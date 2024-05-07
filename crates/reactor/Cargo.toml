@@ -1,0 +1,11 @@
+[package]
+name = "reactor"
+version = { workspace = true }
+edition = { workspace = true }
+publish = false
+description = "Main reactor module with world exports and all generated bindgen for included components"
+
+[dependencies]
+wasmtime = { workspace = true, features = ["component-model"] }
+tracing = {workspace = true}
+anyhow = { workspace = true }
