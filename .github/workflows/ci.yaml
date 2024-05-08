@@ -86,8 +86,6 @@ jobs:
       - id: coverage
         name: Collect code coverage
         uses: actions-rs/grcov@v0.1
-        with:
-          config: grcov.yaml
 
       - name: Archive code coverage results
         uses: actions/upload-artifact@v4
