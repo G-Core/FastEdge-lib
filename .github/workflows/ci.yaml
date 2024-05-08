@@ -7,7 +7,7 @@ env:
 
 jobs:
   build:
-    runs-on: "self-hosted"
+    runs-on: ubuntu-latest
 
     steps:
       - name: Clone repo
@@ -22,43 +22,43 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      #- name: Cleanup cargo advisory-db
-      #  run: |
-      #    rm -fr /home/github-runner/actions-runner/_work/_temp/_github_home/.cargo/advisory-db/github.com-2f857891b7f43c59
+      - name: Cleanup cargo advisory-db
+        run: |
+          rm -fr /home/github-runner/actions-runner/_work/_temp/_github_home/.cargo/advisory-db/github.com-2f857891b7f43c59
 
-      #- name: Configure the check
-      #  run: |
-      #    curl -O https://bitbucket.gcore.lu/projects/CORE/repos/handbook/raw/tools/allowed-rust-licenses/deny.toml
-      #    cat deny.custom >> deny.toml
-      #    sed 's/#"RUSTSEC-0000-0000"/"RUSTSEC-2023-0052"/g' deny.toml > output
-      #    mv output deny.toml
+      - name: Configure the check
+        run: |
+          curl -O https://bitbucket.gcore.lu/projects/CORE/repos/handbook/raw/tools/allowed-rust-licenses/deny.toml
+          cat deny.custom >> deny.toml
+          sed 's/#"RUSTSEC-0000-0000"/"RUSTSEC-2023-0052"/g' deny.toml > output
+          mv output deny.toml
 
-      #- name: Vuln and licence check
-      #  uses: EmbarkStudios/cargo-deny-action@v1
+      - name: Vuln and licence check
+        uses: EmbarkStudios/cargo-deny-action@v1
 
-      #- name: Release build
-      #  uses: actions-rs/cargo@v1
-      #  with:
-      #    command: build
-      #    args: --release --all-features
+      - name: Release build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
 
-      #- name: Install cargo-audit binary crate
-      #  uses: actions-rs/install@v0.1
-      #  with:
-      #    crate: cargo-audit
-      #    version: latest
-      #    use-tool-cache: true
+      - name: Install cargo-audit binary crate
+        uses: actions-rs/install@v0.1
+        with:
+          crate: cargo-audit
+          version: latest
+          use-tool-cache: true
 
-      #- name: Annotate commit with clippy warnings
-      #  uses: actions-rs/clippy-check@v1
-      #  with:
-      #    token: ${{ secrets.GITHUB_TOKEN }}
-      #    args: --all-features
+      - name: Annotate commit with clippy warnings
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
 
-      #- name: Security audit
-      #  uses: actions-rs/audit-check@v1
-      #  with:
-      #    token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Security audit
+        uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   lint:
     needs: build
