@@ -515,8 +515,8 @@ fn app_name_from_request(req: &Request<Body>) -> Result<SmolStr> {
         None => Ok(SmolStr::from(path)),
         Some(i) => {
             let (prefix, _) = path.split_at(i);
-            if prefix.contains("-") {
-                Ok(SmolStr::from(prefix.replace("-", "_")))
+            if prefix.contains('-') {
+                Ok(SmolStr::from(prefix.replace('-', "_")))
             } else {
                 Ok(SmolStr::from(prefix))
             }

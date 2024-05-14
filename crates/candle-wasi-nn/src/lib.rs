@@ -55,7 +55,7 @@ impl BackendInner for CandleBackend {
     fn load(&mut self, builders: &[&[u8]], target: ExecutionTarget) -> Result<Graph, BackendError> {
         let s = Instant::now();
         if builders.len() != 1 {
-            return Err(BackendError::InvalidNumberOfBuilders(1, builders.len()).into());
+            return Err(BackendError::InvalidNumberOfBuilders(1, builders.len()));
         }
         let device = device(target).map_err(candle_error)?;
         let mut cursor = Cursor::new(builders[0]);
@@ -70,7 +70,7 @@ impl BackendInner for CandleBackend {
         Ok(box_.into())
     }
 
-    fn as_dir_loadable<'a>(&'a mut self) -> Option<&'a mut dyn BackendFromDir> {
+    fn as_dir_loadable(&mut self) -> Option<&mut dyn BackendFromDir> {
         Some(self)
     }
 }

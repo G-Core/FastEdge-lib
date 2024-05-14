@@ -147,7 +147,7 @@ where
         };
         let used = ByteSize::b(store.memory_used() as u64);
 
-        let body = resp.body.map_or_else(|| Body::empty(), |b| Body::from(b));
+        let body = resp.body.map_or_else(Body::empty, Body::from);
         builder.body(body).map(|r| (r, used)).map_err(Error::msg)
     }
 
