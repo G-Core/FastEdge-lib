@@ -1,0 +1,38 @@
+[package]
+name = "runtime"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[features]
+default = ["kafka_log"]
+kafka_log = []
+
+[dependencies]
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+wasi-common = { workspace = true }
+wasmtime-wasi-nn = { workspace = true }
+smol_str = { workspace = true }
+moka = { workspace = true }
+wasmtime-environ = "19.0.2"
+wit-component = "0.206.0"
+tracing = { workspace = true }
+bytesize = "1"
+http-backend = { path = "../http-backend" }
+candle-wasi-nn = { path = "../candle-wasi-nn" }
+async-trait = "0.1"
+bytes = "1.5"
+serde = "1.0"
+serde_json = "1.0.108"
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+claims = "0.7"
+
+[lints]
+workspace = true

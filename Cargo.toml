@@ -1,0 +1,59 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.3.7"
+edition = "2021"
+publish = false
+authors = ["FastEdge Development Team"]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+tracing = "0.1"
+hyper = { version = "0.14", features = ["full"] }
+http = "0.2.9"
+async-trait = "0.1"
+wasmtime = { version = "20.0" }
+wasmtime-wasi = { version = "20.0" }
+wasi-common = { version = "20.0" }
+wasmtime-wasi-nn = { version = "20.0" }
+clap = { version = "4", features = ["derive"] }
+moka = { version = "0.12", features = ["sync"] }
+smol_str = "0.2.1"
+anyhow = "1.0"
+
+
+[workspace.lints.rust]
+unused_extern_crates = 'warn'
+trivial_numeric_casts = 'warn'
+unstable_features = 'warn'
+unused_import_braces = 'warn'
+
+[workspace.lints.clippy]
+all = 'allow'
+
+[package]
+name = "cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+
+[dependencies]
+anyhow = { workspace = true }
+hyper = { workspace = true }
+http = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+wasmtime = { workspace = true }
+wasmtime-wasi = { workspace = true }
+smol_str = { workspace = true }
+clap = { version = "4.5.0", features = ["derive"] }
+pretty_env_logger = "0.5.0"
+runtime = { path = "crates/runtime", default-features = false }
+http-service = { path = "crates/http-service" }
+http-backend = { path = "crates/http-backend" }
+hyper-tls = "0.5.0"
