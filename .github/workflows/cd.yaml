@@ -1,43 +1,19 @@
-name: Continuous Integration
-
-permissions:
-  pull-requests: write
-  contents: write
+name: Continuous Delivery
 
 on:
   push:
     branches:
       - 'main'
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Clone repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@stable
-        with:
-          profile: minimal
-          target: wasm32-wasi
-
-      - name: Run Release PR
-        uses: MarcoIeni/release-plz-action@v0.5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-
   build:
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
 
     runs-on: ${{ matrix.os }}
-    needs: release
     steps:
       - name: Clone repo
         uses: actions/checkout@v4
