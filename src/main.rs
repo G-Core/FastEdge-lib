@@ -145,10 +145,9 @@ async fn main() -> anyhow::Result<()> {
 /// * server_name if it is missing
 /// * Gcore PoP sample Geo headers
 fn append_headers(geo: bool, headers: &mut HashMap<Cow<str>, Cow<str>>) {
-    if headers
+    if !headers
         .keys()
-        .find(|k| "server_name".eq_ignore_ascii_case(k))
-        .is_none()
+        .any(|k| "server_name".eq_ignore_ascii_case(k))
     {
         headers.insert(
             Cow::Borrowed("Server_name"),
@@ -212,7 +211,6 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext<'_
         let env = app
             .env
             .iter()
-            .map(|(k, v)| (k, v))
             .collect::<Vec<(&String, &String)>>();
 
         let logger = self.make_logger(name, app);

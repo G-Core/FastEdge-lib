@@ -20,7 +20,7 @@ use reactor::gcore::fastedge::{
     http_client::Host,
 };
 
-const HOST_HEADER_NAME: &'static str = "host";
+const HOST_HEADER_NAME: &str = "host";
 
 type HeaderList = Vec<(String, String)>;
 
@@ -138,12 +138,11 @@ impl<C> Backend<C> {
         let builder = match self.strategy {
             BackendStrategy::Direct => {
                 let mut headers = req.headers.into_iter().collect::<Vec<(String, String)>>();
-                headers.extend(self.propagate_headers.clone().into_iter());
+                headers.extend(self.propagate_headers.clone());
                 // CLI has to set Host header from URL, if it is not set already by the request
-                if headers
+                if !headers
                     .iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case(HOST_HEADER_NAME))
-                    .is_none()
+                    .any(|(k, _)| k.eq_ignore_ascii_case(HOST_HEADER_NAME))
                 {
                     if let Ok(uri) = req.uri.parse::<Uri>() {
                         if let Some(host) = uri.authority().map(|a| {
@@ -217,8 +216,8 @@ impl<C> Backend<C> {
                     })
                     .collect::<Vec<(String, String)>>();
 
-                headers.extend(backend_headers(&original_url, original_host).into_iter());
-                headers.extend(self.propagate_headers.clone().into_iter());
+                headers.extend(backend_headers(&original_url, original_host));
+                headers.extend(self.propagate_headers.clone());
 
                 let host = canonical_host_name(&headers, &original_url)?;
                 let url = canonical_url(&original_url, &host, self.uri.path())?;
@@ -240,7 +239,7 @@ impl<C> Backend<C> {
             }
         };
         debug!("request builder: {:?}", builder);
-        let body = req.body.unwrap_or_else(|| vec![]);
+        let body = req.body.unwrap_or_default();
         builder.body(hyper::Body::from(body)).map_err(Error::msg)
     }
 }
@@ -314,7 +313,7 @@ fn canonical_host_name(headers: &Headers, original_uri: &Uri) -> Result<String> 
             None
         }
     });
-    host.or_else(|| original_uri.host().and_then(|h| Some(h.to_string())))
+    host.or_else(|| original_uri.host().map(|h| h.to_string()))
         .ok_or(anyhow!("Could determine a Host header"))
 }
 
@@ -352,16 +351,13 @@ fn canonical_url(original_url: &Uri, canonical_host: &str, backend_path: &str) -
 }
 
 fn backend_headers(original_url: &Uri, original_host: String) -> HeaderList {
-    let mut headers = vec![];
-    headers.push(("Fastedge-Hostname".to_string(), original_host));
-    headers.push((
+    vec![("Fastedge-Hostname".to_string(), original_host),(
         "Fastedge-Scheme".to_string(),
         original_url
             .scheme_str()
-            .unwrap_or_else(|| "http")
+            .unwrap_or( "http")
             .to_string(),
-    ));
-    headers
+    )]
 }
 
 impl FastEdgeConnector {
