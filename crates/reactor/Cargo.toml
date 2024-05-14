@@ -1,8 +1,9 @@
 [package]
 name = "reactor"
-version = { workspace = true }
-edition = { workspace = true }
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 description = "Main reactor module with world exports and all generated bindgen for included components"
 
 [dependencies]

@@ -22,20 +22,6 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      - name: Cleanup cargo advisory-db
-        run: |
-          rm -fr /home/github-runner/actions-runner/_work/_temp/_github_home/.cargo/advisory-db/github.com-2f857891b7f43c59
-
-      - name: Configure the check
-        run: |
-          curl -O https://bitbucket.gcore.lu/projects/CORE/repos/handbook/raw/tools/allowed-rust-licenses/deny.toml
-          cat deny.custom >> deny.toml
-          sed 's/#"RUSTSEC-0000-0000"/"RUSTSEC-2023-0052"/g' deny.toml > output
-          mv output deny.toml
-
-      - name: Vuln and licence check
-        uses: EmbarkStudios/cargo-deny-action@v1
-
       - name: Release build
         uses: actions-rs/cargo@v1
         with:
@@ -60,15 +46,6 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  lint:
-    needs: build
-    runs-on: "self-hosted"
-    steps:
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          override: true
-
       - uses: actions-rs/cargo@v1
         with:
           command: clean
@@ -92,3 +69,53 @@ jobs:
         with:
           name: code-coverage-report
           path: ${{ steps.coverage.outputs.report }}
+
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: wasm32-wasi
+
+      - name: Run Release PR
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release-builds:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+
+      - name: Release build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --bin cli

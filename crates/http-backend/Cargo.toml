@@ -1,8 +1,9 @@
 [package]
 name = "http-backend"
-version = { workspace = true }
-edition = { workspace = true }
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
 description = "Client component for outbound http requests"
 
 [dependencies]
