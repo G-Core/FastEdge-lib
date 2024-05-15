@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
             let backend = builder.build(backend_connector);
             let cli_app = App {
                 binary_id: 0,
-                max_duration: run.max_duration.map(|m| m / 10).unwrap_or(u64::MAX),
+                max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
                 mem_limit: run.mem_limit.unwrap_or(u32::MAX as usize),
                 env: run.envs.unwrap_or_default().into_iter().collect(),
                 rsp_headers: Default::default(),
