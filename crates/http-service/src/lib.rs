@@ -39,6 +39,11 @@ pub use crate::executor::ExecutorFactory;
 
 pub(crate) static TRACEPARENT: &str = "traceparent";
 
+const FASTEDGE_INTERNAL_ERROR: u16 = 530;
+const FASTEDGE_OUT_OF_MEMORY: u16 = 531;
+const FASTEDGE_EXECUTION_TIMEOUT: u16 = 532;
+const FASTEDGE_EXECUTION_PANIC: u16 = 533;
+
 pub struct HttpsConfig {
     pub ssl_certs: &'static str,
     pub ssl_pkey: &'static str,
@@ -279,7 +284,7 @@ where
                 warn!(cause=?error,
                     "failure on getting context"
                 );
-                return internal_server_error("context error");
+                return internal_fastedge_error("context error");
             }
         };
 
@@ -298,8 +303,8 @@ where
         let response = match executor.execute(request).await {
             Ok((mut response, time_elapsed, memory_used)) => {
                 info!(
-                    "{} completed with status code: '{}' in {:.0?} using {} of WebAssembly heap",
-                    &app_name,
+                    "'{}' completed with status code: '{}' in {:.0?} using {} of WebAssembly heap",
+                    app_name,
                     response.status(),
                     time_elapsed,
                     memory_used
@@ -328,45 +333,46 @@ where
                 response
             }
             Err(error) => {
+                let root_cause = error.root_cause();
                 let time_elapsed = std::time::Instant::now().duration_since(start_);
                 let (status_code, fail_reason, msg) =
-                    if let Some(exit) = error.downcast_ref::<I32Exit>() {
+                    if let Some(exit) = root_cause.downcast_ref::<I32Exit>() {
                         if exit.0 == 0 {
-                            (StatusCode::OK, AppResult::SUCCESS, Body::empty())
+                            (StatusCode::OK.as_u16(), AppResult::SUCCESS, Body::empty())
                         } else {
                             (
-                                StatusCode::INTERNAL_SERVER_ERROR,
+                                FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Body::from("Execute error"),
+                                Body::from("fastedge: App failed"),
                             )
                         }
-                    } else if let Some(trap) = error.downcast_ref::<Trap>() {
+                    } else if let Some(trap) = root_cause.downcast_ref::<Trap>() {
                         match trap {
                             Trap::Interrupt => (
-                                StatusCode::REQUEST_TIMEOUT,
+                                FASTEDGE_EXECUTION_TIMEOUT,
                                 AppResult::TIMEOUT,
-                                Body::from("Timeout"),
+                                Body::from("fastedge: Execution timeout"),
                             ),
                             Trap::UnreachableCodeReached => (
-                                StatusCode::INSUFFICIENT_STORAGE,
+                                FASTEDGE_OUT_OF_MEMORY,
                                 AppResult::OOM,
-                                Body::from("Out of memory"),
+                                Body::from("fastedge: Out of memory"),
                             ),
                             _ => (
-                                StatusCode::INTERNAL_SERVER_ERROR,
+                                FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Body::from("App failed"),
+                                Body::from("fastedge: App failed"),
                             ),
                         }
                     } else {
                         (
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            FASTEDGE_INTERNAL_ERROR,
                             AppResult::OTHER,
-                            Body::from("Execute error"),
+                            Body::from("fastedge: Execute error"),
                         )
                     };
                 info!(
-                    "{} failed with status code: '{}' in {:.0?}",
+                    "'{}' failed with status code: '{}' in {:.0?}",
                     app_name, status_code, time_elapsed
                 );
 
@@ -377,7 +383,7 @@ where
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
                         app_name: app_name.to_string(),
-                        status_code: status_code.as_u16() as u32,
+                        status_code: status_code as u32,
                         fail_reason: fail_reason as u32,
                         billing_plan: cfg.plan.clone(),
                         time_elapsed: time_elapsed.as_micros() as u64,
@@ -404,50 +410,7 @@ where
         Ok(response)
     }
 
-    /*/// instantiate a component InstancePre and StoreBuilder and cache it
-    pub fn make_executor(&self, name: &str, cfg: &App) -> Result<Arc<dyn Any + Send + Sync>> {
-        trace!(name, ?cfg, "create ExecuteContext");
 
-        #[cfg(feature = "viceroy")]
-        if cfg.is_viceroy_execute() {
-            trace!("create Viceroy ExecuteContext");
-            let module = self.context.loader().load_module(cfg.binary_id)?;
-            info!("Added '{}' to cache", name);
-            return Ok(Arc::new(ViceroyExecutor::new(
-                &self.engine,
-                module,
-                self.context.backend().uri(),
-                cfg,
-            )?));
-        }
-
-        trace!("create component ExecuteContext");
-        let env = cfg
-            .env
-            .iter()
-            .map(|(k, v)| (k, v))
-            .collect::<Vec<(&String, &String)>>();
-
-        let logger = self.context.make_logger(name, cfg);
-
-        let version = WasiVersion::Preview2;
-        let store_builder = self
-            .engine
-            .store_builder(version)
-            .set_env(&env)
-            .max_memory_size(cfg.mem_limit)
-            .max_epoch_ticks(cfg.max_duration)
-            .logger(logger);
-
-        let component = self.context.loader().load_component(cfg.binary_id)?;
-        let instance_pre = self.engine.component_instantiate_pre(&component)?;
-        info!("Added '{}' to cache", name);
-        Ok(Arc::new(HttpExecutorImpl::new(
-            instance_pre,
-            store_builder,
-            self.context.backend(),
-        )))
-    }*/
 }
 
 fn remote_traceparent(req: &Request<Body>) -> String {
@@ -459,17 +422,17 @@ fn remote_traceparent(req: &Request<Body>) -> String {
 }
 
 /// Creates an HTTP 500 response.
-fn internal_server_error(msg: &'static str) -> Result<Response<Body>> {
+fn internal_fastedge_error(msg: &'static str) -> Result<Response<Body>> {
     Ok(Response::builder()
-        .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .body(Body::from(msg))?)
+        .status(FASTEDGE_INTERNAL_ERROR)
+        .body(Body::from(format!("fastedge: {}", msg)))?)
 }
 
 /// Creates an HTTP 404 response.
 fn not_found() -> Result<Response<Body>> {
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body(Body::from("Unknown app"))?)
+        .body(Body::from("fastedge: Unknown app"))?)
 }
 
 /// Creates an HTTP 429 response.
@@ -625,16 +588,22 @@ mod tests {
         }
     }
 
-    static WASM_SAMPLE: &[u8] = include_bytes!("fixtures/dummy.wasm");
+    static DUMMY_SAMPLE: &[u8] = include_bytes!("fixtures/dummy.wasm");
+    static ALLOC_SAMPLE: &[u8] = include_bytes!("fixtures/alloc.wasm");
 
     impl PreCompiledLoader<u64> for TestContext {
-        fn load_component(&self, _id: u64) -> Result<Component> {
-            let wasm_sample = componentize_if_necessary(WASM_SAMPLE)?;
+        fn load_component(&self, id: u64) -> Result<Component> {
+            let bytes = if id == 100 {
+                ALLOC_SAMPLE
+            } else {
+                DUMMY_SAMPLE
+            };
+            let wasm_sample = componentize_if_necessary(bytes)?;
             Component::new(&self.engine, wasm_sample)
         }
 
         fn load_module(&self, _id: u64) -> Result<Module> {
-            Module::new(&self.engine, WASM_SAMPLE)
+            Module::new(&self.engine, DUMMY_SAMPLE)
         }
     }
 
@@ -760,17 +729,17 @@ mod tests {
 
     #[tokio::test]
     #[tracing_test::traced_test]
-    async fn test_insufficient_memory() {
+    async fn test_timeout() {
         let req = assert_ok!(http::Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
-            .header("server_name", "insufficient_memory.test.com")
+            .header("server_name", "timeout.test.com")
             .body(hyper::Body::from("")));
 
         let app = Some(App {
-            binary_id: 0,
-            max_duration: 10,
-            mem_limit: 1000000,
+            binary_id: 1,
+            max_duration: 0,
+            mem_limit: 10000000,
             env: Default::default(),
             rsp_headers: HashMap::from([("RES_HEADER_03".to_string(), "03".to_string())]),
             log: Default::default(),
@@ -791,7 +760,51 @@ mod tests {
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request(req).await);
-        assert_eq!(StatusCode::INTERNAL_SERVER_ERROR, res.status());
+        assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
+        let headers = res.headers();
+        assert_eq!(3, headers.len());
+        assert_eq!(
+            "*",
+            assert_some!(headers.get("access-control-allow-origin"))
+        );
+        assert_eq!("no-store", assert_some!(headers.get("cache-control")));
+        assert_eq!("03", assert_some!(headers.get("RES_HEADER_03")));
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_insufficient_memory() {
+        let req = assert_ok!(http::Request::builder()
+            .method("GET")
+            .uri("http://www.rust-lang.org/?size=200000")
+            .header("server_name", "insufficient_memory.test.com")
+            .body(hyper::Body::from("")));
+
+        let app = Some(App {
+            binary_id: 100,
+            max_duration: 10,
+            mem_limit: 1500000,
+            env: Default::default(),
+            rsp_headers: HashMap::from([("RES_HEADER_03".to_string(), "03".to_string())]),
+            log: Default::default(),
+            app_id: 12345,
+            client_id: 23456,
+            plan: "test_plan".to_string(),
+            status: Status::Enabled,
+            debug_until: None,
+        });
+
+        let context = TestContext {
+            geo: load_geo_info(),
+            app,
+            engine: make_engine(),
+        };
+
+        let http_service: HttpService<TestContext> =
+            assert_ok!(ServiceBuilder::new(context).build());
+
+        let res = assert_ok!(http_service.handle_request(req).await);
+        assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
         assert_eq!(
