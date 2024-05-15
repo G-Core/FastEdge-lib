@@ -23,29 +23,29 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-#      - name: Release build
-#        uses: actions-rs/cargo@v1
-#        with:
-#          command: build
-#          args: --release --all-features
+      - name: Release build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
 
-#      - name: Install cargo-audit binary crate
-#        uses: actions-rs/install@v0.1
-#        with:
-#          crate: cargo-audit
-#          version: latest
-#          use-tool-cache: true
+      - name: Install cargo-audit binary crate
+        uses: actions-rs/install@v0.1
+        with:
+          crate: cargo-audit
+          version: latest
+          use-tool-cache: true
 
-#      - name: Annotate commit with clippy warnings
-#        uses: actions-rs/clippy-check@v1
-#        with:
-#          token: ${{ secrets.GITHUB_TOKEN }}
-#          args: --all-features
+      - name: Annotate commit with clippy warnings
+        uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features
 
-#      - name: Security audit
-#        uses: actions-rs/audit-check@v1
-#        with:
-#          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Security audit
+        uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   coverage:
     needs: build
@@ -62,22 +62,22 @@ jobs:
           toolchain: nightly
           override: true
 
-#      - uses: actions-rs/cargo@v1#
-#        name: Run test with code coverage report
-#        with:
-#          command: test
-#          args: --all-features --no-fail-fast
-#        env:
-#          CARGO_INCREMENTAL: '0'
-#          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-#          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+      - uses: actions-rs/cargo@v1
+        name: Run test with code coverage report
+        with:
+          command: test
+          args: --all-features --no-fail-fast
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
 
-#      - id: coverage
-#        name: Collect code coverage
-#        uses: actions-rs/grcov@v0.1
+      - id: coverage
+        name: Collect code coverage
+        uses: actions-rs/grcov@v0.1
 
-#      - name: Archive code coverage results
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: code-coverage-report
-#          path: ${{ steps.coverage.outputs.report }}
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage-report
+          path: ${{ steps.coverage.outputs.report }}
