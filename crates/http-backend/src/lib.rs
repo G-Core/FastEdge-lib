@@ -7,11 +7,15 @@ use std::time::Duration;
 use anyhow::{anyhow, Error, Result};
 use async_trait::async_trait;
 use http::{uri::Scheme, HeaderMap, HeaderValue, Uri};
-use hyper::client::connect::Connect;
-use hyper::{client::HttpConnector, service::Service, Client};
+use http_body_util::Full;
+use hyper::body::Bytes;
+use hyper_util::client::legacy::connect::{Connect, HttpConnector};
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
+use tower_service::Service;
 use tracing::{debug, trace, warn};
 
 use reactor::gcore::fastedge::http::Headers;
@@ -47,7 +51,7 @@ pub struct FastEdgeConnector {
 
 #[derive(Clone, Debug)]
 pub struct Backend<C> {
-    client: Client<C>,
+    client: Client<C, Full<Bytes>>,
     uri: Uri,
     propagate_headers: HeaderList,
     propagate_header_names: Vec<String>,
@@ -80,7 +84,7 @@ impl Builder {
     where
         C: Connect + Clone,
     {
-        let client = hyper::Client::builder()
+        let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
             .set_host(false)
             .pool_idle_timeout(Duration::from_secs(30))
             .build(connector);
@@ -133,7 +137,7 @@ impl<C> Backend<C> {
         Ok(())
     }
 
-    fn make_request(&self, req: Request) -> Result<http::Request<hyper::Body>> {
+    fn make_request(&self, req: Request) -> Result<http::Request<Full<Bytes>>> {
         trace!("strategy: {:?}", self.strategy);
         let builder = match self.strategy {
             BackendStrategy::Direct => {
@@ -240,7 +244,7 @@ impl<C> Backend<C> {
         };
         debug!("request builder: {:?}", builder);
         let body = req.body.unwrap_or_default();
-        builder.body(hyper::Body::from(body)).map_err(Error::msg)
+        Ok(builder.body(Full::new(Bytes::from(body)))?)
     }
 }
 
@@ -260,9 +264,9 @@ where
         let request = self.make_request(req)?;
         let res = self.client.request(request).await?;
 
-        let status = res.status().as_u16();
-        let (parts, body) = res.into_parts();
-        let headers = if !parts.headers.is_empty() {
+        let _status = res.status().as_u16();
+        let (parts, _body) = res.into_parts();
+        let _headers = if !parts.headers.is_empty() {
             Some(
                 parts
                     .headers
@@ -280,7 +284,7 @@ where
             None
         };
 
-        let body_bytes = hyper::body::to_bytes(body).await?;
+        /*let body_bytes = body.into();
         let body = Some(body_bytes.to_vec());
 
         trace!(?status, ?headers, len = body_bytes.len(), "reply");
@@ -289,7 +293,8 @@ where
             status,
             headers,
             body,
-        }))
+        }))*/
+        unimplemented!("send request")
     }
 }
 
@@ -351,13 +356,13 @@ fn canonical_url(original_url: &Uri, canonical_host: &str, backend_path: &str) -
 }
 
 fn backend_headers(original_url: &Uri, original_host: String) -> HeaderList {
-    vec![("Fastedge-Hostname".to_string(), original_host),(
-        "Fastedge-Scheme".to_string(),
-        original_url
-            .scheme_str()
-            .unwrap_or( "http")
-            .to_string(),
-    )]
+    vec![
+        ("Fastedge-Hostname".to_string(), original_host),
+        (
+            "Fastedge-Scheme".to_string(),
+            original_url.scheme_str().unwrap_or("http").to_string(),
+        ),
+    ]
 }
 
 impl FastEdgeConnector {
@@ -385,7 +390,9 @@ impl Service<Uri> for FastEdgeConnector {
         Box::pin(async move {
             let conn = connect_fut
                 .await
-                .map(|inner| Connection { inner })
+                .map(|inner| Connection {
+                    inner: inner.into_inner(),
+                })
                 .map_err(Box::new)?;
             Ok(conn)
         })
@@ -430,9 +437,9 @@ impl AsyncWrite for Connection {
     }
 }
 
-impl hyper::client::connect::Connection for Connection {
-    fn connected(&self) -> hyper::client::connect::Connected {
-        hyper::client::connect::Connected::new()
+impl hyper_util::client::legacy::connect::Connection for Connection {
+    fn connected(&self) -> hyper_util::client::legacy::connect::Connected {
+        hyper_util::client::legacy::connect::Connected::new()
     }
 }
 

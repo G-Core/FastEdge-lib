@@ -1,12 +1,15 @@
+mod wasi_http;
+
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Error, Result};
 use async_trait::async_trait;
 use bytesize::ByteSize;
-use http::{HeaderMap, HeaderValue, Method, Request, Response};
+use http::{HeaderMap, HeaderValue, Method};
 use http_backend::Backend;
-use hyper::Body;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Bytes, Incoming};
 use smol_str::SmolStr;
 use wasmtime_wasi::StdoutStream;
 
@@ -16,13 +19,18 @@ use runtime::{App, InstancePre, WasmEngine};
 
 use crate::HttpState;
 
+pub use wasi_http::WasiHttpExecutorImpl;
+
 pub(crate) static X_REAL_IP: &str = "x-real-ip";
 pub(crate) static TRACEPARENT: &str = "traceparent";
 pub(crate) static X_CDN_REQUESTOR: &str = "x-cdn-requestor";
 
 #[async_trait]
 pub trait HttpExecutor {
-    async fn execute(&self, req: Request<Body>) -> Result<(Response<Body>, Duration, ByteSize)>;
+    async fn execute(
+        &self,
+        req: hyper::Request<Incoming>,
+    ) -> Result<(hyper::Response<Full<Bytes>>, Duration, ByteSize)>;
 }
 
 pub trait ExecutorFactory<C> {
@@ -38,7 +46,7 @@ pub trait ExecutorFactory<C> {
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
 pub struct HttpExecutorImpl<C> {
-    instance_pre: InstancePre<HttpState<C>>,
+    instance_pre: InstancePre<HttpState>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
 }
@@ -48,7 +56,10 @@ impl<C> HttpExecutor for HttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
 {
-    async fn execute(&self, req: Request<Body>) -> Result<(Response<Body>, Duration, ByteSize)> {
+    async fn execute(
+        &self,
+        req: hyper::Request<Incoming>,
+    ) -> Result<(hyper::Response<Full<Bytes>>, Duration, ByteSize)> {
         let start_ = Instant::now();
         let response = self.execute_impl(req).await;
         let elapsed = Instant::now().duration_since(start_);
@@ -61,7 +72,7 @@ where
     C: Clone + Send + Sync + 'static,
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState<C>>,
+        instance_pre: InstancePre<HttpState>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
     ) -> Self {
@@ -72,7 +83,10 @@ where
         }
     }
 
-    async fn execute_impl(&self, req: Request<Body>) -> Result<(Response<Body>, ByteSize)> {
+    async fn execute_impl(
+        &self,
+        req: hyper::Request<Incoming>,
+    ) -> Result<(hyper::Response<Full<Bytes>>, ByteSize)> {
         let (parts, body) = req.into_parts();
         let method = to_fastedge_http_method(&parts.method)?;
 
@@ -87,7 +101,7 @@ where
             })
             .collect::<Vec<(String, String)>>();
 
-        let body = hyper::body::to_bytes(body).await?;
+        let body = body.collect().await?.to_bytes();
         let body = if body.is_empty() {
             None
         } else {
@@ -111,10 +125,7 @@ where
             .propagate_headers(&parts.headers)
             .context("propagate headers")?;
 
-        let state = HttpState {
-            wasi_nn,
-            http_backend,
-        };
+        let state = HttpState { wasi_nn };
 
         let mut store = store_builder.build(state)?;
 
@@ -147,7 +158,7 @@ where
         };
         let used = ByteSize::b(store.memory_used() as u64);
 
-        let body = resp.body.map_or_else(Body::empty, Body::from);
+        let body = resp.body.map(|b| Full::from(b)).unwrap_or_default();
         builder.body(body).map(|r| (r, used)).map_err(Error::msg)
     }
 

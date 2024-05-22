@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
+use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
 use crate::registry::CachedGraphRegistry;
 use crate::store::StoreBuilder;
@@ -74,6 +75,7 @@ pub struct Data<T> {
     store_limits: ProxyLimiter,
     table: ResourceTable,
     pub logger: Option<Logger>,
+    http: WasiHttpCtx,
 }
 
 impl<T> AsRef<T> for Data<T> {
@@ -85,6 +87,16 @@ impl<T> AsRef<T> for Data<T> {
 impl<T> AsMut<T> for Data<T> {
     fn as_mut(&mut self) -> &mut T {
         &mut self.inner
+    }
+}
+
+impl<T: Send> WasiHttpView for Data<T> {
+    fn ctx(&mut self) -> &mut WasiHttpCtx {
+        &mut self.http
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
     }
 }
 

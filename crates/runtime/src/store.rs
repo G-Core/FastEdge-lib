@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
 use tracing::{debug, instrument, trace};
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
+use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_nn::WasiNnCtx;
 
 use crate::{Data, Wasi, WasiVersion};
@@ -58,6 +59,12 @@ impl<T> Deref for Store<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl<T> DerefMut for Store<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
@@ -215,6 +222,7 @@ impl StoreBuilder {
                 store_limits: self.store_limits,
                 table,
                 logger,
+                http: WasiHttpCtx,
             },
         );
         inner.limiter(|state| &mut state.store_limits);

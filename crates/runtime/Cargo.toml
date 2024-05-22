@@ -36,6 +36,7 @@ prometheus = { version = "0.13.3", features = ["process"], optional = true }
 clickhouse = { version = "0.11.6", optional = true }
 lazy_static = { version = "1.4.0", optional = true }
 
+wasmtime-wasi-http = "20.0.2"
 
 [dev-dependencies]
 claims = "0.7"
