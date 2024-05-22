@@ -1,10 +1,9 @@
 use clap::{Args, Parser, Subcommand};
 use http_backend::{Backend, BackendStrategy};
-use http_service::executor::{ExecutorFactory, HttpExecutorImpl};
+use http_service::executor::{ExecutorFactory, WasiHttpExecutorImpl};
 use http_service::stats::{StatRow, StatsWriter};
 use http_service::{ContextHeaders, HttpConfig, HttpService, HttpState};
-use hyper::client::HttpConnector;
-use hyper_tls::HttpsConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::Status;
 use runtime::logger::{Console, Logger};
 use runtime::service::{Service, ServiceBuilder};
@@ -67,7 +66,7 @@ struct CliContext<'a> {
     headers: HashMap<Cow<'a, str>, Cow<'a, str>>,
     engine: Engine,
     app: Option<App>,
-    backend: Backend<HttpsConnector<HttpConnector>>,
+    backend: Backend<HttpConnector>,
     wasm_bytes: Vec<u8>,
 }
 
@@ -83,9 +82,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Http(run) => {
             let wasm_bytes = tokio::fs::read(&run.wasm).await?;
 
-            let backend_connector = HttpsConnector::new();
-            let mut builder =
-                Backend::<HttpsConnector<HttpConnector>>::builder(BackendStrategy::Direct);
+            let backend_connector = HttpConnector::new();
+            let mut builder = Backend::<HttpConnector>::builder(BackendStrategy::Direct);
             if let Some(propagate_headers) = run.propagate_headers {
                 builder.propagate_headers_names(propagate_headers);
             }
@@ -181,12 +179,12 @@ impl PreCompiledLoader<u64> for CliContext<'_> {
 }
 
 impl ContextT for CliContext<'_> {
-    type BackendConnector = HttpsConnector<HttpConnector>;
+    type BackendConnector = HttpConnector;
     fn make_logger(&self, _app_name: SmolStr, _wrk: &App) -> Logger {
         Logger::new(Console::default())
     }
 
-    fn backend(&self) -> Backend<HttpsConnector<HttpConnector>> {
+    fn backend(&self) -> Backend<HttpConnector> {
         self.backend.to_owned()
     }
 
@@ -199,19 +197,16 @@ impl ContextT for CliContext<'_> {
     }
 }
 
-impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext<'_> {
-    type Executor = HttpExecutorImpl<HttpsConnector<HttpConnector>>;
+impl ExecutorFactory<HttpState> for CliContext<'_> {
+    type Executor = WasiHttpExecutorImpl;
 
     fn get_executor(
         &self,
         name: SmolStr,
         app: &App,
-        engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
+        engine: &WasmEngine<HttpState>,
     ) -> anyhow::Result<Self::Executor> {
-        let env = app
-            .env
-            .iter()
-            .collect::<Vec<(&String, &String)>>();
+        let env = app.env.iter().collect::<Vec<(&String, &String)>>();
 
         let logger = self.make_logger(name, app);
 
@@ -225,11 +220,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext<'_
 
         let component = self.loader().load_component(app.binary_id)?;
         let instance_pre = engine.component_instantiate_pre(&component)?;
-        Ok(HttpExecutorImpl::new(
-            instance_pre,
-            store_builder,
-            self.backend(),
-        ))
+        Ok(WasiHttpExecutorImpl::new(instance_pre, store_builder))
     }
 }
 

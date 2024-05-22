@@ -2,40 +2,42 @@ use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Error, Result};
+use anyhow::{bail, Result};
 use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
-use hyper::client::connect::Connect;
-use hyper::server::conn::{AddrIncoming, AddrStream};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Server};
+use http_body_util::Full;
+use hyper::body;
+use hyper::body::{Bytes, Incoming};
+use hyper::rt::{Read, Write};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper_util::client::legacy::connect::Connect;
+use hyper_util::rt::TokioIo;
 use smol_str::SmolStr;
-use tokio_rustls::rustls;
+use tokio::net::TcpListener;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error_span, info, info_span, trace, warn, Instrument};
+use tracing::{debug, error, info, info_span, trace, warn, Instrument};
 use wasi_common::I32Exit;
 use wasmtime::Trap;
 use wasmtime_wasi_nn::WasiNnCtx;
 
-use http_backend::Backend;
 use runtime::app::Status;
 use runtime::service::Service;
 use runtime::{App, ContextT, Router, WasmEngine, WasmEngineBuilder};
 
+pub use crate::executor::ExecutorFactory;
 use crate::executor::{AppResult, HttpExecutor};
 #[cfg(feature = "stats")]
 use crate::stats::StatRow;
 use crate::stats::StatsWriter;
 
-use crate::tls::{load_certs, load_private_key, TlsAcceptor, TlsStream};
 pub mod executor;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 pub mod stats;
-mod tls;
-
-pub use crate::executor::ExecutorFactory;
+//mod tls;
+//use crate::tls::{load_certs, load_private_key, TlsAcceptor, TlsStream};
 
 pub(crate) static TRACEPARENT: &str = "traceparent";
 
@@ -57,13 +59,12 @@ pub struct HttpConfig {
 }
 
 pub struct HttpService<T: ContextT> {
-    engine: WasmEngine<HttpState<T::BackendConnector>>,
+    engine: WasmEngine<HttpState>,
     context: T,
 }
 
-pub struct HttpState<C> {
+pub struct HttpState {
     wasi_nn: WasiNnCtx,
-    http_backend: Backend<C>,
 }
 
 pub trait ContextHeaders {
@@ -76,14 +77,14 @@ where
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState>
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Connect + Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
 {
-    type State = HttpState<T::BackendConnector>;
+    type State = HttpState;
     type Config = HttpConfig;
     type Context = T;
 
@@ -98,10 +99,11 @@ where
         } else {
             [127, 0, 0, 1]
         };
-        let listen_addr = (interface, config.port).into();
+        let listen_addr: SocketAddr = (interface, config.port).into();
+        let self_ = Arc::new(self);
 
-        if let Some(https) = config.https {
-            let tls = {
+        if let Some(_https) = config.https {
+            /*let tls = {
                 // Load public certificate.
                 let certs = load_certs(https.ssl_certs)?;
                 // Load private key.
@@ -116,24 +118,33 @@ where
                 cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
                 Arc::new(cfg)
             };
-            self.serve_tls(listen_addr, tls).await?
+            self.serve_tls(listen_addr, tls).await?*/
+            unimplemented!("load tls config")
         } else {
-            self.serve(listen_addr).await?
-        };
+            info!("Listening on http://{}", listen_addr);
+            let listener = TcpListener::bind(listen_addr).await?;
 
-        Ok(())
+            // We start a loop to continuously accept incoming connections
+            loop {
+                let (stream, _) = listener.accept().await?;
+
+                let stream = TokioIo::new(stream);
+                tracing::trace!("new http connection");
+                let connection = self_.clone();
+                tokio::spawn(connection.serve(stream));
+            }
+            //self.serve(listen_addr).await?
+        };
     }
 
     fn configure_engine(builder: &mut WasmEngineBuilder<Self::State>) -> Result<()> {
-        wasmtime_wasi::add_to_linker_async(builder.component_linker_ref())?;
-        wasmtime_wasi_nn::wit::ML::add_to_linker(builder.component_linker_ref(), |data| {
-            &mut data.as_mut().wasi_nn
-        })?;
+        let linker = builder.component_linker_ref();
+        wasmtime_wasi_nn::wit::ML::add_to_linker(linker, |data| &mut data.as_mut().wasi_nn)?;
+        // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
+        linker.allow_shadowing(true);
+        wasmtime_wasi_http::proxy::add_to_linker(linker)?;
+        wasmtime_wasi::add_to_linker_async(linker)?;
 
-        reactor::gcore::fastedge::http_client::add_to_linker(
-            builder.component_linker_ref(),
-            |data| &mut data.as_mut().http_backend,
-        )?;
         Ok(())
     }
 }
@@ -144,41 +155,38 @@ where
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState>
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
 {
-    async fn serve(self, listen_addr: SocketAddr) -> Result<()> {
-        let service = Arc::new(self);
-        let make_service = make_service_fn(|_conn: &AddrStream| {
-            let service = service.clone();
-            async move {
-                let service = service_fn(move |req| {
-                    let self_ = service.clone();
+    async fn serve<I>(self: Arc<Self>, io: I)
+    where
+        I: Read + Write + Unpin,
+    {
+        let self_ = self.clone();
+        if let Err(err) = http1::Builder::new()
+            .serve_connection(
+                io,
+                service_fn(|req: Request<Incoming>| async {
                     let request_id = remote_traceparent(&req);
-                    async move {
-                        self_
-                            .handle_request(req)
-                            .instrument(info_span!("http_handler", request_id))
-                            .await
-                    }
-                });
-                Ok::<_, Error>(service)
-            }
-        });
-        info!("Listening on http://{}", listen_addr);
-        Server::try_bind(&listen_addr)
-            .with_context(|| format!("Unable to listen on {}", listen_addr))?
-            .serve(make_service)
-            .await?;
-        Ok(())
+
+                    self_
+                        .handle_request(req)
+                        .instrument(info_span!("http_handler", request_id))
+                        .await
+                }),
+            )
+            .await
+        {
+            error!("Error serving connection: {:?}", err);
+        };
     }
 
-    async fn serve_tls(self, listen_addr: SocketAddr, tls: Arc<ServerConfig>) -> Result<()> {
-        let service = Arc::new(self);
+    async fn serve_tls(self, _listen_addr: SocketAddr, _tls: Arc<ServerConfig>) -> Result<()> {
+        /*   let service = Arc::new(self);
         let make_service = make_service_fn(|_conn: &TlsStream| {
             let service = service.clone();
             async move {
@@ -202,11 +210,15 @@ where
         Server::builder(TlsAcceptor::new(tls, incoming))
             .serve(make_service)
             .await?;
-        Ok(())
+        Ok(())*/
+        unimplemented!("TLS server")
     }
 
     /// handle HTTP request.
-    async fn handle_request(&self, mut request: Request<Body>) -> Result<Response<Body>> {
+    async fn handle_request(
+        &self,
+        mut request: Request<body::Incoming>,
+    ) -> Result<Response<Full<Bytes>>> {
         #[cfg(feature = "stats")]
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -338,12 +350,12 @@ where
                 let (status_code, fail_reason, msg) =
                     if let Some(exit) = root_cause.downcast_ref::<I32Exit>() {
                         if exit.0 == 0 {
-                            (StatusCode::OK.as_u16(), AppResult::SUCCESS, Body::empty())
+                            (StatusCode::OK.as_u16(), AppResult::SUCCESS, Full::default())
                         } else {
                             (
                                 FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Body::from("fastedge: App failed"),
+                                Full::from("fastedge: App failed"),
                             )
                         }
                     } else if let Some(trap) = root_cause.downcast_ref::<Trap>() {
@@ -351,26 +363,27 @@ where
                             Trap::Interrupt => (
                                 FASTEDGE_EXECUTION_TIMEOUT,
                                 AppResult::TIMEOUT,
-                                Body::from("fastedge: Execution timeout"),
+                                Full::from("fastedge: Execution timeout"),
                             ),
                             Trap::UnreachableCodeReached => (
                                 FASTEDGE_OUT_OF_MEMORY,
                                 AppResult::OOM,
-                                Body::from("fastedge: Out of memory"),
+                                Full::from("fastedge: Out of memory"),
                             ),
                             _ => (
                                 FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Body::from("fastedge: App failed"),
+                                Full::from("fastedge: App failed"),
                             ),
                         }
                     } else {
                         (
                             FASTEDGE_INTERNAL_ERROR,
                             AppResult::OTHER,
-                            Body::from("fastedge: Execute error"),
+                            Full::from("fastedge: Execute error"),
                         )
                     };
+                debug!(cause=?error, "execution error");
                 info!(
                     "'{}' failed with status code: '{}' in {:.0?}",
                     app_name, status_code, time_elapsed
@@ -409,11 +422,9 @@ where
         };
         Ok(response)
     }
-
-
 }
 
-fn remote_traceparent(req: &Request<Body>) -> String {
+fn remote_traceparent(req: &Request<Incoming>) -> String {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
@@ -422,37 +433,37 @@ fn remote_traceparent(req: &Request<Body>) -> String {
 }
 
 /// Creates an HTTP 500 response.
-fn internal_fastedge_error(msg: &'static str) -> Result<Response<Body>> {
+fn internal_fastedge_error(msg: &'static str) -> Result<Response<Full<Bytes>>> {
     Ok(Response::builder()
         .status(FASTEDGE_INTERNAL_ERROR)
-        .body(Body::from(format!("fastedge: {}", msg)))?)
+        .body(Full::from(format!("fastedge: {}", msg)))?)
 }
 
 /// Creates an HTTP 404 response.
-fn not_found() -> Result<Response<Body>> {
+fn not_found() -> Result<Response<Full<Bytes>>> {
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body(Body::from("fastedge: Unknown app"))?)
+        .body(Full::from("fastedge: Unknown app"))?)
 }
 
 /// Creates an HTTP 429 response.
-fn too_many_requests() -> Result<Response<Body>> {
+fn too_many_requests() -> Result<Response<Full<Bytes>>> {
     Ok(Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
-        .body(Body::empty())?)
+        .body(Full::default())?)
 }
 
 /// Creates an HTTP 406 response.
-fn not_acceptable() -> Result<Response<Body>> {
+fn not_acceptable() -> Result<Response<Full<Bytes>>> {
     Ok(Response::builder()
         .status(StatusCode::NOT_ACCEPTABLE)
-        .body(Body::empty())?)
+        .body(Full::default())?)
 }
 
 /// borrows the request and returns the apps name
 /// app name can be either as sub-domain in a format '<app_name>.<domain>' (from `Server_name` header)
 /// or '<domain>/<app_name>' (from URL)
-fn app_name_from_request(req: &Request<Body>) -> Result<SmolStr> {
+fn app_name_from_request(req: &Request<Incoming>) -> Result<SmolStr> {
     match req.headers().get("server_name") {
         None => {}
         Some(h) => {
@@ -532,17 +543,18 @@ fn app_req_headers<'a>(geo: impl Iterator<Item = (Cow<'a, str>, Cow<'a, str>)>) 
 mod tests {
     use std::collections::HashMap;
 
-    use crate::stats::StatRow;
     use claims::*;
     use test_case::test_case;
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
 
-    use crate::executor::HttpExecutorImpl;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
     use runtime::{componentize_if_necessary, PreCompiledLoader, WasiVersion, WasmConfig};
+
+    use crate::executor::HttpExecutorImpl;
+    use crate::stats::StatRow;
 
     use super::*;
 
@@ -623,8 +635,8 @@ mod tests {
         }
     }
 
-    impl ExecutorFactory<HttpState<FastEdgeConnector>> for TestContext {
-        type Executor = HttpExecutorImpl<FastEdgeConnector>;
+    impl ExecutorFactory<HttpState> for TestContext {
+        type Executor = WasiHttpExecutorImpl<FastEdgeConnector>;
 
         fn get_executor(
             &self,
