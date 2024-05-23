@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use bytesize::ByteSize;
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
-use tracing::error;
+use tracing::{error, info};
 use wasmtime_wasi_http::WasiHttpView;
 
-use runtime::store::StoreBuilder;
 use runtime::InstancePre;
+use runtime::store::StoreBuilder;
 
 use crate::executor::HttpExecutor;
 use crate::HttpState;
@@ -65,9 +65,19 @@ impl WasiHttpExecutorImpl {
         let instance_pre = self.instance_pre.clone();
 
         let task = tokio::task::spawn(async move {
+            let builder = hyper::Request::builder()
+                .uri("http://localhost/path")
+                .method(parts.method)
+                .extension(parts.extensions)
+                .version(parts.version);
+            let request = builder.body(body)?;
+            //let request = hyper::Request::from_parts(parts, body);
+            info!(?request, "###");
+            info!( "### uri = {:?}", request.uri().scheme());
+            info!( "### authority = {:?}", request.uri().authority());
             let req = store
                 .data_mut()
-                .new_incoming_request(hyper::Request::from_parts(parts, body))
+                .new_incoming_request(request)
                 .expect("new incoming request");
             let out = store
                 .data_mut()
@@ -78,7 +88,7 @@ impl WasiHttpExecutorImpl {
                 &mut store,
                 instance_pre.as_ref(),
             )
-            .await?;
+                .await?;
 
             if let Err(e) = proxy
                 .wasi_http_incoming_handler()
