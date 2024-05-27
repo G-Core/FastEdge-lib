@@ -246,8 +246,12 @@ impl ContextHeaders for CliContext<'_> {
 }
 
 impl Router for CliContext<'_> {
-    async fn lookup(&self, _name: &str) -> Option<App> {
+    async fn lookup_by_name(&self, _name: &str) -> Option<App> {
         self.app.to_owned()
+    }
+
+    async fn lookup_by_id(&self, _id: u64) -> Option<App> {
+        unreachable!()
     }
 }
 

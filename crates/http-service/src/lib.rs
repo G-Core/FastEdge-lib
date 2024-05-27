@@ -234,7 +234,7 @@ where
             app_name,
             request.uri()
         );
-        let cfg = match self.context.lookup(&app_name).await {
+        let cfg = match self.context.lookup_by_name(&app_name).await {
             None => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN);
@@ -612,7 +612,7 @@ mod tests {
     }
 
     impl Router for TestContext {
-        async fn lookup(&self, _name: &str) -> Option<App> {
+        async fn lookup_by_name(&self, _name: &str) -> Option<App> {
             self.app.clone()
         }
     }
