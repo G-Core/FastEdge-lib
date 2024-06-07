@@ -1,7 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 use http_backend::{Backend, BackendStrategy};
 use http_service::executor::{ExecutorFactory, HttpExecutorImpl};
-use http_service::stats::{StatRow, StatsWriter};
 use http_service::{ContextHeaders, HttpConfig, HttpService, HttpState};
 use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
@@ -19,6 +18,7 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
+use runtime::util::stats::{StatRow, StatsWriter};
 
 #[derive(Debug, Parser)]
 #[command(name = "cli")]

@@ -21,18 +21,18 @@ use wasmtime_wasi_nn::WasiNnCtx;
 use http_backend::Backend;
 use runtime::app::Status;
 use runtime::service::Service;
-use runtime::{App, ContextT, Router, WasmEngine, WasmEngineBuilder};
+use runtime::{App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder};
+#[cfg(feature = "metrics")]
+use runtime::util::metrics;
 
-use crate::executor::{AppResult, HttpExecutor};
+use crate::executor::{ HttpExecutor};
 #[cfg(feature = "stats")]
-use crate::stats::StatRow;
-use crate::stats::StatsWriter;
+use runtime::util::stats::StatRow;
+use runtime::util::stats::StatsWriter;
 
 use crate::tls::{load_certs, load_private_key, TlsAcceptor, TlsStream};
 pub mod executor;
-#[cfg(feature = "metrics")]
-pub mod metrics;
-pub mod stats;
+
 mod tls;
 
 pub use crate::executor::ExecutorFactory;
