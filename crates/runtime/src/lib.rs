@@ -21,6 +21,7 @@ pub mod registry;
 pub mod service;
 pub mod store;
 pub mod stub;
+pub mod util;
 
 use crate::logger::Logger;
 use anyhow::anyhow;
@@ -33,6 +34,16 @@ use tracing::trace;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
 
 const PREVIEW1_ADAPTER: &[u8] = include_bytes!("adapters/wasi_snapshot_preview1.reactor.wasm");
+
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum AppResult {
+    SUCCESS,
+    #[cfg(feature = "metrics")]
+    UNKNOWN,
+    TIMEOUT,
+    OOM,
+    OTHER,
+}
 
 pub type InstancePre<T> = Arc<wasmtime::component::InstancePre<Data<T>>>;
 pub type ModuleInstancePre<T> = Arc<wasmtime::InstancePre<Data<T>>>;

@@ -179,12 +179,4 @@ fn to_fastedge_http_method(method: &Method) -> Result<fastedge::http::Method> {
     })
 }
 
-#[derive(PartialEq, Copy, Clone, Debug)]
-pub enum AppResult {
-    SUCCESS,
-    #[cfg(feature = "metrics")]
-    UNKNOWN,
-    TIMEOUT,
-    OOM,
-    OTHER,
-}
+
