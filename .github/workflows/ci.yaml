@@ -23,6 +23,9 @@ jobs:
           target: wasm32-wasi
           components: rustfmt, clippy
 
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.2.1
+
       - name: Run cargo-audit binary crate
         uses: rustsec/audit-check@v1.4.1
         with:
