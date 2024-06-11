@@ -37,24 +37,3 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features
 
-  release:
-    runs-on: ubuntu-latest
-    if: github.ref != 'refs/heads/main'
-    steps:
-      - name: Clone repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          target: wasm32-wasi
-          components: rustfmt, clippy
-
-      - name: Run Release PR
-        uses: MarcoIeni/release-plz-action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
