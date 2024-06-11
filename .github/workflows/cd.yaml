@@ -21,16 +21,13 @@ jobs:
           submodules: recursive
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
+          target: wasm32-wasi
+          components: rustfmt, clippy
 
       - name: Release build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --bin cli
+        run: cargo build --release
 
       - name: Upload target binary
         uses: actions/upload-artifact@v4

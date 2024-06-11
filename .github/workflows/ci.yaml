@@ -4,6 +4,7 @@ on: [ push ]
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
   build:
@@ -17,67 +18,42 @@ jobs:
           submodules: recursive
 
       - name: Setup Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
+          target: wasm32-wasi
           components: rustfmt, clippy
 
-      - name: Release build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
-
-      - name: Install cargo-audit binary crate
-        uses: actions-rs/install@v0.1
-        with:
-          crate: cargo-audit
-          version: latest
-          use-tool-cache: true
-
-      - name: Annotate commit with clippy warnings
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
-
-      - name: Security audit
-        uses: actions-rs/audit-check@v1
+      - name: Run cargo-audit binary crate
+        uses: rustsec/audit-check@v1.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-#  coverage:
-#    needs: build
-#    runs-on: ubuntu-latest
-#    if: github.ref != 'refs/heads/main'
-#    steps:
-#      - name: Clone repo
-#        uses: actions/checkout@v4
-#        with:
-#          submodules: recursive
-#
-#      - uses: actions-rs/toolchain@v1
-#        with:
-#          toolchain: nightly
-#          override: true
-#
-#      - uses: actions-rs/cargo@v1
-#        name: Run test with code coverage report
-#        with:
-#          command: test
-#          args: --workspace --all-features --no-fail-fast
-#        env:
-#          CARGO_INCREMENTAL: '0'
-#          RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-#          RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-#
-#      - id: coverage
-#        name: Collect code coverage
-#        uses: actions-rs/grcov@v0.1
-#
-#      - name: Archive code coverage results
-#        uses: actions/upload-artifact@v4
-#        with:
-#          name: code-coverage-report
-#          path: ${{ steps.coverage.outputs.report }}
+      - name: Release Build
+        run: cargo build --release --all-features
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features
+
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-wasi
+          components: rustfmt, clippy
+
+      - name: Run Release PR
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
