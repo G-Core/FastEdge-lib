@@ -4,18 +4,19 @@ use clickhouse::Row;
 use serde::Serialize;
 
 #[cfg(feature = "stats")]
-#[derive(Row, Debug, Serialize)]
+#[derive(Row, Debug, Serialize, Default)]
 pub struct StatRow {
     pub app_id: u64,
     pub client_id: u64,
     pub timestamp: u32,
-    pub app_name: String,
+    pub app_name: smol_str::SmolStr,
     pub status_code: u32,
     pub fail_reason: u32,
-    pub billing_plan: String,
+    pub billing_plan: smol_str::SmolStr,
     pub time_elapsed: u64,
     pub memory_used: u64,
-    pub pop: String,
+    pub pop: smol_str::SmolStr,
+    pub region: smol_str::SmolStr
 }
 
 #[cfg(not(feature = "stats"))]

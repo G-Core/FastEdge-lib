@@ -4,6 +4,7 @@ use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
+use smol_str::SmolStr;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct App {
@@ -11,15 +12,15 @@ pub struct App {
     pub max_duration: u64,
     pub mem_limit: usize,
     #[serde(default)]
-    pub env: HashMap<String, String>,
+    pub env: HashMap<SmolStr, SmolStr>,
     #[serde(default)]
-    pub rsp_headers: HashMap<String, String>,
+    pub rsp_headers: HashMap<SmolStr, SmolStr>,
     #[serde(default)]
     pub log: Log,
     #[serde(default)]
     pub app_id: u64,
     pub client_id: u64,
-    pub plan: String,
+    pub plan: SmolStr,
     #[serde(default)]
     pub status: Status,
     #[serde(default)]
@@ -72,7 +73,7 @@ impl<'de> Visitor<'de> for StatusVisitor {
             2 => Ok(Status::Disabled),
             3 | 4 => Ok(Status::RateLimited),
             5 => Ok(Status::Suspended),
-            _ => Err(E::custom("not in range: [0..4]")),
+            _ => Err(E::custom("status not in range: [0..5]")),
         }
     }
 }

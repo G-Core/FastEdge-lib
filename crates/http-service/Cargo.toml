@@ -9,6 +9,7 @@ authors.workspace = true
 default = []
 metrics = ["runtime/metrics"]
 stats = ["runtime/stats"]
+tls = ["tokio-rustls", "rustls-pemfile", "hyper-rustls", "rustls"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -22,10 +23,10 @@ wasmtime-wasi-nn = { workspace = true }
 wasi-common = { workspace = true }
 tracing = { workspace = true }
 smol_str = { workspace = true }
-tokio-rustls = "0.24.1"
-rustls-pemfile = "1.0.2"
-hyper-rustls = "0.24.1"
-rustls = "0.21.6"
+tokio-rustls = { version = "0.24.1", optional = true}
+rustls-pemfile = { version = "1.0.2" , optional = true}
+hyper-rustls = { version = "0.24.1", optional = true }
+rustls = { version = "0.21.6", optional = true }
 reactor = { path = "../reactor" }
 runtime = { path = "../runtime" }
 http-backend = { path = "../http-backend" }

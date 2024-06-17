@@ -1,19 +1,16 @@
-use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context, Error, Result};
+use anyhow::{ bail, Context, Error, Result};
 use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
 use hyper::client::connect::Connect;
-use hyper::server::conn::{AddrIncoming, AddrStream};
+use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Server};
 use smol_str::SmolStr;
-use tokio_rustls::rustls;
-use tokio_rustls::rustls::ServerConfig;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error_span, info, info_span, trace, warn, Instrument};
+use tracing::{debug, info, info_span, trace, warn, Instrument};
 use wasi_common::I32Exit;
 use wasmtime::Trap;
 use wasmtime_wasi_nn::WasiNnCtx;
@@ -30,10 +27,13 @@ use crate::executor::{ HttpExecutor};
 use runtime::util::stats::StatRow;
 use runtime::util::stats::StatsWriter;
 
+#[cfg(feature = "tls")]
 use crate::tls::{load_certs, load_private_key, TlsAcceptor, TlsStream};
-pub mod executor;
 
+#[cfg(feature = "tls")]
 mod tls;
+
+pub mod executor;
 
 pub use crate::executor::ExecutorFactory;
 
@@ -44,14 +44,18 @@ const FASTEDGE_OUT_OF_MEMORY: u16 = 531;
 const FASTEDGE_EXECUTION_TIMEOUT: u16 = 532;
 const FASTEDGE_EXECUTION_PANIC: u16 = 533;
 
+#[cfg(feature = "tls")]
+#[derive(Default)]
 pub struct HttpsConfig {
     pub ssl_certs: &'static str,
     pub ssl_pkey: &'static str,
 }
 
+#[derive(Default)]
 pub struct HttpConfig {
     pub all_interfaces: bool,
     pub port: u16,
+    #[cfg(feature = "tls")]
     pub https: Option<HttpsConfig>,
     pub cancel: CancellationToken,
 }
@@ -67,7 +71,7 @@ pub struct HttpState<C> {
 }
 
 pub trait ContextHeaders {
-    fn append_headers(&self) -> impl Iterator<Item = (Cow<str>, Cow<str>)>;
+    fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
 
 impl<T> Service for HttpService<T>
@@ -100,6 +104,8 @@ where
         };
         let listen_addr = (interface, config.port).into();
 
+
+        #[cfg(feature = "tls")]
         if let Some(https) = config.https {
             let tls = {
                 // Load public certificate.
@@ -111,7 +117,7 @@ where
                     .with_safe_defaults()
                     .with_no_client_auth()
                     .with_single_cert(certs, key)
-                    .map_err(|e| anyhow!(format!("{}", e)))?;
+                    .map_err(|e| anyhow::anyhow!(format!("{}", e)))?;
                 // Configure ALPN to accept HTTP/2, HTTP/1.1 in that order.
                 cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
                 Arc::new(cfg)
@@ -120,6 +126,9 @@ where
         } else {
             self.serve(listen_addr).await?
         };
+
+        #[cfg(not(feature = "tls"))]
+        self.serve(listen_addr).await?;
 
         Ok(())
     }
@@ -177,7 +186,8 @@ where
         Ok(())
     }
 
-    async fn serve_tls(self, listen_addr: SocketAddr, tls: Arc<ServerConfig>) -> Result<()> {
+    #[cfg(feature = "tls")]
+    async fn serve_tls(self, listen_addr: SocketAddr, tls: Arc<rustls::ServerConfig>) -> Result<()> {
         let service = Arc::new(self);
         let make_service = make_service_fn(|_conn: &TlsStream| {
             let service = service.clone();
@@ -188,7 +198,7 @@ where
                     async move {
                         service
                             .handle_request(req)
-                            .instrument(error_span!("https_handler", request_id))
+                            .instrument(tracing::error_span!("https_handler", request_id))
                             .await
                     }
                 });
@@ -196,7 +206,7 @@ where
             }
         });
 
-        let incoming = AddrIncoming::bind(&listen_addr)
+        let incoming = hyper::server::conn::AddrIncoming::bind(&listen_addr)
             .with_context(|| format!("Unable to bind on {}", listen_addr))?;
         info!("Listening on https://{}", listen_addr);
         Server::builder(TlsAcceptor::new(tls, incoming))
@@ -288,16 +298,6 @@ where
             }
         };
 
-        #[cfg(feature = "stats")]
-        let pop = match request.headers().get("x-cdn-requestor") {
-            None => {
-                info!("missing pop info header");
-                "unknown"
-            }
-            Some(v) => v.to_str().unwrap(),
-        }
-        .to_string();
-
         let start_ = std::time::Instant::now();
 
         let response = match executor.execute(request).await {
@@ -316,13 +316,13 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name: app_name.to_string(),
+                        app_name,
                         status_code: response.status().as_u16() as u32,
                         fail_reason: 0, // TODO: use AppResult
                         billing_plan: cfg.plan.clone(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: memory_used.as_u64(),
-                        pop,
+                        .. Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
@@ -382,13 +382,13 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name: app_name.to_string(),
+                        app_name,
                         status_code: status_code as u32,
                         fail_reason: fail_reason as u32,
                         billing_plan: cfg.plan.clone(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: 0,
-                        pop,
+                        .. Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
@@ -511,7 +511,7 @@ fn app_res_headers(app_cfg: App) -> HeaderMap {
     headers
 }
 
-fn app_req_headers<'a>(geo: impl Iterator<Item = (Cow<'a, str>, Cow<'a, str>)>) -> HeaderMap {
+fn app_req_headers(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for (key, value) in geo {
         trace!("append new request header {}={}", key, value);

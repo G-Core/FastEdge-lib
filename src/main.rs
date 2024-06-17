@@ -11,8 +11,7 @@ use runtime::{
     componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
     WasiVersion, WasmConfig, WasmEngine,
 };
-use smol_str::SmolStr;
-use std::borrow::Cow;
+use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
@@ -44,13 +43,13 @@ struct HttpRunArgs {
     wasm: PathBuf,
     /// Environment variable list
     #[arg(long, value_parser = parse_key_value::< String, String >)]
-    envs: Option<Vec<(String, String)>>,
+    envs: Option<Vec<(SmolStr, SmolStr)>>,
     /// Add header from original request
     #[arg(long = "propagate-header", num_args = 0..)]
     propagate_headers: Option<Vec<String>>,
     /// Execution context headers added to request
     #[arg(long, value_parser = parse_key_value::< String, String >)]
-    headers: Option<Vec<(String, String)>>,
+    headers: Option<Vec<(SmolStr, SmolStr)>>,
     /// Append sample Geo PoP headers
     #[arg(long, default_value = "false")]
     geo: bool,
@@ -63,8 +62,8 @@ struct HttpRunArgs {
 }
 
 /// Test tool execution context
-struct CliContext<'a> {
-    headers: HashMap<Cow<'a, str>, Cow<'a, str>>,
+struct CliContext {
+    headers: HashMap<SmolStr, SmolStr>,
     engine: Engine,
     app: Option<App>,
     backend: Backend<HttpsConnector<HttpConnector>>,
@@ -99,16 +98,15 @@ async fn main() -> anyhow::Result<()> {
                 log: Default::default(),
                 app_id: 0,
                 client_id: 0,
-                plan: "cli".to_string(),
+                plan: SmolStr::new("cli"),
                 status: Status::Enabled,
                 debug_until: None,
             };
 
-            let mut headers: HashMap<Cow<str>, Cow<str>> = run
+            let mut headers: HashMap<SmolStr, SmolStr> = run
                 .headers
                 .unwrap_or_default()
                 .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
                 .collect();
 
             append_headers(run.geo, &mut headers);
@@ -125,8 +123,7 @@ async fn main() -> anyhow::Result<()> {
             let http = http.run(HttpConfig {
                 all_interfaces: false,
                 port: run.port,
-                https: None,
-                cancel: cancel.clone(),
+                cancel: cancel.clone()
             });
             tokio::select! {
                 _ = http => {
@@ -144,32 +141,32 @@ async fn main() -> anyhow::Result<()> {
 /// Append to request headers:
 /// * server_name if it is missing
 /// * Gcore PoP sample Geo headers
-fn append_headers(geo: bool, headers: &mut HashMap<Cow<str>, Cow<str>>) {
+fn append_headers(geo: bool, headers: &mut HashMap<SmolStr, SmolStr>) {
     if !headers
         .keys()
         .any(|k| "server_name".eq_ignore_ascii_case(k))
     {
         headers.insert(
-            Cow::Borrowed("Server_name"),
-            Cow::Borrowed("test.localhost"),
+            "Server_name".to_smolstr(),
+            "test.localhost".to_smolstr(),
         );
     }
 
     if geo {
-        headers.insert(Cow::Borrowed("PoP-Lat"), Cow::Borrowed("49.6113"));
-        headers.insert(Cow::Borrowed("PoP-Long"), Cow::Borrowed("6.1294"));
-        headers.insert(Cow::Borrowed("PoP-Reg"), Cow::Borrowed("LU"));
-        headers.insert(Cow::Borrowed("PoP-City"), Cow::Borrowed("Luxembourg"));
-        headers.insert(Cow::Borrowed("PoP-Continent"), Cow::Borrowed("EU"));
-        headers.insert(Cow::Borrowed("PoP-Country-Code"), Cow::Borrowed("AU"));
+        headers.insert("PoP-Lat".to_smolstr(),"49.6113".to_smolstr());
+        headers.insert("PoP-Long".to_smolstr(), "6.1294".to_smolstr());
+        headers.insert("PoP-Reg".to_smolstr(), "LU".to_smolstr());
+        headers.insert("PoP-City".to_smolstr(), "Luxembourg".to_smolstr());
+        headers.insert("PoP-Continent".to_smolstr(), "EU".to_smolstr());
+        headers.insert("PoP-Country-Code".to_smolstr(), "AU".to_smolstr());
         headers.insert(
-            Cow::Borrowed("PoP-Country-Name"),
-            Cow::Borrowed("Luxembourg"),
+            "PoP-Country-Name".to_smolstr(),
+            "Luxembourg".to_smolstr(),
         );
     }
 }
 
-impl PreCompiledLoader<u64> for CliContext<'_> {
+impl PreCompiledLoader<u64> for CliContext {
     fn load_component(&self, _id: u64) -> anyhow::Result<Component> {
         let wasm_sample = componentize_if_necessary(&self.wasm_bytes)?;
         Component::new(&self.engine, wasm_sample)
@@ -180,7 +177,7 @@ impl PreCompiledLoader<u64> for CliContext<'_> {
     }
 }
 
-impl ContextT for CliContext<'_> {
+impl ContextT for CliContext {
     type BackendConnector = HttpsConnector<HttpConnector>;
     fn make_logger(&self, _app_name: SmolStr, _wrk: &App) -> Logger {
         Logger::new(Console::default())
@@ -199,7 +196,7 @@ impl ContextT for CliContext<'_> {
     }
 }
 
-impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext<'_> {
+impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
     type Executor = HttpExecutorImpl<HttpsConnector<HttpConnector>>;
 
     fn get_executor(
@@ -211,7 +208,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext<'_
         let env = app
             .env
             .iter()
-            .collect::<Vec<(&String, &String)>>();
+            .collect::<Vec<(&SmolStr, &SmolStr)>>();
 
         let logger = self.make_logger(name, app);
 
@@ -233,19 +230,19 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext<'_
     }
 }
 
-impl ExecutorCache for CliContext<'_> {
+impl ExecutorCache for CliContext {
     fn invalidate(&self, _name: &str) {
         unreachable!()
     }
 }
 
-impl ContextHeaders for CliContext<'_> {
-    fn append_headers(&self) -> impl Iterator<Item = (Cow<str>, Cow<str>)> {
+impl ContextHeaders for CliContext {
+    fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)> {
         self.headers.iter().map(|(k, v)| (k.clone(), v.clone()))
     }
 }
 
-impl Router for CliContext<'_> {
+impl Router for CliContext {
     async fn lookup_by_name(&self, _name: &str) -> Option<App> {
         self.app.to_owned()
     }
@@ -255,7 +252,7 @@ impl Router for CliContext<'_> {
     }
 }
 
-impl StatsWriter for CliContext<'_> {
+impl StatsWriter for CliContext {
     async fn write_stats(&self, _stat: StatRow) {}
 }
 
