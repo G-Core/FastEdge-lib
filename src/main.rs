@@ -123,8 +123,7 @@ async fn main() -> anyhow::Result<()> {
             let http = http.run(HttpConfig {
                 all_interfaces: false,
                 port: run.port,
-                https: None,
-                cancel: cancel.clone(),
+                cancel: cancel.clone()
             });
             tokio::select! {
                 _ = http => {
