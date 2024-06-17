@@ -21,8 +21,8 @@ wasi-common = { workspace = true }
 wasmtime-wasi-nn = { workspace = true }
 smol_str = { workspace = true }
 moka = { workspace = true }
-wasmtime-environ = "19.0.2"
-wit-component = "0.206.0"
+wasmtime-environ = "20.0.2"
+wit-component = "0.210.0"
 tracing = { workspace = true }
 bytesize = "1"
 http-backend = { path = "../http-backend" }

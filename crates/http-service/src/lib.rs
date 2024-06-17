@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -67,7 +66,7 @@ pub struct HttpState<C> {
 }
 
 pub trait ContextHeaders {
-    fn append_headers(&self) -> impl Iterator<Item = (Cow<str>, Cow<str>)>;
+    fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
 
 impl<T> Service for HttpService<T>
@@ -288,16 +287,6 @@ where
             }
         };
 
-        #[cfg(feature = "stats")]
-        let pop = match request.headers().get("x-cdn-requestor") {
-            None => {
-                info!("missing pop info header");
-                "unknown"
-            }
-            Some(v) => v.to_str().unwrap(),
-        }
-        .to_string();
-
         let start_ = std::time::Instant::now();
 
         let response = match executor.execute(request).await {
@@ -316,13 +305,13 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name: app_name.to_string(),
+                        app_name,
                         status_code: response.status().as_u16() as u32,
                         fail_reason: 0, // TODO: use AppResult
                         billing_plan: cfg.plan.clone(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: memory_used.as_u64(),
-                        pop,
+                        .. Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
@@ -382,13 +371,13 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name: app_name.to_string(),
+                        app_name,
                         status_code: status_code as u32,
                         fail_reason: fail_reason as u32,
                         billing_plan: cfg.plan.clone(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: 0,
-                        pop,
+                        .. Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
@@ -511,7 +500,7 @@ fn app_res_headers(app_cfg: App) -> HeaderMap {
     headers
 }
 
-fn app_req_headers<'a>(geo: impl Iterator<Item = (Cow<'a, str>, Cow<'a, str>)>) -> HeaderMap {
+fn app_req_headers<'a>(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for (key, value) in geo {
         trace!("append new request header {}={}", key, value);
