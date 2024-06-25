@@ -247,7 +247,7 @@ impl Router for CliContext {
         self.app.to_owned()
     }
 
-    async fn lookup_by_id(&self, _id: u64) -> Option<App> {
+    async fn lookup_by_id(&self, _id: u64) -> Option<(SmolStr, App)> {
         unreachable!()
     }
 }

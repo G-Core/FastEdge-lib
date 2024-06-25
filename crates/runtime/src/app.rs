@@ -34,8 +34,6 @@ pub enum Log {
     None,
     #[cfg(feature = "kafka_log")]
     Kafka,
-    #[cfg(feature = "file_log")]
-    File { name: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
