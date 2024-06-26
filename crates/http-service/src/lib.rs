@@ -165,7 +165,7 @@ where
         let listener = if let Some(fd) = owned_fd {
             TcpListener::from(fd)
         } else {
-            TcpListener::bind(&addr)?
+            TcpListener::bind(addr)?
         };
         let listen_addr = listener.local_addr()?;
         let service = Arc::new(self);
