@@ -14,7 +14,7 @@ use runtime::{
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio_util::sync::CancellationToken;
+use shellflip::ShutdownCoordinator;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
 use runtime::util::stats::{StatRow, StatsWriter};
@@ -73,7 +73,7 @@ struct CliContext {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
-    let cancel = CancellationToken::new();
+    let shutdown_coordinator = ShutdownCoordinator::new();
     let args = Cli::parse();
     let config = WasmConfig::default();
     let engine = Engine::new(&config)?;
@@ -123,14 +123,15 @@ async fn main() -> anyhow::Result<()> {
             let http = http.run(HttpConfig {
                 all_interfaces: false,
                 port: run.port,
-                cancel: cancel.clone()
+                cancel: shutdown_coordinator.handle_weak(),
+                listen_fd: None,
             });
             tokio::select! {
                 _ = http => {
 
                 },
                 _ = tokio::signal::ctrl_c() => {
-                    cancel.cancel()
+                    shutdown_coordinator.shutdown().await
                 }
             }
         }

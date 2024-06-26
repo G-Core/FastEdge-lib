@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -27,16 +26,13 @@ enum State {
 // TlsStream implements AsyncRead/AsyncWrite handshaking tokio_rustls::Accept first
 pub struct TlsStream {
     state: State,
-    pub addr: SocketAddr,
 }
 
 impl TlsStream {
     fn new(stream: AddrStream, config: Arc<ServerConfig>) -> TlsStream {
-        let addr = stream.remote_addr();
         let accept = tokio_rustls::TlsAcceptor::from(config).accept(stream);
         TlsStream {
             state: State::Handshaking(accept),
-            addr,
         }
     }
 }
