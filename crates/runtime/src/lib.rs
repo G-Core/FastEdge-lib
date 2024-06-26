@@ -326,7 +326,7 @@ pub trait ExecutorCache {
 
 pub trait Router: Send + Sync {
     fn lookup_by_name(&self, name: &str) -> impl std::future::Future<Output = Option<App>> + Send;
-    fn lookup_by_id(&self, id: u64) -> impl std::future::Future<Output = Option<App>> + Send;
+    fn lookup_by_id(&self, id: u64) -> impl std::future::Future<Output = Option<(SmolStr, App)>> + Send;
 }
 
 pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
