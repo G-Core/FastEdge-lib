@@ -1,5 +1,6 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::net::{SocketAddr, TcpListener};
+use std::os::fd::OwnedFd;
+use std::sync::{Arc, Weak};
 
 use anyhow::{ bail, Context, Error, Result};
 use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
@@ -8,8 +9,8 @@ use hyper::client::connect::Connect;
 use hyper::server::conn::AddrStream;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Server};
+use shellflip::{ShutdownHandle, ShutdownSignal};
 use smol_str::SmolStr;
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, info_span, trace, warn, Instrument};
 use wasi_common::I32Exit;
 use wasmtime::Trap;
@@ -57,7 +58,8 @@ pub struct HttpConfig {
     pub port: u16,
     #[cfg(feature = "tls")]
     pub https: Option<HttpsConfig>,
-    pub cancel: CancellationToken,
+    pub cancel: Weak<ShutdownHandle>,
+    pub listen_fd: Option<OwnedFd>,
 }
 
 pub struct HttpService<T: ContextT> {
@@ -73,6 +75,7 @@ pub struct HttpState<C> {
 pub trait ContextHeaders {
     fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
+
 
 impl<T> Service for HttpService<T>
 where
@@ -122,15 +125,13 @@ where
                 cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
                 Arc::new(cfg)
             };
-            self.serve_tls(listen_addr, tls).await?
+            tokio::spawn(self.serve_tls(listen_addr, tls, config.cancel)).await?
         } else {
-            self.serve(listen_addr).await?
-        };
+            tokio::spawn(self.serve( listen_addr, config.listen_fd, config.cancel)).await?
+        }
 
         #[cfg(not(feature = "tls"))]
-        self.serve(listen_addr).await?;
-
-        Ok(())
+        tokio::spawn(self.serve( listen_addr, config.listen_fd, config.cancel)).await?
     }
 
     fn configure_engine(builder: &mut WasmEngineBuilder<Self::State>) -> Result<()> {
@@ -160,47 +161,62 @@ where
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
 {
-    async fn serve(self, listen_addr: SocketAddr) -> Result<()> {
+    async fn serve(self,  addr: SocketAddr, owned_fd: Option<OwnedFd>, cancel: Weak<ShutdownHandle>) -> Result<()> {
+        let listener = if let Some(fd) = owned_fd {
+            TcpListener::from(fd)
+        } else {
+            TcpListener::bind(addr)?
+        };
+        let listen_addr = listener.local_addr()?;
         let service = Arc::new(self);
         let make_service = make_service_fn(|_conn: &AddrStream| {
             let service = service.clone();
             async move {
                 let service = service_fn(move |req| {
-                    let self_ = service.clone();
-                    let request_id = remote_traceparent(&req);
-                    async move {
-                        self_
-                            .handle_request(req)
-                            .instrument(info_span!("http_handler", request_id))
-                            .await
-                    }
+                        let self_ = service.clone();
+                        let request_id = remote_traceparent(&req);
+                        async move {
+                            self_
+                                .handle_request(req)
+                                .instrument(info_span!("http_handler", request_id))
+                                .await
+                        }
                 });
                 Ok::<_, Error>(service)
             }
         });
         info!("Listening on http://{}", listen_addr);
-        Server::try_bind(&listen_addr)
+        let graceful_shutdown = async {
+            if let Some(cancel) = cancel.upgrade() {
+                let mut signal = ShutdownSignal::from(cancel.as_ref());
+                signal.on_shutdown().await
+            }
+        };
+
+
+        Server::from_tcp(listener)
             .with_context(|| format!("Unable to listen on {}", listen_addr))?
-            .serve(make_service)
+            .serve(make_service).with_graceful_shutdown( graceful_shutdown)
             .await?;
         Ok(())
     }
 
     #[cfg(feature = "tls")]
-    async fn serve_tls(self, listen_addr: SocketAddr, tls: Arc<rustls::ServerConfig>) -> Result<()> {
+    async fn serve_tls(self, listen_addr: std::net::SocketAddr, tls: Arc<rustls::ServerConfig>, cancel: Weak<ShutdownHandle>) -> Result<()> {
         let service = Arc::new(self);
         let make_service = make_service_fn(|_conn: &TlsStream| {
             let service = service.clone();
             async move {
                 let service = service_fn(move |req| {
-                    let service = service.clone();
-                    let request_id = remote_traceparent(&req);
-                    async move {
-                        service
-                            .handle_request(req)
-                            .instrument(tracing::error_span!("https_handler", request_id))
-                            .await
-                    }
+                        let service = service.clone();
+                        let request_id = remote_traceparent(&req);
+                        async move {
+                            service
+                                .handle_request(req)
+                                .instrument(tracing::error_span!("https_handler", request_id))
+                                .await
+                        }
+
                 });
                 Ok::<_, Error>(service)
             }
@@ -209,8 +225,16 @@ where
         let incoming = hyper::server::conn::AddrIncoming::bind(&listen_addr)
             .with_context(|| format!("Unable to bind on {}", listen_addr))?;
         info!("Listening on https://{}", listen_addr);
+
+        let graceful_shutdown = async {
+            if let Some(cancel) = cancel.upgrade() {
+                let mut signal = ShutdownSignal::from(cancel.as_ref());
+                signal.on_shutdown().await
+            }
+        };
+
         Server::builder(TlsAcceptor::new(tls, incoming))
-            .serve(make_service)
+            .serve(make_service).with_graceful_shutdown( graceful_shutdown)
             .await?;
         Ok(())
     }

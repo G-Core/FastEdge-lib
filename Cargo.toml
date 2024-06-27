@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 publish = false
 authors = ["FastEdge Development Team"]
@@ -23,7 +23,7 @@ clap = { version = "4", features = ["derive"] }
 moka = { version = "0.12", features = ["sync"] }
 smol_str = { version = "0.2.1", features = ["serde"] }
 anyhow = "1.0"
-
+shellflip = "2.1.0"
 
 [workspace.lints.rust]
 unused_extern_crates = 'warn'
@@ -57,3 +57,4 @@ runtime = { path = "crates/runtime", default-features = false }
 http-service = { path = "crates/http-service" }
 http-backend = { path = "crates/http-backend" }
 hyper-tls = "0.5.0"
+shellflip = {workspace = true}
