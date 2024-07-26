@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Error, Result};
 use async_trait::async_trait;
 use bytesize::ByteSize;
-use http::{HeaderMap, HeaderValue, Method};
+use http::{HeaderMap, HeaderValue, Method, Response};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
+use http_body_util::combinators::BoxBody;
 use hyper::body::{Bytes, Incoming};
 use smol_str::SmolStr;
 use wasmtime_wasi::StdoutStream;
@@ -30,7 +31,7 @@ pub trait HttpExecutor {
     async fn execute(
         &self,
         req: hyper::Request<Incoming>,
-    ) -> Result<(hyper::Response<Full<Bytes>>, Duration, ByteSize)>;
+    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>;
 }
 
 pub trait ExecutorFactory<C> {
@@ -46,7 +47,7 @@ pub trait ExecutorFactory<C> {
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
 pub struct HttpExecutorImpl<C> {
-    instance_pre: InstancePre<HttpState>,
+    instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
 }
@@ -59,7 +60,7 @@ where
     async fn execute(
         &self,
         req: hyper::Request<Incoming>,
-    ) -> Result<(hyper::Response<Full<Bytes>>, Duration, ByteSize)> {
+    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)> {
         let start_ = Instant::now();
         let response = self.execute_impl(req).await;
         let elapsed = Instant::now().duration_since(start_);
@@ -72,7 +73,7 @@ where
     C: Clone + Send + Sync + 'static,
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState>,
+        instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
     ) -> Self {
@@ -86,7 +87,7 @@ where
     async fn execute_impl(
         &self,
         req: hyper::Request<Incoming>,
-    ) -> Result<(hyper::Response<Full<Bytes>>, ByteSize)> {
+    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)> {
         let (parts, body) = req.into_parts();
         let method = to_fastedge_http_method(&parts.method)?;
 
@@ -125,7 +126,7 @@ where
             .propagate_headers(&parts.headers)
             .context("propagate headers")?;
 
-        let state = HttpState { wasi_nn };
+        let state = HttpState { wasi_nn, http_backend };
 
         let mut store = store_builder.build(state)?;
 
@@ -158,7 +159,7 @@ where
         };
         let used = ByteSize::b(store.memory_used() as u64);
 
-        let body = resp.body.map(|b| Full::from(b)).unwrap_or_default();
+        let body = resp.body.map(|b| Full::from(b).map_err(|never| match never {}).boxed()).unwrap_or_default();
         builder.body(body).map(|r| (r, used)).map_err(Error::msg)
     }
 

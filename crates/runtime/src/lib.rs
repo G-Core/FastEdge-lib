@@ -25,7 +25,7 @@ pub mod stub;
 pub mod util;
 
 use crate::logger::Logger;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 pub use app::App;
 use smol_str::SmolStr;
 use std::borrow::Cow;
@@ -343,13 +343,14 @@ pub trait Router: Send + Sync {
 
 pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
     for payload in Parser::new(0).parse_all(buffer) {
-        match payload? {
-            Payload::Version { encoding, .. } => {
+        match payload {
+            Ok(Payload::Version { encoding, .. }) => {
                 return match encoding {
                     Encoding::Component => Ok(Cow::Borrowed(buffer)),
                     Encoding::Module => componentize(buffer).map(Cow::Owned),
                 };
-            }
+            },
+            Err(error) => bail!("parse error: {}", error),
             _ => (),
         }
     }

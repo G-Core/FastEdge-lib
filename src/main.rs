@@ -2,7 +2,6 @@ use clap::{Args, Parser, Subcommand};
 use http_backend::{Backend, BackendStrategy};
 use http_service::executor::{ExecutorFactory, HttpExecutorImpl};
 use http_service::{ContextHeaders, HttpConfig, HttpService, HttpState};
-use hyper::client::HttpConnector;
 use hyper_tls::HttpsConnector;
 use runtime::app::Status;
 use runtime::logger::{Console, Logger};
@@ -14,6 +13,7 @@ use runtime::{
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use hyper_util::client::legacy::connect::HttpConnector;
 use shellflip::ShutdownCoordinator;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
@@ -125,6 +125,7 @@ async fn main() -> anyhow::Result<()> {
                 port: run.port,
                 cancel: shutdown_coordinator.handle_weak(),
                 listen_fd: None,
+                backoff: 64,
             });
             tokio::select! {
                 _ = http => {

@@ -1,17 +1,22 @@
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 use std::os::fd::OwnedFd;
 use std::sync::{Arc, Weak};
-
-use anyhow::{ bail, Context, Error, Result};
+use std::time::Duration;
+use anyhow::{bail,  Result};
+use bytes::Bytes;
 use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
-use hyper::client::connect::Connect;
-use hyper::server::conn::AddrStream;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Server};
-use shellflip::{ShutdownHandle, ShutdownSignal};
+use http_body_util::{BodyExt, Empty, Full};
+use http_body_util::combinators::BoxBody;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper_util::client::legacy::connect::Connect;
+use hyper_util::rt::TokioIo;
+use shellflip::{ShutdownHandle};
 use smol_str::SmolStr;
-use tracing::{debug, info, info_span, trace, warn, Instrument};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpListener;
+use tracing::Instrument;
 use wasi_common::I32Exit;
 use wasmtime::Trap;
 use wasmtime_wasi_nn::WasiNnCtx;
@@ -28,12 +33,6 @@ use crate::executor::{ HttpExecutor};
 use runtime::util::stats::StatRow;
 use runtime::util::stats::StatsWriter;
 
-#[cfg(feature = "tls")]
-use crate::tls::{load_certs, load_private_key, TlsAcceptor, TlsStream};
-
-#[cfg(feature = "tls")]
-mod tls;
-
 pub mod executor;
 
 pub use crate::executor::ExecutorFactory;
@@ -45,21 +44,13 @@ const FASTEDGE_OUT_OF_MEMORY: u16 = 531;
 const FASTEDGE_EXECUTION_TIMEOUT: u16 = 532;
 const FASTEDGE_EXECUTION_PANIC: u16 = 533;
 
-#[cfg(feature = "tls")]
-#[derive(Default)]
-pub struct HttpsConfig {
-    pub ssl_certs: &'static str,
-    pub ssl_pkey: &'static str,
-}
-
 #[derive(Default)]
 pub struct HttpConfig {
     pub all_interfaces: bool,
     pub port: u16,
-    #[cfg(feature = "tls")]
-    pub https: Option<HttpsConfig>,
     pub cancel: Weak<ShutdownHandle>,
     pub listen_fd: Option<OwnedFd>,
+    pub backoff: u64,
 }
 
 pub struct HttpService<T: ContextT> {
@@ -100,38 +91,48 @@ where
 
     /// Run hyper http service
     async fn run(self, config: Self::Config) -> Result<()> {
-        let interface: [u8; 4] = if config.all_interfaces {
-            [0, 0, 0, 0]
+        let listener = if let Some(fd) = config.listen_fd {
+            let listener = std::net::TcpListener::from(fd);
+            listener.set_nonblocking(true)?;
+            TcpListener::from_std(listener)?
         } else {
-            [127, 0, 0, 1]
-        };
-        let listen_addr = (interface, config.port).into();
-
-
-        #[cfg(feature = "tls")]
-        if let Some(https) = config.https {
-            let tls = {
-                // Load public certificate.
-                let certs = load_certs(https.ssl_certs)?;
-                // Load private key.
-                let key = load_private_key(https.ssl_pkey)?;
-                // Do not use client certificate authentication.
-                let mut cfg = rustls::ServerConfig::builder()
-                    .with_safe_defaults()
-                    .with_no_client_auth()
-                    .with_single_cert(certs, key)
-                    .map_err(|e| anyhow::anyhow!(format!("{}", e)))?;
-                // Configure ALPN to accept HTTP/2, HTTP/1.1 in that order.
-                cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-                Arc::new(cfg)
+            let interface: [u8; 4] = if config.all_interfaces {
+                [0, 0, 0, 0]
+            } else {
+                [127, 0, 0, 1]
             };
-            tokio::spawn(self.serve_tls(listen_addr, tls, config.cancel)).await?
-        } else {
-            tokio::spawn(self.serve( listen_addr, config.listen_fd, config.cancel)).await?
-        }
+            let listen_addr = SocketAddr::from((interface, config.port));
+            TcpListener::bind(listen_addr).await?
 
-        #[cfg(not(feature = "tls"))]
-        tokio::spawn(self.serve( listen_addr, config.listen_fd, config.cancel)).await?
+        };
+        let listen_addr = listener.local_addr()?;
+        tracing::info!("Listening on http://{}", listen_addr);
+        let mut backoff = 1;
+        let self_ = Arc::new(self);
+        loop {
+            match listener.accept().await {
+                Ok((stream, _)) => {
+                    tracing::trace!("new http connection");
+                    let connection = self_.clone();
+                    if let Some(cancel) = config.cancel.upgrade() {
+                        tokio::spawn(connection.serve(stream, cancel));
+                        backoff = 1;
+                    } else {
+                        tracing::debug!("weak cancel handler");
+                        backoff *= 2;
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(cause=?error, "http accept error");
+                    tokio::time::sleep(Duration::from_millis(backoff * 100)).await;
+                    if backoff > config.backoff {
+                        backoff = 1;
+                    } else {
+                        backoff *= 2;
+                    }
+                }
+            }
+        }
     }
 
     fn configure_engine(builder: &mut WasmEngineBuilder<Self::State>) -> Result<()> {
@@ -161,93 +162,33 @@ where
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
 {
-    async fn serve(self,  addr: SocketAddr, owned_fd: Option<OwnedFd>, cancel: Weak<ShutdownHandle>) -> Result<()> {
-        let listener = if let Some(fd) = owned_fd {
-            TcpListener::from(fd)
-        } else {
-            TcpListener::bind(addr)?
-        };
-        let listen_addr = listener.local_addr()?;
-        let service = Arc::new(self);
-        let make_service = make_service_fn(|_conn: &AddrStream| {
-            let service = service.clone();
+    async fn serve<S>(self: Arc<Self>, stream: S, _cancel: Arc<ShutdownHandle>)  where S: AsyncRead + AsyncWrite + Unpin{
+        let io = TokioIo::new(stream);
+
+        let service = service_fn(move |req| {
+            let self_ = self.clone();
+            let request_id = remote_traceparent(&req);
             async move {
-                let service = service_fn(move |req| {
-                        let self_ = service.clone();
-                        let request_id = remote_traceparent(&req);
-                        async move {
-                            self_
-                                .handle_request(req)
-                                .instrument(info_span!("http_handler", request_id))
-                                .await
-                        }
-                });
-                Ok::<_, Error>(service)
+                self_
+                    .handle_request(req)
+                    .instrument(tracing::info_span!("http_handler", request_id))
+                    .await
             }
         });
-        info!("Listening on http://{}", listen_addr);
-        let graceful_shutdown = async {
-            if let Some(cancel) = cancel.upgrade() {
-                let mut signal = ShutdownSignal::from(cancel.as_ref());
-                signal.on_shutdown().await
-            }
-        };
-
-
-        Server::from_tcp(listener)
-            .with_context(|| format!("Unable to listen on {}", listen_addr))?
-            .serve(make_service).with_graceful_shutdown( graceful_shutdown)
-            .await?;
-        Ok(())
-    }
-
-    #[cfg(feature = "tls")]
-    async fn serve_tls(self, listen_addr: std::net::SocketAddr, tls: Arc<rustls::ServerConfig>, cancel: Weak<ShutdownHandle>) -> Result<()> {
-        let service = Arc::new(self);
-        let make_service = make_service_fn(|_conn: &TlsStream| {
-            let service = service.clone();
-            async move {
-                let service = service_fn(move |req| {
-                        let service = service.clone();
-                        let request_id = remote_traceparent(&req);
-                        async move {
-                            service
-                                .handle_request(req)
-                                .instrument(tracing::error_span!("https_handler", request_id))
-                                .await
-                        }
-
-                });
-                Ok::<_, Error>(service)
-            }
-        });
-
-        let incoming = hyper::server::conn::AddrIncoming::bind(&listen_addr)
-            .with_context(|| format!("Unable to bind on {}", listen_addr))?;
-        info!("Listening on https://{}", listen_addr);
-
-        let graceful_shutdown = async {
-            if let Some(cancel) = cancel.upgrade() {
-                let mut signal = ShutdownSignal::from(cancel.as_ref());
-                signal.on_shutdown().await
-            }
-        };
-
-        Server::builder(TlsAcceptor::new(tls, incoming))
-            .serve(make_service).with_graceful_shutdown( graceful_shutdown)
-            .await?;
-        Ok(())
+        if let Err(error) = http1::Builder::new().serve_connection(io, service).await {
+            tracing::warn!(cause=?error, "Error serving connection");
+        }
     }
 
     /// handle HTTP request.
-    async fn handle_request(&self, mut request: Request<Body>) -> Result<Response<Body>> {
+    async fn handle_request(&self, mut request: Request<hyper::body::Incoming>) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
         #[cfg(feature = "stats")]
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .expect("current time")
             .as_secs();
 
-        debug!(?request, "process");
+        tracing::debug!(?request, "process");
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
@@ -257,13 +198,13 @@ where
             Err(error) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN);
-                info!(cause=?error, "App name not provided");
+                tracing::info!(cause=?error, "App name not provided");
                 return not_found();
             }
             Ok(app_name) => app_name,
         };
         // lookup for application config and binary_id
-        info!(
+        tracing::info!(
             "Processing request for application '{}' on URL: {}",
             app_name,
             request.uri()
@@ -272,7 +213,7 @@ where
             None => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN);
-                info!(
+                tracing::info!(
                     "Request for unknown application '{}' on URL: {}",
                     app_name,
                     request.uri()
@@ -280,7 +221,7 @@ where
                 return not_found();
             }
             Some(cfg) if cfg.status == Status::Draft || cfg.status == Status::Disabled => {
-                info!(
+                tracing::info!(
                     "Request for disabled application '{}' on URL: {}",
                     app_name,
                     request.uri()
@@ -288,7 +229,7 @@ where
                 return not_found();
             }
             Some(cfg) if cfg.status == Status::RateLimited => {
-                info!(
+                tracing::info!(
                     "Request for rate limited application '{}' on URL: {}",
                     app_name,
                     request.uri()
@@ -296,7 +237,7 @@ where
                 return too_many_requests();
             }
             Some(app_cfg) if app_cfg.status == Status::Suspended => {
-                info!(
+                tracing::info!(
                     "Request for suspended application '{}' on URL: {}",
                     app_name,
                     request.uri()
@@ -315,7 +256,7 @@ where
             Err(error) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN);
-                warn!(cause=?error,
+                tracing::warn!(cause=?error,
                     "failure on getting context"
                 );
                 return internal_fastedge_error("context error");
@@ -326,7 +267,7 @@ where
 
         let response = match executor.execute(request).await {
             Ok((mut response, time_elapsed, memory_used)) => {
-                info!(
+                tracing::info!(
                     "'{}' completed with status code: '{}' in {:.0?} using {} of WebAssembly heap",
                     app_name,
                     response.status(),
@@ -340,10 +281,10 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name,
+                        app_name: app_name.to_string(),
                         status_code: response.status().as_u16() as u32,
                         fail_reason: 0, // TODO: use AppResult
-                        billing_plan: cfg.plan.clone(),
+                        billing_plan: cfg.plan.to_string(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: memory_used.as_u64(),
                         .. Default::default()
@@ -362,12 +303,12 @@ where
                 let (status_code, fail_reason, msg) =
                     if let Some(exit) = root_cause.downcast_ref::<I32Exit>() {
                         if exit.0 == 0 {
-                            (StatusCode::OK.as_u16(), AppResult::SUCCESS, Body::empty())
+                            (StatusCode::OK.as_u16(), AppResult::SUCCESS, Empty::new().map_err(|never| match never {}).boxed())
                         } else {
                             (
                                 FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Body::from("fastedge: App failed"),
+                                Full::new(Bytes::from("fastedge: App failed")).map_err(|never| match never {}).boxed(),
                             )
                         }
                     } else if let Some(trap) = root_cause.downcast_ref::<Trap>() {
@@ -375,27 +316,27 @@ where
                             Trap::Interrupt => (
                                 FASTEDGE_EXECUTION_TIMEOUT,
                                 AppResult::TIMEOUT,
-                                Body::from("fastedge: Execution timeout"),
+                                Full::new(Bytes::from("fastedge: Execution timeout")).map_err(|never| match never {}).boxed(),
                             ),
                             Trap::UnreachableCodeReached => (
                                 FASTEDGE_OUT_OF_MEMORY,
                                 AppResult::OOM,
-                                Body::from("fastedge: Out of memory"),
+                                Full::new(Bytes::from("fastedge: Out of memory")).map_err(|never| match never {}).boxed(),
                             ),
                             _ => (
                                 FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Body::from("fastedge: App failed"),
+                                Full::new(Bytes::from("fastedge: App failed")).map_err(|never| match never {}).boxed(),
                             ),
                         }
                     } else {
                         (
                             FASTEDGE_INTERNAL_ERROR,
                             AppResult::OTHER,
-                            Body::from("fastedge: Execute error"),
+                            Full::new(Bytes::from("fastedge: Execute error")).map_err(|never| match never {}).boxed(),
                         )
                     };
-                info!(
+                tracing::info!(
                     "'{}' failed with status code: '{}' in {:.0?}",
                     app_name, status_code, time_elapsed
                 );
@@ -406,10 +347,10 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name,
+                        app_name: app_name.to_string(),
                         status_code: status_code as u32,
                         fail_reason: fail_reason as u32,
-                        billing_plan: cfg.plan.clone(),
+                        billing_plan: cfg.plan.to_string(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: 0,
                         .. Default::default()
@@ -417,7 +358,7 @@ where
                     self.context.write_stats(stat_row).await;
                 }
                 #[cfg(not(feature = "stats"))]
-                debug!(?fail_reason, "stats");
+                tracing::debug!(?fail_reason, "stats");
 
                 #[cfg(feature = "metrics")]
                 metrics::metrics(fail_reason);
@@ -437,7 +378,7 @@ where
 
 }
 
-fn remote_traceparent(req: &Request<Body>) -> String {
+fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
@@ -446,37 +387,37 @@ fn remote_traceparent(req: &Request<Body>) -> String {
 }
 
 /// Creates an HTTP 500 response.
-fn internal_fastedge_error(msg: &'static str) -> Result<Response<Body>> {
+fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
     Ok(Response::builder()
         .status(FASTEDGE_INTERNAL_ERROR)
-        .body(Body::from(format!("fastedge: {}", msg)))?)
+        .body(Full::new(Bytes::from(format!("fastedge: {}", msg))).map_err(|never| match never {}).boxed())?)
 }
 
 /// Creates an HTTP 404 response.
-fn not_found() -> Result<Response<Body>> {
+fn not_found() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body(Body::from("fastedge: Unknown app"))?)
+        .body(Full::new(Bytes::from("fastedge: Unknown app")).map_err(|never| match never {}).boxed())?)
 }
 
 /// Creates an HTTP 429 response.
-fn too_many_requests() -> Result<Response<Body>> {
+fn too_many_requests() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
     Ok(Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
-        .body(Body::empty())?)
+        .body(Empty::new().map_err(|never| match never {}).boxed())?)
 }
 
 /// Creates an HTTP 406 response.
-fn not_acceptable() -> Result<Response<Body>> {
+fn not_acceptable() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
     Ok(Response::builder()
         .status(StatusCode::NOT_ACCEPTABLE)
-        .body(Body::empty())?)
+        .body(Empty::new().map_err(|never| match never {}).boxed())?)
 }
 
 /// borrows the request and returns the apps name
 /// app name can be either as sub-domain in a format '<app_name>.<domain>' (from `Server_name` header)
 /// or '<domain>/<app_name>' (from URL)
-fn app_name_from_request(req: &Request<Body>) -> Result<SmolStr> {
+fn app_name_from_request(req: &Request<hyper::body::Incoming>) -> Result<SmolStr> {
     match req.headers().get("server_name") {
         None => {}
         Some(h) => {
@@ -522,11 +463,11 @@ fn app_res_headers(app_cfg: App) -> HeaderMap {
     for (name, val) in app_cfg.rsp_headers {
         if !val.is_empty() {
             let Ok(key) = name.parse::<HeaderName>() else {
-                debug!("Unable to parse header name: {}", name);
+                tracing::debug!("Unable to parse header name: {}", name);
                 continue;
             };
             let Ok(value) = val.parse::<HeaderValue>() else {
-                debug!("Unable to parse header value: {}", val);
+                tracing::debug!("Unable to parse header value: {}", val);
                 continue;
             };
             headers.insert(key, value);
@@ -538,15 +479,15 @@ fn app_res_headers(app_cfg: App) -> HeaderMap {
 fn app_req_headers(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     for (key, value) in geo {
-        trace!("append new request header {}={}", key, value);
+        tracing::trace!("append new request header {}={}", key, value);
         match key.parse::<HeaderName>() {
             Ok(name) => match value.parse::<HeaderValue>() {
                 Ok(value) => {
                     headers.insert(name, value);
                 }
-                Err(error) => warn!(cause=?error, "could not parse http value: {}", value),
+                Err(error) => tracing::warn!(cause=?error, "could not parse http value: {}", value),
             },
-            Err(error) => warn!(cause=?error, "could not parse http header: {}", key),
+            Err(error) => tracing::warn!(cause=?error, "could not parse http header: {}", key),
         }
     }
     headers

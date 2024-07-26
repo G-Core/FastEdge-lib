@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.4.2"
+version = "0.5.0"
 edition = "2021"
 publish = false
 authors = ["FastEdge Development Team"]
@@ -15,10 +15,10 @@ tracing = "0.1"
 hyper = { version = "1", features = ["full"] }
 http = "1.1.0"
 async-trait = "0.1"
-wasmtime = { version = "22.0" }
-wasmtime-wasi = { version = "22.0" }
-wasi-common = { version = "22.0" }
-wasmtime-wasi-nn = { version = "22.0" }
+wasmtime = { version = "20.0.2" }
+wasmtime-wasi = { version = "20.0.2" }
+wasi-common = { version = "20.0.2" }
+wasmtime-wasi-nn = { version = "20.0.2" }
 clap = { version = "4", features = ["derive"] }
 moka = { version = "0.12", features = ["sync"] }
 smol_str = { version = "0.2.1", features = ["serde"] }

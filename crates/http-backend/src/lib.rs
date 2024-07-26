@@ -7,13 +7,13 @@ use std::time::Duration;
 use anyhow::{anyhow, Error, Result};
 use async_trait::async_trait;
 use http::{uri::Scheme, HeaderMap, HeaderValue, Uri};
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
+use hyper::rt::ReadBufCursor;
 use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use pin_project::pin_project;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 use tower_service::Service;
 use tracing::{debug, trace, warn};
@@ -264,9 +264,9 @@ where
         let request = self.make_request(req)?;
         let res = self.client.request(request).await?;
 
-        let _status = res.status().as_u16();
-        let (parts, _body) = res.into_parts();
-        let _headers = if !parts.headers.is_empty() {
+        let status = res.status().as_u16();
+        let (parts, body) = res.into_parts();
+        let headers = if !parts.headers.is_empty() {
             Some(
                 parts
                     .headers
@@ -284,7 +284,7 @@ where
             None
         };
 
-        /*let body_bytes = body.into();
+        let body_bytes = body.collect().await?.to_bytes();
         let body = Some(body_bytes.to_vec());
 
         trace!(?status, ?headers, len = body_bytes.len(), "reply");
@@ -293,8 +293,7 @@ where
             status,
             headers,
             body,
-        }))*/
-        unimplemented!("send request")
+        }))
     }
 }
 
@@ -399,41 +398,34 @@ impl Service<Uri> for FastEdgeConnector {
     }
 }
 
-impl AsyncRead for Connection {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<std::io::Result<()>> {
-        let this = self.project();
-        this.inner.poll_read(cx, buf)
+impl hyper::rt::Read for Connection {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, mut buf: ReadBufCursor<'_>) -> Poll<std::result::Result<(), std::io::Error>> {
+        let n = unsafe {
+            let mut tbuf = tokio::io::ReadBuf::uninit(buf.as_mut());
+            match tokio::io::AsyncRead::poll_read(self.project().inner, cx, &mut tbuf) {
+                Poll::Ready(Ok(())) => tbuf.filled().len(),
+                other => return other,
+            }
+        };
+
+        unsafe {
+            buf.advance(n);
+        }
+        Poll::Ready(Ok(()))
     }
 }
 
-impl AsyncWrite for Connection {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<std::result::Result<usize, std::io::Error>> {
-        let this = self.project();
-        this.inner.poll_write(cx, buf)
+impl hyper::rt::Write for Connection {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::result::Result<usize, std::io::Error>> {
+        tokio::io::AsyncWrite::poll_write(self.project().inner, cx, buf)
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::result::Result<(), std::io::Error>> {
-        let this = self.project();
-        this.inner.poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::result::Result<(), std::io::Error>> {
+        tokio::io::AsyncWrite::poll_flush(self.project().inner, cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::result::Result<(), std::io::Error>> {
-        let this = self.project();
-        this.inner.poll_shutdown(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::result::Result<(), std::io::Error>> {
+        tokio::io::AsyncWrite::poll_shutdown(self.project().inner, cx)
     }
 }
 
