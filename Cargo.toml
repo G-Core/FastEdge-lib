@@ -51,6 +51,7 @@ tokio-util = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 smol_str = { workspace = true }
+async-trait = {workspace = true}
 clap = { version = "4.5", features = ["derive"] }
 pretty_env_logger = "0.5"
 runtime = { path = "crates/runtime", default-features = false }
@@ -58,4 +59,7 @@ http-service = { path = "crates/http-service" }
 http-backend = { path = "crates/http-backend" }
 hyper-tls = "0.6"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+http-body-util = "0.1"
 shellflip = {workspace = true}
+bytesize = "1.3.0"
+

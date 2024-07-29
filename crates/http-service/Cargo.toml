@@ -27,7 +27,7 @@ reactor = { path = "../reactor" }
 runtime = { path = "../runtime" }
 http-backend = { path = "../http-backend" }
 nanoid = "0.4"
-bytesize = "1.2.0"
+bytesize = "1.3.0"
 futures = "0.3.30"
 once_cell = "1.19"
 prometheus = { version = "0.13.3", features = ["process"], optional = true }
@@ -40,6 +40,7 @@ hyper-util = "0.1"
 http-body-util = "0.1"
 shellflip = {workspace = true}
 bytes = "1.6"
+uri = "0.4"
 
 [dev-dependencies]
 claims = "0.7"

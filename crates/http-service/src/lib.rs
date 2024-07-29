@@ -2,40 +2,39 @@ use std::net::SocketAddr;
 use std::os::fd::OwnedFd;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use anyhow::{bail,  Result};
+
+pub use crate::executor::ExecutorFactory;
+use crate::executor::HttpExecutor;
+use anyhow::{bail, Result};
 use bytes::Bytes;
 use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
 use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
-use http_body_util::{BodyExt, Empty, Full};
 use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Empty, Full};
+use hyper::body::Body;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::client::legacy::connect::Connect;
 use hyper_util::rt::TokioIo;
-use shellflip::{ShutdownHandle};
+use runtime::app::Status;
+use runtime::service::Service;
+#[cfg(feature = "metrics")]
+use runtime::util::metrics;
+#[cfg(feature = "stats")]
+use runtime::util::stats::StatRow;
+use runtime::util::stats::StatsWriter;
+use runtime::{App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder};
+use shellflip::ShutdownHandle;
 use smol_str::SmolStr;
+use state::HttpState;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tracing::Instrument;
 use wasi_common::I32Exit;
 use wasmtime::Trap;
-use wasmtime_wasi_nn::WasiNnCtx;
-
-use http_backend::Backend;
-use runtime::app::Status;
-use runtime::service::Service;
-use runtime::{App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder};
-#[cfg(feature = "metrics")]
-use runtime::util::metrics;
-
-use crate::executor::{ HttpExecutor};
-#[cfg(feature = "stats")]
-use runtime::util::stats::StatRow;
-use runtime::util::stats::StatsWriter;
 
 pub mod executor;
-
-pub use crate::executor::ExecutorFactory;
+pub mod state;
 
 pub(crate) static TRACEPARENT: &str = "traceparent";
 
@@ -58,15 +57,9 @@ pub struct HttpService<T: ContextT> {
     context: T,
 }
 
-pub struct HttpState<C> {
-    wasi_nn: WasiNnCtx,
-    http_backend: Backend<C>,
-}
-
 pub trait ContextHeaders {
     fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
-
 
 impl<T> Service for HttpService<T>
 where
@@ -103,7 +96,6 @@ where
             };
             let listen_addr = SocketAddr::from((interface, config.port));
             TcpListener::bind(listen_addr).await?
-
         };
         let listen_addr = listener.local_addr()?;
         tracing::info!("Listening on http://{}", listen_addr);
@@ -136,15 +128,16 @@ where
     }
 
     fn configure_engine(builder: &mut WasmEngineBuilder<Self::State>) -> Result<()> {
-        wasmtime_wasi::add_to_linker_async(builder.component_linker_ref())?;
-        wasmtime_wasi_nn::wit::ML::add_to_linker(builder.component_linker_ref(), |data| {
-            &mut data.as_mut().wasi_nn
-        })?;
+        let linker = builder.component_linker_ref();
+        wasmtime_wasi_nn::wit::ML::add_to_linker(linker, |data| &mut data.as_mut().wasi_nn)?;
+        // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
+        linker.allow_shadowing(true);
+        wasmtime_wasi_http::proxy::add_to_linker(linker)?;
+        wasmtime_wasi::add_to_linker_async(linker)?;
 
-        reactor::gcore::fastedge::http_client::add_to_linker(
-            builder.component_linker_ref(),
-            |data| &mut data.as_mut().http_backend,
-        )?;
+        reactor::gcore::fastedge::http_client::add_to_linker(linker, |data| {
+            &mut data.as_mut().http_backend
+        })?;
         Ok(())
     }
 }
@@ -162,7 +155,10 @@ where
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
 {
-    async fn serve<S>(self: Arc<Self>, stream: S, _cancel: Arc<ShutdownHandle>)  where S: AsyncRead + AsyncWrite + Unpin{
+    async fn serve<S>(self: Arc<Self>, stream: S, _cancel: Arc<ShutdownHandle>)
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
         let io = TokioIo::new(stream);
 
         let service = service_fn(move |req| {
@@ -181,14 +177,20 @@ where
     }
 
     /// handle HTTP request.
-    async fn handle_request(&self, mut request: Request<hyper::body::Incoming>) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+    async fn handle_request<B>(
+        &self,
+        mut request: Request<B>,
+    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         #[cfg(feature = "stats")]
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .expect("current time")
             .as_secs();
 
-        tracing::debug!(?request, "process");
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
@@ -287,7 +289,7 @@ where
                         billing_plan: cfg.plan.to_string(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: memory_used.as_u64(),
-                        .. Default::default()
+                        ..Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
@@ -298,17 +300,24 @@ where
                 response
             }
             Err(error) => {
+                tracing::warn!(cause=?error, "execute");
                 let root_cause = error.root_cause();
                 let time_elapsed = std::time::Instant::now().duration_since(start_);
                 let (status_code, fail_reason, msg) =
                     if let Some(exit) = root_cause.downcast_ref::<I32Exit>() {
                         if exit.0 == 0 {
-                            (StatusCode::OK.as_u16(), AppResult::SUCCESS, Empty::new().map_err(|never| match never {}).boxed())
+                            (
+                                StatusCode::OK.as_u16(),
+                                AppResult::SUCCESS,
+                                Empty::new().map_err(|never| match never {}).boxed(),
+                            )
                         } else {
                             (
                                 FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Full::new(Bytes::from("fastedge: App failed")).map_err(|never| match never {}).boxed(),
+                                Full::new(Bytes::from("fastedge: App failed"))
+                                    .map_err(|never| match never {})
+                                    .boxed(),
                             )
                         }
                     } else if let Some(trap) = root_cause.downcast_ref::<Trap>() {
@@ -316,29 +325,39 @@ where
                             Trap::Interrupt => (
                                 FASTEDGE_EXECUTION_TIMEOUT,
                                 AppResult::TIMEOUT,
-                                Full::new(Bytes::from("fastedge: Execution timeout")).map_err(|never| match never {}).boxed(),
+                                Full::new(Bytes::from("fastedge: Execution timeout"))
+                                    .map_err(|never| match never {})
+                                    .boxed(),
                             ),
                             Trap::UnreachableCodeReached => (
                                 FASTEDGE_OUT_OF_MEMORY,
                                 AppResult::OOM,
-                                Full::new(Bytes::from("fastedge: Out of memory")).map_err(|never| match never {}).boxed(),
+                                Full::new(Bytes::from("fastedge: Out of memory"))
+                                    .map_err(|never| match never {})
+                                    .boxed(),
                             ),
                             _ => (
                                 FASTEDGE_EXECUTION_PANIC,
                                 AppResult::OTHER,
-                                Full::new(Bytes::from("fastedge: App failed")).map_err(|never| match never {}).boxed(),
+                                Full::new(Bytes::from("fastedge: App failed"))
+                                    .map_err(|never| match never {})
+                                    .boxed(),
                             ),
                         }
                     } else {
                         (
                             FASTEDGE_INTERNAL_ERROR,
                             AppResult::OTHER,
-                            Full::new(Bytes::from("fastedge: Execute error")).map_err(|never| match never {}).boxed(),
+                            Full::new(Bytes::from("fastedge: Execute error"))
+                                .map_err(|never| match never {})
+                                .boxed(),
                         )
                     };
                 tracing::info!(
                     "'{}' failed with status code: '{}' in {:.0?}",
-                    app_name, status_code, time_elapsed
+                    app_name,
+                    status_code,
+                    time_elapsed
                 );
 
                 #[cfg(feature = "stats")]
@@ -353,7 +372,7 @@ where
                         billing_plan: cfg.plan.to_string(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: 0,
-                        .. Default::default()
+                        ..Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
@@ -374,8 +393,6 @@ where
         };
         Ok(response)
     }
-
-
 }
 
 fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
@@ -388,16 +405,20 @@ fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
 
 /// Creates an HTTP 500 response.
 fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
-    Ok(Response::builder()
-        .status(FASTEDGE_INTERNAL_ERROR)
-        .body(Full::new(Bytes::from(format!("fastedge: {}", msg))).map_err(|never| match never {}).boxed())?)
+    Ok(Response::builder().status(FASTEDGE_INTERNAL_ERROR).body(
+        Full::new(Bytes::from(format!("fastedge: {}", msg)))
+            .map_err(|never| match never {})
+            .boxed(),
+    )?)
 }
 
 /// Creates an HTTP 404 response.
 fn not_found() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
-    Ok(Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(Full::new(Bytes::from("fastedge: Unknown app")).map_err(|never| match never {}).boxed())?)
+    Ok(Response::builder().status(StatusCode::NOT_FOUND).body(
+        Full::new(Bytes::from("fastedge: Unknown app"))
+            .map_err(|never| match never {})
+            .boxed(),
+    )?)
 }
 
 /// Creates an HTTP 429 response.
@@ -417,7 +438,7 @@ fn not_acceptable() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
 /// borrows the request and returns the apps name
 /// app name can be either as sub-domain in a format '<app_name>.<domain>' (from `Server_name` header)
 /// or '<domain>/<app_name>' (from URL)
-fn app_name_from_request(req: &Request<hyper::body::Incoming>) -> Result<SmolStr> {
+fn app_name_from_request(req: &Request<impl Body>) -> Result<SmolStr> {
     match req.headers().get("server_name") {
         None => {}
         Some(h) => {
@@ -495,19 +516,20 @@ fn app_req_headers(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use crate::stats::StatRow;
     use claims::*;
+    use smol_str::ToSmolStr;
+    use std::collections::HashMap;
     use test_case::test_case;
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
 
-    use crate::executor::HttpExecutorImpl;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
     use runtime::{componentize_if_necessary, PreCompiledLoader, WasiVersion, WasmConfig};
+
+    use crate::executor::HttpExecutorImpl;
+    use runtime::util::stats::StatRow;
 
     use super::*;
 
@@ -517,7 +539,11 @@ mod tests {
             .method("GET")
             .uri(uri)
             .header("server_name", server_name)
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let app_name = assert_ok!(app_name_from_request(&req));
         assert_eq!(expected, app_name);
@@ -525,7 +551,7 @@ mod tests {
 
     #[derive(Clone)]
     struct TestContext {
-        geo: HashMap<Cow<'static, str>, Cow<'static, str>>,
+        geo: HashMap<SmolStr, SmolStr>,
         app: Option<App>,
         engine: Engine,
     }
@@ -580,10 +606,14 @@ mod tests {
         async fn lookup_by_name(&self, _name: &str) -> Option<App> {
             self.app.clone()
         }
+
+        async fn lookup_by_id(&self, _id: u64) -> Option<(SmolStr, App)> {
+            todo!()
+        }
     }
 
     impl ContextHeaders for TestContext {
-        fn append_headers(&self) -> impl Iterator<Item = (Cow<str>, Cow<str>)> {
+        fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)> {
             self.geo.iter().map(|(k, v)| (k.to_owned(), v.to_owned()))
         }
     }
@@ -597,11 +627,7 @@ mod tests {
             cfg: &App,
             engine: &WasmEngine<HttpState<FastEdgeConnector>>,
         ) -> Result<Self::Executor> {
-            let env = cfg
-                .env
-                .iter()
-                .map(|(k, v)| (k, v))
-                .collect::<Vec<(&String, &String)>>();
+            let env = cfg.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
             let logger = self.make_logger(name.clone(), cfg);
 
@@ -631,13 +657,13 @@ mod tests {
             mem_limit: 1400000,
             env: Default::default(),
             rsp_headers: HashMap::from([
-                ("RES_HEADER_01".to_string(), "01".to_string()),
-                ("RES_HEADER_02".to_string(), "02".to_string()),
+                ("RES_HEADER_01".to_smolstr(), "01".to_smolstr()),
+                ("RES_HEADER_02".to_smolstr(), "02".to_smolstr()),
             ]),
             log: Default::default(),
             app_id: 12345,
             client_id: 23456,
-            plan: "test_plan".to_string(),
+            plan: "test_plan".to_smolstr(),
             status,
             debug_until: None,
         })
@@ -649,15 +675,15 @@ mod tests {
         engine
     }
 
-    fn load_geo_info() -> HashMap<Cow<'static, str>, Cow<'static, str>> {
+    fn load_geo_info() -> HashMap<SmolStr, SmolStr> {
         let mut ret = HashMap::new();
-        ret.insert(Cow::Borrowed("PoP-Lat"), Cow::Borrowed("47.00420"));
-        ret.insert(Cow::Borrowed("PoP-Long"), Cow::Borrowed("28.85740"));
-        ret.insert(Cow::Borrowed("PoP-Reg"), Cow::Borrowed("CU"));
-        ret.insert(Cow::Borrowed("PoP-City"), Cow::Borrowed("Bucharest"));
-        ret.insert(Cow::Borrowed("PoP-Continent"), Cow::Borrowed("EU"));
-        ret.insert(Cow::Borrowed("PoP-Country-Code"), Cow::Borrowed("RO"));
-        ret.insert(Cow::Borrowed("PoP-Country-Name"), Cow::Borrowed("Romania"));
+        ret.insert("PoP-Lat".to_smolstr(), "47.00420".to_smolstr());
+        ret.insert("PoP-Long".to_smolstr(), "28.85740".to_smolstr());
+        ret.insert("PoP-Reg".to_smolstr(), "CU".to_smolstr());
+        ret.insert("PoP-City".to_smolstr(), "Bucharest".to_smolstr());
+        ret.insert("PoP-Continent".to_smolstr(), "EU".to_smolstr());
+        ret.insert("PoP-Country-Code".to_smolstr(), "RO".to_smolstr());
+        ret.insert("PoP-Country-Name".to_smolstr(), "Romania".to_smolstr());
         ret
     }
 
@@ -668,7 +694,11 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "success.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -699,18 +729,22 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "timeout.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let app = Some(App {
             binary_id: 1,
             max_duration: 0,
             mem_limit: 10000000,
             env: Default::default(),
-            rsp_headers: HashMap::from([("RES_HEADER_03".to_string(), "03".to_string())]),
+            rsp_headers: HashMap::from([("RES_HEADER_03".to_smolstr(), "03".to_smolstr())]),
             log: Default::default(),
             app_id: 12345,
             client_id: 23456,
-            plan: "test_plan".to_string(),
+            plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: None,
         });
@@ -743,18 +777,22 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/?size=200000")
             .header("server_name", "insufficient_memory.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let app = Some(App {
             binary_id: 100,
             max_duration: 10,
             mem_limit: 1500000,
             env: Default::default(),
-            rsp_headers: HashMap::from([("RES_HEADER_03".to_string(), "03".to_string())]),
+            rsp_headers: HashMap::from([("RES_HEADER_03".to_smolstr(), "03".to_smolstr())]),
             log: Default::default(),
             app_id: 12345,
             client_id: 23456,
-            plan: "test_plan".to_string(),
+            plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: None,
         });
@@ -787,7 +825,11 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -809,7 +851,11 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -831,7 +877,11 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -853,7 +903,11 @@ mod tests {
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
-            .body(hyper::Body::from("")));
+            .body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            ));
 
         let context = TestContext {
             geo: load_geo_info(),

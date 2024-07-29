@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc};
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer};
+use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Formatter;
-use smol_str::SmolStr;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct App {
@@ -90,6 +90,7 @@ mod tests {
     use super::*;
     use claims::{assert_err, assert_ok};
     use serde_json::json;
+    use smol_str::ToSmolStr;
 
     #[test]
     fn test_status_deserialize() {
@@ -123,11 +124,11 @@ mod tests {
             max_duration: 10,
             mem_limit: 1000000,
             env: Default::default(),
-            rsp_headers: HashMap::from([("RES_HEADER_03".to_string(), "03".to_string())]),
+            rsp_headers: HashMap::from([("RES_HEADER_03".to_smolstr(), "03".to_smolstr())]),
             log: Default::default(),
             app_id: 12345,
             client_id: 23456,
-            plan: "test_plan".to_string(),
+            plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: Some(assert_ok!("2037-01-01T12:00:27.87Z".parse())),
         };

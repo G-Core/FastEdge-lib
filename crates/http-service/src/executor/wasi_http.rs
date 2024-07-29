@@ -1,21 +1,23 @@
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bytesize::ByteSize;
-use http::Response;
-use http_body_util::{BodyExt, Full};
+use http::uri::{Authority, Scheme};
+use http::{header, HeaderMap, Response, Uri};
 use http_body_util::combinators::BoxBody;
-use hyper::body::{Bytes, Incoming};
-use tracing::{error, info};
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Body, Bytes};
+use smol_str::ToSmolStr;
+use tracing::error;
 use wasmtime_wasi_http::WasiHttpView;
 
 use http_backend::Backend;
-use runtime::InstancePre;
 use runtime::store::StoreBuilder;
+use runtime::InstancePre;
 
 use crate::executor::HttpExecutor;
-use crate::HttpState;
+use crate::state::HttpState;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -30,10 +32,14 @@ impl<C> HttpExecutor for WasiHttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
 {
-    async fn execute(
+    async fn execute<B>(
         &self,
-        req: hyper::Request<Incoming>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)> {
+        req: hyper::Request<B>,
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         let start_ = Instant::now();
         let response = self.execute_impl(req).await;
         let elapsed = Instant::now().duration_since(start_);
@@ -45,7 +51,11 @@ impl<C> WasiHttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
 {
-    pub fn new(instance_pre: InstancePre<HttpState<C>>, store_builder: StoreBuilder, backend: Backend<C>) -> Self {
+    pub fn new(
+        instance_pre: InstancePre<HttpState<C>>,
+        store_builder: StoreBuilder,
+        backend: Backend<C>,
+    ) -> Self {
         Self {
             instance_pre,
             store_builder,
@@ -53,14 +63,31 @@ where
         }
     }
 
-    async fn execute_impl(
+    async fn execute_impl<B>(
         &self,
-        req: hyper::Request<Incoming>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)> {
+        req: hyper::Request<B>,
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)>
+    where
+        B: BodyExt,
+    {
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
 
-        let body = body.collect().await.expect("incoming body").to_bytes();
+        // fix relative uri to absolute
+        if parts.uri.scheme().is_none() {
+            let mut uparts = parts.uri.clone().into_parts();
+            uparts.scheme = Some(Scheme::HTTP);
+            if uparts.authority.is_none() {
+                uparts.authority = Some(Authority::from_static("localhost"))
+            }
+            parts.uri = Uri::from_parts(uparts)?;
+        }
+
+        let body = body
+            .collect()
+            .await
+            .map_err(|_| anyhow!("body read error"))?
+            .to_bytes();
         let body = Full::new(body).map_err(|never| match never {});
         let body = body.boxed();
 
@@ -68,43 +95,61 @@ where
         let wasi_nn = self
             .store_builder
             .make_wasi_nn_ctx()
-            .expect("make_wasi_nn_ctx");
+            .context("make_wasi_nn_ctx")?;
         let mut http_backend = self.backend.to_owned();
 
         http_backend
-            .propagate_headers(&parts.headers)
+            .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;
 
-        let state = HttpState { wasi_nn, http_backend };
+        let propagate_header_names = http_backend.propagate_header_names();
+        let mut propagate_headers: HeaderMap = parts
+            .headers
+            .iter()
+            .filter_map(|(k, v)| {
+                if propagate_header_names.contains(&k.to_smolstr()) {
+                    Some((k.to_owned(), v.to_owned()))
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        let mut store = store_builder.build(state).expect("store build");
+        let server_name = parts
+            .headers
+            .get("server_name")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(anyhow!("header Server_name is missing"))?;
+        propagate_headers.insert(header::HOST, be_base_domain(server_name).parse()?);
+
+        let backend_uri = http_backend.uri();
+        let state = HttpState {
+            wasi_nn,
+            http_backend,
+            uri: backend_uri,
+            propagate_headers,
+            propagate_header_names,
+        };
+
+        let mut store = store_builder.build(state).context("store build")?;
         let instance_pre = self.instance_pre.clone();
 
         let task = tokio::task::spawn(async move {
-            let builder = hyper::Request::builder()
-                .uri("http://localhost/path")
-                .method(parts.method)
-                .extension(parts.extensions)
-                .version(parts.version);
-            let request = builder.body(body)?;
-            //let request = hyper::Request::from_parts(parts, body);
-            info!(?request, "###");
-            info!( "### uri = {:?}", request.uri().scheme());
-            info!( "### authority = {:?}", request.uri().authority());
+            let request = hyper::Request::from_parts(parts, body);
             let req = store
                 .data_mut()
                 .new_incoming_request(request)
-                .expect("new incoming request");
+                .context("new incoming request")?;
             let out = store
                 .data_mut()
                 .new_response_outparam(sender)
-                .expect("new response outparam");
+                .context("new response outparam")?;
 
             let (proxy, _inst) = wasmtime_wasi_http::proxy::Proxy::instantiate_pre(
                 &mut store,
                 instance_pre.as_ref(),
             )
-                .await?;
+            .await?;
 
             if let Err(e) = proxy
                 .wasi_http_incoming_handler()
@@ -121,20 +166,13 @@ where
         match receiver.await {
             Ok(Ok(resp)) => {
                 let (parts, body) = resp.into_parts();
-                let body = body.collect().await.expect("incoming body").to_bytes();
+                let body = body.collect().await.context("response body")?.to_bytes();
                 let body = Full::new(body).map_err(|never| match never {}).boxed();
-                let used = task.await.expect("task await").expect("byte size");
+                let used = task.await.context("task await")?.context("byte size")?;
                 Ok((Response::from_parts(parts, body), used))
             }
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {
-                // An error in the receiver (`RecvError`) only indicates that the
-                // task exited before a response was sent (i.e., the sender was
-                // dropped); it does not describe the underlying cause of failure.
-                // Instead we retrieve and propagate the error from inside the task
-                // which should more clearly tell the user what went wrong. Note
-                // that we assume the task has already exited at this point so the
-                // `await` should resolve immediately.
                 let e = match task.await {
                     Ok(r) => {
                         r.expect_err("if the receiver has an error, the task must have failed")
@@ -145,4 +183,15 @@ where
             }
         }
     }
+}
+
+fn be_base_domain(server_name: &str) -> String {
+    let base_domain = match server_name.find('.') {
+        None => server_name,
+        Some(i) => {
+            let (_, domain) = server_name.split_at(i + 1);
+            domain
+        }
+    };
+    format!("be.{}", base_domain)
 }

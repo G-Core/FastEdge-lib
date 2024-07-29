@@ -8,17 +8,16 @@ use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::{HeaderMap, HeaderValue, Method, Response};
 use http_backend::Backend;
-use http_body_util::{BodyExt, Full};
 use http_body_util::combinators::BoxBody;
-use hyper::body::{Bytes, Incoming};
-use smol_str::SmolStr;
-use wasmtime_wasi::StdoutStream;
-
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Body, Bytes};
 use reactor::gcore::fastedge;
 use runtime::store::StoreBuilder;
 use runtime::{App, InstancePre, WasmEngine};
+use smol_str::SmolStr;
+use wasmtime_wasi::StdoutStream;
 
-use crate::HttpState;
+use crate::state::HttpState;
 
 pub use wasi_http::WasiHttpExecutorImpl;
 
@@ -28,10 +27,13 @@ pub(crate) static X_CDN_REQUESTOR: &str = "x-cdn-requestor";
 
 #[async_trait]
 pub trait HttpExecutor {
-    async fn execute(
+    async fn execute<B>(
         &self,
-        req: hyper::Request<Incoming>,
-    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>;
+        req: hyper::Request<B>,
+    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send;
 }
 
 pub trait ExecutorFactory<C> {
@@ -57,10 +59,14 @@ impl<C> HttpExecutor for HttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
 {
-    async fn execute(
+    async fn execute<B>(
         &self,
-        req: hyper::Request<Incoming>,
-    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)> {
+        req: hyper::Request<B>,
+    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         let start_ = Instant::now();
         let response = self.execute_impl(req).await;
         let elapsed = Instant::now().duration_since(start_);
@@ -84,10 +90,14 @@ where
         }
     }
 
-    async fn execute_impl(
+    async fn execute_impl<B>(
         &self,
-        req: hyper::Request<Incoming>,
-    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)> {
+        req: hyper::Request<B>,
+    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         let (parts, body) = req.into_parts();
         let method = to_fastedge_http_method(&parts.method)?;
 
@@ -102,7 +112,11 @@ where
             })
             .collect::<Vec<(String, String)>>();
 
-        let body = body.collect().await?.to_bytes();
+        let body = body
+            .collect()
+            .await
+            .map_err(|_| anyhow!("body read error"))?
+            .to_bytes();
         let body = if body.is_empty() {
             None
         } else {
@@ -123,10 +137,18 @@ where
         let mut http_backend = self.backend.to_owned();
 
         http_backend
-            .propagate_headers(&parts.headers)
+            .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;
 
-        let state = HttpState { wasi_nn, http_backend };
+        let propagate_header_names = http_backend.propagate_header_names();
+        let backend_uri = http_backend.uri();
+        let state = HttpState {
+            wasi_nn,
+            http_backend,
+            uri: backend_uri,
+            propagate_headers: parts.headers,
+            propagate_header_names,
+        };
 
         let mut store = store_builder.build(state)?;
 
@@ -159,7 +181,10 @@ where
         };
         let used = ByteSize::b(store.memory_used() as u64);
 
-        let body = resp.body.map(|b| Full::from(b).map_err(|never| match never {}).boxed()).unwrap_or_default();
+        let body = resp
+            .body
+            .map(|b| Full::from(b).map_err(|never| match never {}).boxed())
+            .unwrap_or_default();
         builder.body(body).map(|r| (r, used)).map_err(Error::msg)
     }
 
@@ -190,5 +215,3 @@ fn to_fastedge_http_method(method: &Method) -> Result<fastedge::http::Method> {
         method => bail!("unsupported method: {}", method),
     })
 }
-
-
