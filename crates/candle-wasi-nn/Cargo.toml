@@ -5,6 +5,10 @@ edition.workspace = true
 publish.workspace = true
 authors.workspace = true
 
+[features]
+metal = []
+cuda = []
+
 [dependencies]
 wasmtime-wasi-nn = { workspace = true }
 tracing = { workspace = true }

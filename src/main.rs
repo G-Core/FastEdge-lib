@@ -1,23 +1,34 @@
+use async_trait::async_trait;
+use bytesize::ByteSize;
 use clap::{Args, Parser, Subcommand};
+use http::{Request, Response};
 use http_backend::{Backend, BackendStrategy};
-use http_service::executor::{ExecutorFactory, HttpExecutorImpl};
-use http_service::{ContextHeaders, HttpConfig, HttpService, HttpState};
-use hyper::client::HttpConnector;
+use http_body_util::combinators::BoxBody;
+use http_body_util::BodyExt;
+use http_service::executor::{
+    ExecutorFactory, HttpExecutor, HttpExecutorImpl, WasiHttpExecutorImpl,
+};
+use http_service::state::HttpState;
+use http_service::{ContextHeaders, HttpConfig, HttpService};
+use hyper::body::{Body, Bytes};
+use hyper::Error;
 use hyper_tls::HttpsConnector;
+use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::Status;
 use runtime::logger::{Console, Logger};
 use runtime::service::{Service, ServiceBuilder};
+use runtime::util::stats::{StatRow, StatsWriter};
 use runtime::{
     componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
     WasiVersion, WasmConfig, WasmEngine,
 };
+use shellflip::ShutdownCoordinator;
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use shellflip::ShutdownCoordinator;
+use std::time::Duration;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
-use runtime::util::stats::{StatRow, StatsWriter};
 
 #[derive(Debug, Parser)]
 #[command(name = "cli")]
@@ -46,7 +57,7 @@ struct HttpRunArgs {
     envs: Option<Vec<(SmolStr, SmolStr)>>,
     /// Add header from original request
     #[arg(long = "propagate-header", num_args = 0..)]
-    propagate_headers: Option<Vec<String>>,
+    propagate_headers: Vec<SmolStr>,
     /// Execution context headers added to request
     #[arg(long, value_parser = parse_key_value::< String, String >)]
     headers: Option<Vec<(SmolStr, SmolStr)>>,
@@ -59,6 +70,9 @@ struct HttpRunArgs {
     /// Limit execution duration
     #[arg(long)]
     max_duration: Option<u64>,
+    /// Enable WASI HTTP interface
+    #[arg(long)]
+    wasi_http: Option<bool>,
 }
 
 /// Test tool execution context
@@ -68,6 +82,7 @@ struct CliContext {
     app: Option<App>,
     backend: Backend<HttpsConnector<HttpConnector>>,
     wasm_bytes: Vec<u8>,
+    wasi_http: bool,
 }
 
 #[tokio::main]
@@ -85,9 +100,9 @@ async fn main() -> anyhow::Result<()> {
             let backend_connector = HttpsConnector::new();
             let mut builder =
                 Backend::<HttpsConnector<HttpConnector>>::builder(BackendStrategy::Direct);
-            if let Some(propagate_headers) = run.propagate_headers {
-                builder.propagate_headers_names(propagate_headers);
-            }
+
+            builder.propagate_headers_names(run.propagate_headers);
+
             let backend = builder.build(backend_connector);
             let cli_app = App {
                 binary_id: 0,
@@ -103,11 +118,8 @@ async fn main() -> anyhow::Result<()> {
                 debug_until: None,
             };
 
-            let mut headers: HashMap<SmolStr, SmolStr> = run
-                .headers
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
+            let mut headers: HashMap<SmolStr, SmolStr> =
+                run.headers.unwrap_or_default().into_iter().collect();
 
             append_headers(run.geo, &mut headers);
 
@@ -117,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
                 app: Some(cli_app),
                 backend,
                 wasm_bytes,
+                wasi_http: run.wasi_http.unwrap_or_default(),
             };
 
             let http: HttpService<CliContext> = ServiceBuilder::new(context).build()?;
@@ -125,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
                 port: run.port,
                 cancel: shutdown_coordinator.handle_weak(),
                 listen_fd: None,
+                backoff: 64,
             });
             tokio::select! {
                 _ = http => {
@@ -147,23 +161,17 @@ fn append_headers(geo: bool, headers: &mut HashMap<SmolStr, SmolStr>) {
         .keys()
         .any(|k| "server_name".eq_ignore_ascii_case(k))
     {
-        headers.insert(
-            "Server_name".to_smolstr(),
-            "test.localhost".to_smolstr(),
-        );
+        headers.insert("server_name".to_smolstr(), "test.localhost".to_smolstr());
     }
 
     if geo {
-        headers.insert("PoP-Lat".to_smolstr(),"49.6113".to_smolstr());
-        headers.insert("PoP-Long".to_smolstr(), "6.1294".to_smolstr());
-        headers.insert("PoP-Reg".to_smolstr(), "LU".to_smolstr());
-        headers.insert("PoP-City".to_smolstr(), "Luxembourg".to_smolstr());
-        headers.insert("PoP-Continent".to_smolstr(), "EU".to_smolstr());
-        headers.insert("PoP-Country-Code".to_smolstr(), "AU".to_smolstr());
-        headers.insert(
-            "PoP-Country-Name".to_smolstr(),
-            "Luxembourg".to_smolstr(),
-        );
+        headers.insert("pop-lat".to_smolstr(), "49.6113".to_smolstr());
+        headers.insert("pop-long".to_smolstr(), "6.1294".to_smolstr());
+        headers.insert("pop-reg".to_smolstr(), "lu".to_smolstr());
+        headers.insert("pop-city".to_smolstr(), "luxembourg".to_smolstr());
+        headers.insert("pop-continent".to_smolstr(), "eu".to_smolstr());
+        headers.insert("pop-country-code".to_smolstr(), "au".to_smolstr());
+        headers.insert("pop-country-name".to_smolstr(), "luxembourg".to_smolstr());
     }
 }
 
@@ -197,8 +205,30 @@ impl ContextT for CliContext {
     }
 }
 
+enum CliExecutor {
+    Http(HttpExecutorImpl<HttpsConnector<HttpConnector>>),
+    Wasi(WasiHttpExecutorImpl<HttpsConnector<HttpConnector>>),
+}
+
+#[async_trait]
+impl HttpExecutor for CliExecutor {
+    async fn execute<B>(
+        &self,
+        req: Request<B>,
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, Error>>, Duration, ByteSize)>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
+        match self {
+            CliExecutor::Http(ref executor) => executor.execute(req).await,
+            CliExecutor::Wasi(ref executor) => executor.execute(req).await,
+        }
+    }
+}
+
 impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
-    type Executor = HttpExecutorImpl<HttpsConnector<HttpConnector>>;
+    type Executor = CliExecutor;
 
     fn get_executor(
         &self,
@@ -206,10 +236,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
         app: &App,
         engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
     ) -> anyhow::Result<Self::Executor> {
-        let env = app
-            .env
-            .iter()
-            .collect::<Vec<(&SmolStr, &SmolStr)>>();
+        let env = app.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
         let logger = self.make_logger(name, app);
 
@@ -223,11 +250,19 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
 
         let component = self.loader().load_component(app.binary_id)?;
         let instance_pre = engine.component_instantiate_pre(&component)?;
-        Ok(HttpExecutorImpl::new(
-            instance_pre,
-            store_builder,
-            self.backend(),
-        ))
+        if self.wasi_http {
+            Ok(CliExecutor::Wasi(WasiHttpExecutorImpl::new(
+                instance_pre,
+                store_builder,
+                self.backend(),
+            )))
+        } else {
+            Ok(CliExecutor::Http(HttpExecutorImpl::new(
+                instance_pre,
+                store_builder,
+                self.backend(),
+            )))
+        }
     }
 }
 

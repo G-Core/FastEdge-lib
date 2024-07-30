@@ -1,13 +1,14 @@
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::Arc;
+use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 
 use crate::registry::CachedGraphRegistry;
 use crate::store::StoreBuilder;
 use http_backend::Backend;
 use limiter::ProxyLimiter;
 use std::time::Duration;
-use wasmtime::component::{Component, ResourceTable};
+use wasmtime::component::{Component, Resource, ResourceTable};
 use wasmtime::{
     Engine, InstanceAllocationStrategy, Module, PoolingAllocationConfig, ProfilingStrategy,
     WasmBacktraceDetails,
@@ -24,14 +25,19 @@ pub mod stub;
 pub mod util;
 
 use crate::logger::Logger;
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 pub use app::App;
+use http::request::Parts;
+use http::Request;
 use smol_str::SmolStr;
 use std::borrow::Cow;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
-use tracing::trace;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
+use wasmtime_wasi_http::bindings::http::types::ErrorCode;
+use wasmtime_wasi_http::types::{
+    default_send_request, HostFutureIncomingResponse, OutgoingRequest,
+};
 
 const PREVIEW1_ADAPTER: &[u8] = include_bytes!("adapters/wasi_snapshot_preview1.reactor.wasm");
 
@@ -74,6 +80,11 @@ pub struct Data<T> {
     store_limits: ProxyLimiter,
     table: ResourceTable,
     pub logger: Option<Logger>,
+    http: WasiHttpCtx,
+}
+
+pub trait BackendRequest {
+    fn backend_request(&mut self, head: Parts) -> anyhow::Result<(String, Parts)>;
 }
 
 impl<T> AsRef<T> for Data<T> {
@@ -86,6 +97,41 @@ impl<T> AsMut<T> for Data<T> {
     fn as_mut(&mut self) -> &mut T {
         &mut self.inner
     }
+}
+
+impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
+    fn ctx(&mut self) -> &mut WasiHttpCtx {
+        &mut self.http
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
+
+    fn send_request(
+        &mut self,
+        request: OutgoingRequest,
+    ) -> HttpResult<Resource<HostFutureIncomingResponse>>
+    where
+        Self: Sized,
+    {
+        let default_timeout = Duration::from_millis(3000);
+        let (head, body) = request.request.into_parts();
+        let (authority, head) = self.inner.backend_request(head).map_err(|e| {
+            tracing::warn!(cause=?e, "backend request");
+            ErrorCode::InternalError(Some(e.to_string()))
+        })?;
+        let outgoing_request = OutgoingRequest {
+            use_tls: false,
+            authority,
+            request: Request::from_parts(head, body),
+            connect_timeout: default_timeout,
+            first_byte_timeout: default_timeout,
+            between_bytes_timeout: default_timeout,
+        };
+        default_send_request(self, outgoing_request)
+    }
+
 }
 
 impl<T> Data<T> {
@@ -326,18 +372,22 @@ pub trait ExecutorCache {
 
 pub trait Router: Send + Sync {
     fn lookup_by_name(&self, name: &str) -> impl std::future::Future<Output = Option<App>> + Send;
-    fn lookup_by_id(&self, id: u64) -> impl std::future::Future<Output = Option<(SmolStr, App)>> + Send;
+    fn lookup_by_id(
+        &self,
+        id: u64,
+    ) -> impl std::future::Future<Output = Option<(SmolStr, App)>> + Send;
 }
 
 pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
     for payload in Parser::new(0).parse_all(buffer) {
-        match payload? {
-            Payload::Version { encoding, .. } => {
+        match payload {
+            Ok(Payload::Version { encoding, .. }) => {
                 return match encoding {
                     Encoding::Component => Ok(Cow::Borrowed(buffer)),
                     Encoding::Module => componentize(buffer).map(Cow::Owned),
                 };
             }
+            Err(error) => bail!("parse error: {}", error),
             _ => (),
         }
     }
@@ -345,7 +395,7 @@ pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
 }
 
 fn componentize(module: &[u8]) -> anyhow::Result<Vec<u8>> {
-    trace!("componentize module");
+    tracing::trace!("componentize module");
     ComponentEncoder::default()
         .validate(true)
         .module(&module)?

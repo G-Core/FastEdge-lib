@@ -31,8 +31,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Release Build
-        run: cargo build --release --all-features
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Unit Tests
+        run: cargo test --all --exclude http-backend
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features

@@ -14,9 +14,13 @@ anyhow = {workspace = true}
 tracing = {workspace = true}
 hyper = { workspace = true }
 tokio = { workspace = true }
+hyper-util = { version = "0.1.3", features = ["client", "client-legacy", "http1", "tokio"] }
+http-body-util = "0.1.1"
 pin-project = "1.1.3"
 log = "0.4.20"
 url = "2.5.0"
+tower-service = "0.3.2"
+smol_str = {workspace = true}
 
 [dev-dependencies]
 claims = "0.7"

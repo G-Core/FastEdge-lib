@@ -9,14 +9,15 @@ pub struct StatRow {
     pub app_id: u64,
     pub client_id: u64,
     pub timestamp: u32,
-    pub app_name: smol_str::SmolStr,
+    pub app_name: String,
     pub status_code: u32,
     pub fail_reason: u32,
-    pub billing_plan: smol_str::SmolStr,
+    pub billing_plan: String,
     pub time_elapsed: u64,
     pub memory_used: u64,
-    pub pop: smol_str::SmolStr,
-    pub region: smol_str::SmolStr
+    pub pop: String,
+    pub region: String,
+    pub request_id: String,
 }
 
 #[cfg(not(feature = "stats"))]
