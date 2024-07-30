@@ -166,7 +166,7 @@ where
             let request_id = remote_traceparent(&req);
             async move {
                 self_
-                    .handle_request(req)
+                    .handle_request(&request_id, req)
                     .instrument(tracing::info_span!("http_handler", request_id))
                     .await
             }
@@ -179,6 +179,7 @@ where
     /// handle HTTP request.
     async fn handle_request<B>(
         &self,
+        request_id: &str,
         mut request: Request<B>,
     ) -> Result<Response<BoxBody<Bytes, hyper::Error>>>
     where
@@ -289,6 +290,7 @@ where
                         billing_plan: cfg.plan.to_string(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: memory_used.as_u64(),
+                        request_id: request_id.to_string(),
                         ..Default::default()
                     };
                     self.context.write_stats(stat_row).await;
@@ -372,12 +374,13 @@ where
                         billing_plan: cfg.plan.to_string(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: 0,
+                        request_id: request_id.to_string(),
                         ..Default::default()
                     };
                     self.context.write_stats(stat_row).await;
                 }
                 #[cfg(not(feature = "stats"))]
-                tracing::debug!(?fail_reason, "stats");
+                tracing::debug!(?fail_reason, request_id, "stats");
 
                 #[cfg(feature = "metrics")]
                 metrics::metrics(fail_reason);
@@ -399,7 +402,7 @@ fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_owned())
+        .map(|s| s.to_string())
         .unwrap_or(nanoid::nanoid!())
 }
 
@@ -709,7 +712,7 @@ mod tests {
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("1",req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -758,7 +761,7 @@ mod tests {
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("2", req).await);
         assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
@@ -806,7 +809,7 @@ mod tests {
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("3",req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
@@ -839,7 +842,7 @@ mod tests {
 
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("4", req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -865,7 +868,7 @@ mod tests {
 
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("5", req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -891,7 +894,7 @@ mod tests {
 
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("6", req).await);
         assert_eq!(StatusCode::TOO_MANY_REQUESTS, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -917,7 +920,7 @@ mod tests {
 
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request(req).await);
+        let res = assert_ok!(http_service.handle_request("7", req).await);
         assert_eq!(StatusCode::NOT_ACCEPTABLE, res.status());
         assert_eq!(0, res.headers().len());
     }

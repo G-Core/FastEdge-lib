@@ -207,7 +207,7 @@ impl Default for WasmConfig {
         pooling_allocation_config.max_memories_per_module(1);
 
         // allow for up to 128MiB of linear memory. Wasm pages are 64k
-        pooling_allocation_config.memory_pages(256 * (MB as u64) / (64 * 1024));
+        pooling_allocation_config.memory_pages(128 * (MB as u64) / (64 * 1024));
 
         // Core wasm programs have 1 table
         pooling_allocation_config.max_tables_per_module(1);

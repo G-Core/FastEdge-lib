@@ -17,6 +17,7 @@ pub struct StatRow {
     pub memory_used: u64,
     pub pop: String,
     pub region: String,
+    pub request_id: String,
 }
 
 #[cfg(not(feature = "stats"))]
