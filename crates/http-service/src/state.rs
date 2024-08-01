@@ -22,11 +22,14 @@ impl<C> BackendRequest for HttpState<C> {
         let original_url = head.uri;
         tracing::trace!("send request original url: {:?}", original_url);
         let original_host = original_url.authority().map(|a| {
-            if let Some(port) = a.port() {
-                format!("{}:{}", a.host(), port)
-            } else {
-                a.host().to_string()
+            match (original_url.scheme_str(), a.port().map(|p| p.as_u16())) {
+                (None,  Some(80))
+                | (Some("http"),  Some(80))
+                | (Some("https"),  Some(443))
+                | (_, None) => a.host().to_string(),
+                (_,  Some(port)) => format!("{}:{}", a.host(), port),
             }
+
         });
         let original_host = original_host
             .or_else(|| {
