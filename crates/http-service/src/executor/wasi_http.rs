@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bytesize::ByteSize;
-use http::uri::{Authority, Scheme};
+use http::uri::Scheme;
 use http::{header, HeaderMap, Response, Uri};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
@@ -73,12 +73,18 @@ where
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let (mut parts, body) = req.into_parts();
 
+        let server_name = parts
+            .headers
+            .get("server_name")
+            .and_then(|v| v.to_str().ok())
+            .ok_or(anyhow!("header Server_name is missing"))?;
+
         // fix relative uri to absolute
         if parts.uri.scheme().is_none() {
             let mut uparts = parts.uri.clone().into_parts();
             uparts.scheme = Some(Scheme::HTTP);
             if uparts.authority.is_none() {
-                uparts.authority = Some(Authority::from_static("localhost"))
+                uparts.authority = server_name.parse().ok()
             }
             parts.uri = Uri::from_parts(uparts)?;
         }
@@ -115,11 +121,7 @@ where
             })
             .collect();
 
-        let server_name = parts
-            .headers
-            .get("server_name")
-            .and_then(|v| v.to_str().ok())
-            .ok_or(anyhow!("header Server_name is missing"))?;
+
         propagate_headers.insert(header::HOST, be_base_domain(server_name).parse()?);
 
         let backend_uri = http_backend.uri();
