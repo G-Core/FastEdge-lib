@@ -181,7 +181,7 @@ where
         &self,
         request_id: &str,
         mut request: Request<B>,
-    ) -> Result<Response<BoxBody<Bytes, hyper::Error>>>
+    ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -407,7 +407,7 @@ fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
 }
 
 /// Creates an HTTP 500 response.
-fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
     Ok(Response::builder().status(FASTEDGE_INTERNAL_ERROR).body(
         Full::new(Bytes::from(format!("fastedge: {}", msg)))
             .map_err(|never| match never {})
@@ -416,7 +416,7 @@ fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, 
 }
 
 /// Creates an HTTP 404 response.
-fn not_found() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+fn not_found() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
     Ok(Response::builder().status(StatusCode::NOT_FOUND).body(
         Full::new(Bytes::from("fastedge: Unknown app"))
             .map_err(|never| match never {})
@@ -425,14 +425,14 @@ fn not_found() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
 }
 
 /// Creates an HTTP 429 response.
-fn too_many_requests() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+fn too_many_requests() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
     Ok(Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
         .body(Empty::new().map_err(|never| match never {}).boxed())?)
 }
 
 /// Creates an HTTP 406 response.
-fn not_acceptable() -> Result<Response<BoxBody<Bytes, hyper::Error>>> {
+fn not_acceptable() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
     Ok(Response::builder()
         .status(StatusCode::NOT_ACCEPTABLE)
         .body(Empty::new().map_err(|never| match never {}).boxed())?)

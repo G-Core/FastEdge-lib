@@ -11,7 +11,6 @@ use http_service::executor::{
 use http_service::state::HttpState;
 use http_service::{ContextHeaders, HttpConfig, HttpService};
 use hyper::body::{Body, Bytes};
-use hyper::Error;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::Status;
@@ -215,7 +214,7 @@ impl HttpExecutor for CliExecutor {
     async fn execute<B>(
         &self,
         req: Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, Error>>, Duration, ByteSize)>
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
