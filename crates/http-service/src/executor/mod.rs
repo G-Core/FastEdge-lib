@@ -3,7 +3,7 @@ mod wasi_http;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context, Error, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use http::{HeaderMap, HeaderValue, Method, Response};
@@ -30,7 +30,7 @@ pub trait HttpExecutor {
     async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>
+    ) -> Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send;
@@ -62,7 +62,7 @@ where
     async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>
+    ) -> Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -93,7 +93,7 @@ where
     async fn execute_impl<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)>
+    ) -> Result<(Response<BoxBody<Bytes, anyhow::Error>>, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -185,7 +185,7 @@ where
             .body
             .map(|b| Full::from(b).map_err(|never| match never {}).boxed())
             .unwrap_or_default();
-        builder.body(body).map(|r| (r, used)).map_err(Error::msg)
+        builder.body(body).map(|r| (r, used)).map_err(anyhow::Error::msg)
     }
 
     fn get_properties(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {

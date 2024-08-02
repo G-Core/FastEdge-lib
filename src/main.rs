@@ -11,7 +11,6 @@ use http_service::executor::{
 use http_service::state::HttpState;
 use http_service::{ContextHeaders, HttpConfig, HttpService};
 use hyper::body::{Body, Bytes};
-use hyper::Error;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::Status;
@@ -53,13 +52,13 @@ struct HttpRunArgs {
     #[arg(short, long)]
     wasm: PathBuf,
     /// Environment variable list
-    #[arg(long, value_parser = parse_key_value::< String, String >)]
+    #[arg(long, value_parser = parse_key_value::<SmolStr, SmolStr >)]
     envs: Option<Vec<(SmolStr, SmolStr)>>,
     /// Add header from original request
     #[arg(long = "propagate-header", num_args = 0..)]
     propagate_headers: Vec<SmolStr>,
     /// Execution context headers added to request
-    #[arg(long, value_parser = parse_key_value::< String, String >)]
+    #[arg(long, value_parser = parse_key_value::< SmolStr, SmolStr >)]
     headers: Option<Vec<(SmolStr, SmolStr)>>,
     /// Append sample Geo PoP headers
     #[arg(long, default_value = "false")]
@@ -215,7 +214,7 @@ impl HttpExecutor for CliExecutor {
     async fn execute<B>(
         &self,
         req: Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, Error>>, Duration, ByteSize)>
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,

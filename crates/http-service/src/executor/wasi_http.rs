@@ -10,7 +10,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Body, Bytes};
 use smol_str::ToSmolStr;
 use tracing::error;
-use wasmtime_wasi_http::WasiHttpView;
+use wasmtime_wasi_http::{ WasiHttpView};
 
 use http_backend::Backend;
 use runtime::store::StoreBuilder;
@@ -35,7 +35,7 @@ where
     async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, hyper::Error>>, Duration, ByteSize)>
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -66,7 +66,7 @@ where
     async fn execute_impl<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, hyper::Error>>, ByteSize)>
+    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, ByteSize)>
     where
         B: BodyExt,
     {
@@ -168,8 +168,7 @@ where
         match receiver.await {
             Ok(Ok(resp)) => {
                 let (parts, body) = resp.into_parts();
-                let body = body.collect().await.context("response body")?.to_bytes();
-                let body = Full::new(body).map_err(|never| match never {}).boxed();
+                let body  = body.map_err(anyhow::Error::msg).boxed();
                 let used = task.await.context("task await")?.context("byte size")?;
                 Ok((Response::from_parts(parts, body), used))
             }
