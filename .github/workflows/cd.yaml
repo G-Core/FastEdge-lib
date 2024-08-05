@@ -12,33 +12,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Clone repo
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+  build-and-upload:
+    name: Build and upload
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          target: wasm32-wasi
+    runs-on: ${{ matrix.os }}
 
-      - name: Run Release PR
-        uses: MarcoIeni/release-plz-action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build:
-    needs: release
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
 
-    runs-on: ${{ matrix.os }}
     steps:
       - name: Clone repo
         uses: actions/checkout@v4
@@ -57,8 +39,8 @@ jobs:
       - name: Release build
         run: cargo build --release
 
-      - name: Upload target binary
-        uses: actions/upload-artifact@v4
+      - name: Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: cli-${{ matrix.os }}
-          path: target/release/cli
+          files: |
+            ${{ env.ASSET }}
