@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           # Replace with the name of your binary
-          binary_name="fastedge-cli"
+          binary_name="cli"
 
           dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"
