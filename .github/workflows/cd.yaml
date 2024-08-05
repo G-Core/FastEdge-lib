@@ -24,12 +24,12 @@ jobs:
         run: |
           cargo install cargo-get
           echo "TAG=v`cargo get  package.version`" >> $GITHUB_ENV
-          echo "tag name $TAG"
+          echo "tag name ${{ env.TAG }}"
 
       - name: Create tag
         uses: rickstaa/action-create-tag@v1
         with:
-          tag: $TAG
+          tag: ${{ env.TAG }}
           tag_exists_error: true
           message: "Latest release"
 
