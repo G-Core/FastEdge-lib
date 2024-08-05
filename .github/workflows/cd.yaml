@@ -20,15 +20,22 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Get package tag
+        run: |
+          cargo install cargo-get
+          echo "TAG=v`cargo get  package.version`" >> $GITHUB_ENV
+          echo "tag name $TAG"
+
       - name: Create tag
         uses: rickstaa/action-create-tag@v1
         with:
-          tag: "latest"
+          tag: $TAG
           tag_exists_error: true
           message: "Latest release"
 
   build-and-upload:
     name: Build and upload
+    needs: create-tag
 
     runs-on: ${{ matrix.os }}
 
