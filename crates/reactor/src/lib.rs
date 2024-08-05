@@ -2,7 +2,7 @@
 
 wasmtime::component::bindgen!({
     path: "../../sdk/wit",
-    world: "http-reactor",
+    world: "reactor",
     async: true,
     tracing: false,
 });

@@ -138,6 +138,10 @@ where
         reactor::gcore::fastedge::http_client::add_to_linker(linker, |data| {
             &mut data.as_mut().http_backend
         })?;
+
+        reactor::gcore::fastedge::key_value::add_to_linker(linker, |data| {
+            &mut data.as_mut().store
+        })?;
         Ok(())
     }
 }

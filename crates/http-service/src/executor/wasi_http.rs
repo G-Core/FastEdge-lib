@@ -13,6 +13,7 @@ use tracing::error;
 use wasmtime_wasi_http::{ WasiHttpView};
 
 use http_backend::Backend;
+use key_value::KeyValueResource;
 use runtime::store::StoreBuilder;
 use runtime::InstancePre;
 
@@ -131,6 +132,7 @@ where
             uri: backend_uri,
             propagate_headers,
             propagate_header_names,
+            store: KeyValueResource {},
         };
 
         let mut store = store_builder.build(state).context("store build")?;

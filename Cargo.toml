@@ -24,6 +24,8 @@ moka = { version = "0.12", features = ["sync"] }
 smol_str = { version = "0.2.1", features = ["serde"] }
 anyhow = "1.0"
 shellflip = "2.1.0"
+redis = { version = "0.26.1", features = ["aio", "tokio-comp"] }
+
 
 [workspace.lints.rust]
 unused_extern_crates = 'warn'

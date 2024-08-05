@@ -1,5 +1,6 @@
 mod wasi_http;
 
+use key_value::KeyValueResource;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -148,6 +149,7 @@ where
             uri: backend_uri,
             propagate_headers: parts.headers,
             propagate_header_names,
+            store: KeyValueResource {},
         };
 
         let mut store = store_builder.build(state)?;
