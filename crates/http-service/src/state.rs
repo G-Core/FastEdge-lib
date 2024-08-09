@@ -15,7 +15,7 @@ pub struct HttpState<C> {
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<SmolStr>,
-    pub(super) store: KeyValueResource<redis::aio::MultiplexedConnection>
+    pub(super) store: KeyValueResource
 }
 
 impl<C> BackendRequest for HttpState<C> {

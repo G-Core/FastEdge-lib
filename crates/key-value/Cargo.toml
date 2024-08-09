@@ -12,5 +12,4 @@ anyhow = {workspace = true}
 tracing = {workspace = true}
 async-trait = {workspace = true}
 wasmtime = {workspace = true}
-redis = { workspace = true, features = ["aio"] }
-slab = "0.4"
+redis = { workspace = true, features = ["aio", "connection-manager"] }

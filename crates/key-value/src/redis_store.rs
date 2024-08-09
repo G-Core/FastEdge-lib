@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::Store;
+use crate::{Store, StoreFactory};
 use anyhow::Error;
 use async_trait::async_trait;
 use redis::aio::ConnectionLike;
@@ -8,6 +8,8 @@ use redis::aio::ConnectionLike;
 pub struct RedisKeyValue {
     client: redis::Client,
 }
+
+pub struct RedisStoreFactory;
 
 #[async_trait]
 impl Store for RedisKeyValue {
@@ -20,3 +22,12 @@ impl Store for RedisKeyValue {
             .map_err(Error::msg)
     }
 }
+
+impl StoreFactory for RedisStoreFactory {
+    fn create(&self, name: &str) -> Arc<dyn Store> {
+        /*let store = RedisKeyValue{};
+        Arc::new(store)*/
+        todo!()
+    }
+}
+

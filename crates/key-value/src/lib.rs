@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use redis::aio::ConnectionLike;
-use slab::Slab;
+use redis::AsyncCommands;
 use wasmtime::component::Resource;
 
 use reactor::gcore::fastedge::key_value;
 
-mod redis_store;
+//mod redis_store;
 
 type ResourceStore = Resource<key_value::Store>;
 
@@ -21,56 +20,58 @@ pub trait StoreFactory {
 }
 
 #[derive(Clone)]
-pub struct KeyValueResource<F> {
-    stores: Slab<Arc<dyn Store>>,
-    factory: F,
+pub struct KeyValueResource {
+    /*stores: Slab<Arc<dyn Store>>,
+    factory: F,*/
+    redis_connection: redis::aio::ConnectionManager
 }
 
 #[async_trait]
-impl<F: StoreFactory + Send + Sync> key_value::Host for KeyValueResource<F> {}
+impl key_value::Host for KeyValueResource {}
 
 #[async_trait]
-impl<F: StoreFactory + Send + Sync> key_value::HostStore for KeyValueResource<F> {
+impl key_value::HostStore for KeyValueResource {
     async fn open(
         &mut self,
-        name: String,
+        _name: String,
     ) -> wasmtime::Result<Result<Resource<key_value::Store>, key_value::Error>> {
         Ok(async {
-            let id = self.stores.insert(self.factory.create(&name));
-            Ok(Resource::new_own(id as u32))
+            //let id = self.stores.insert(self.factory.create(&name));
+            Ok(Resource::new_own(1))
         }
         .await)
+
     }
 
     async fn get(
         &mut self,
-        store: Resource<key_value::Store>,
+        _store: Resource<key_value::Store>,
         key: String,
     ) -> wasmtime::Result<Result<Option<Vec<u8>>, key_value::Error>> {
         Ok(async {
-            let store = self
+            /*let store = self
                 .stores
                 .get(store.rep() as usize)
                 .ok_or(key_value::Error::Other("unknown resource".to_string()))?;
            store
                 .get(&key)
                 .await
-                .map_err(|e| key_value::Error::Other(e.to_string()))
+                .map_err(|e| key_value::Error::Other(e.to_string()))*/
+            self.redis_connection.get(&key).await.map_err(|e| key_value::Error::Other(e.to_string()))
         }
         .await)
     }
 
-    fn drop(&mut self, store: ResourceStore) -> wasmtime::Result<()> {
-        let _ = self.stores.remove(store.rep() as usize);
+    fn drop(&mut self, _store: ResourceStore) -> wasmtime::Result<()> {
+        /*let _ = self.stores.remove(store.rep() as usize);*/
         Ok(())
     }
 }
 
-impl<F: StoreFactory> KeyValueResource<F> {
-    fn new(factory: F) -> Self {
+impl KeyValueResource {
+   pub fn new(redis_connection: redis::aio::ConnectionManager) -> Self {
         Self {
-            stores: Slab::new(),
-            factory,
+            redis_connection,
         }
     }
 }

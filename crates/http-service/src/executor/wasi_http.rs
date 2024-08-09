@@ -26,6 +26,7 @@ pub struct WasiHttpExecutorImpl<C> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
+    redis_connection: redis::aio::ConnectionManager
 }
 
 #[async_trait]
@@ -56,11 +57,13 @@ where
         instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
+        redis_connection:redis::aio::ConnectionManager
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
+            redis_connection,
         }
     }
 
@@ -132,7 +135,7 @@ where
             uri: backend_uri,
             propagate_headers,
             propagate_header_names,
-            store: KeyValueResource {},
+            store: KeyValueResource::new(self.redis_connection.clone()),
         };
 
         let mut store = store_builder.build(state).context("store build")?;
