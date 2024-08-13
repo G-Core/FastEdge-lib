@@ -16,7 +16,7 @@ use runtime::store::StoreBuilder;
 use runtime::{App, InstancePre, WasmEngine};
 use smol_str::SmolStr;
 use wasmtime_wasi::StdoutStream;
-
+use dictionary::Dictionary;
 use crate::state::HttpState;
 
 pub use wasi_http::WasiHttpExecutorImpl;
@@ -52,6 +52,7 @@ pub struct HttpExecutorImpl<C> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
+    dictionary: Dictionary
 }
 
 #[async_trait]
@@ -82,11 +83,13 @@ where
         instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
+        dictionary: Dictionary,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
+            dictionary,
         }
     }
 
@@ -148,6 +151,7 @@ where
             uri: backend_uri,
             propagate_headers: parts.headers,
             propagate_header_names,
+            dictionary: self.dictionary.clone(),
         };
 
         let mut store = store_builder.build(state)?;

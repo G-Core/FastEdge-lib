@@ -11,7 +11,7 @@ use hyper::body::{Body, Bytes};
 use smol_str::ToSmolStr;
 use tracing::error;
 use wasmtime_wasi_http::{ WasiHttpView};
-
+use dictionary::Dictionary;
 use http_backend::Backend;
 use runtime::store::StoreBuilder;
 use runtime::InstancePre;
@@ -25,6 +25,7 @@ pub struct WasiHttpExecutorImpl<C> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
+    dictionary: Dictionary
 }
 
 #[async_trait]
@@ -55,11 +56,13 @@ where
         instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
+        dictionary: Dictionary,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
+            dictionary,
         }
     }
 
@@ -131,6 +134,7 @@ where
             uri: backend_uri,
             propagate_headers,
             propagate_header_names,
+            dictionary: self.dictionary.clone(),
         };
 
         let mut store = store_builder.build(state).context("store build")?;
