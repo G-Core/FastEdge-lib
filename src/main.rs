@@ -245,7 +245,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
 
         let logger = self.make_logger(name, app);
 
-        let version = WasiVersion::Preview1;
+        let version = WasiVersion::Preview2;
         let store_builder = engine
             .store_builder(version)
             .set_env(&env)
