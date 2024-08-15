@@ -367,7 +367,8 @@ pub trait ContextT {
 }
 
 pub trait ExecutorCache {
-    fn invalidate(&self, name: &str);
+    fn remove(&self, name: &str);
+    fn remove_all(&self);
 }
 
 pub trait Router: Send + Sync {
@@ -395,7 +396,6 @@ pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
 }
 
 fn componentize(module: &[u8]) -> anyhow::Result<Vec<u8>> {
-    tracing::trace!("componentize module");
     ComponentEncoder::default()
         .validate(true)
         .module(&module)?
