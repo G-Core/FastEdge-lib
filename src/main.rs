@@ -266,7 +266,11 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
 }
 
 impl ExecutorCache for CliContext {
-    fn invalidate(&self, _name: &str) {
+    fn remove(&self, _name: &str) {
+        unreachable!()
+    }
+
+    fn remove_all(&self) {
         unreachable!()
     }
 }
