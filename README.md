@@ -7,9 +7,13 @@ FastEdge CLI and common runtime libraries
 Run following commands:
 
 ```
-$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-$ source "$HOME/.cargo/env"
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
 ```
+
+## Pull submodules
+
+Run `git submodule update --init --recursive -f`
 
 ## Building
 
