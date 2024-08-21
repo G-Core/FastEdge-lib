@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use bytesize::ByteSize;
+use bytesize::{ByteSize, MB};
 use clap::{Args, Parser, Subcommand};
 use http::{Request, Response};
 use http_backend::{Backend, BackendStrategy};
@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
+use dictionary::Dictionary;
 
 #[derive(Debug, Parser)]
 #[command(name = "cli")]
@@ -106,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
             let cli_app = App {
                 binary_id: 0,
                 max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
-                mem_limit: run.mem_limit.unwrap_or(u32::MAX as usize),
+                mem_limit: run.mem_limit.unwrap_or((128 * MB) as usize),
                 env: run.envs.unwrap_or_default().into_iter().collect(),
                 rsp_headers: Default::default(),
                 log: Default::default(),
@@ -235,6 +236,11 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
         app: &App,
         engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
     ) -> anyhow::Result<Self::Executor> {
+        let mut dictionary = Dictionary::new();
+        for (k, v) in app.env.iter() {
+            dictionary.insert(k.to_string(), v.to_string());
+        }
+
         let env = app.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
         let logger = self.make_logger(name, app);
@@ -254,12 +260,14 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
                 instance_pre,
                 store_builder,
                 self.backend(),
+                dictionary
             )))
         } else {
             Ok(CliExecutor::Http(HttpExecutorImpl::new(
                 instance_pre,
                 store_builder,
                 self.backend(),
+                dictionary
             )))
         }
     }

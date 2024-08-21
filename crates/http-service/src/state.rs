@@ -7,6 +7,7 @@ use runtime::BackendRequest;
 use smol_str::{SmolStr, ToSmolStr};
 use tracing::instrument;
 use wasmtime_wasi_nn::WasiNnCtx;
+use dictionary::Dictionary;
 
 pub struct HttpState<C> {
     pub(super) wasi_nn: WasiNnCtx,
@@ -14,6 +15,7 @@ pub struct HttpState<C> {
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<SmolStr>,
+    pub(super) dictionary: Dictionary
 }
 
 impl<C> BackendRequest for HttpState<C> {

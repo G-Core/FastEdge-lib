@@ -131,13 +131,18 @@ where
         let linker = builder.component_linker_ref();
         wasmtime_wasi_nn::wit::ML::add_to_linker(linker, |data| &mut data.as_mut().wasi_nn)?;
         // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
+        wasmtime_wasi::add_to_linker_async(linker)?;
         linker.allow_shadowing(true);
         wasmtime_wasi_http::proxy::add_to_linker(linker)?;
-        wasmtime_wasi::add_to_linker_async(linker)?;
 
         reactor::gcore::fastedge::http_client::add_to_linker(linker, |data| {
             &mut data.as_mut().http_backend
         })?;
+
+        reactor::gcore::fastedge::dictionary::add_to_linker(linker, |data| {
+            &mut data.as_mut().dictionary
+        })?;
+
         Ok(())
     }
 }
@@ -525,7 +530,7 @@ mod tests {
     use test_case::test_case;
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
-
+    use dictionary::Dictionary;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
@@ -630,6 +635,11 @@ mod tests {
             cfg: &App,
             engine: &WasmEngine<HttpState<FastEdgeConnector>>,
         ) -> Result<Self::Executor> {
+            let mut dictionary = Dictionary::new();
+            for (k, v) in cfg.env.iter() {
+                dictionary.insert(k.to_string(), v.to_string());
+            }
+
             let env = cfg.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
             let logger = self.make_logger(name.clone(), cfg);
@@ -649,6 +659,7 @@ mod tests {
                 instance_pre,
                 store_builder,
                 self.backend(),
+                dictionary,
             ))
         }
     }
