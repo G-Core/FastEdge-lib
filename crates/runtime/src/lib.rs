@@ -222,12 +222,6 @@ impl Default for WasmConfig {
         // instantiation of a module previously instantiated within the pool.
         pooling_allocation_config.max_unused_warm_slots(10);
 
-        // Use a large pool, but one smaller than the default of 1000 to avoid runnign out of virtual
-        // memory space if multiple engines are spun up in a single process. We'll likely want to move
-        // to the on-demand allocator eventually for most purposes; see
-        // https://github.com/fastly/Viceroy/issues/255
-        pooling_allocation_config.total_core_instances(100);
-
         inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
             pooling_allocation_config,
         ));
