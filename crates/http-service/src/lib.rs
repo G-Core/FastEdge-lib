@@ -468,7 +468,7 @@ fn app_name_from_request(req: &Request<impl Body>) -> Result<SmolStr> {
         bail!("app name not found in URL".to_string());
     }
 
-    return match path.find('/') {
+    match path.find('/') {
         None => Ok(SmolStr::from(path)),
         Some(i) => {
             let (prefix, _) = path.split_at(i);
@@ -478,7 +478,7 @@ fn app_name_from_request(req: &Request<impl Body>) -> Result<SmolStr> {
                 Ok(SmolStr::from(prefix))
             }
         }
-    };
+    }
 }
 
 fn app_res_headers(app_cfg: App) -> HeaderMap {
