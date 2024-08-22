@@ -15,7 +15,7 @@ use dictionary::Dictionary;
 use http_backend::Backend;
 use runtime::store::StoreBuilder;
 use runtime::InstancePre;
-
+use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
 
@@ -100,7 +100,8 @@ where
         let body = Full::new(body).map_err(|never| match never {});
         let body = body.boxed();
 
-        let store_builder = self.store_builder.to_owned(); //.with_properties(properties);
+        let properties = executor::get_properties(&parts.headers);
+        let store_builder = self.store_builder.to_owned().with_properties(properties);
         let wasi_nn = self
             .store_builder
             .make_wasi_nn_ctx()

@@ -133,7 +133,7 @@ where
             body,
         };
 
-        let properties = Self::get_properties(&parts.headers);
+        let properties = get_properties(&parts.headers);
 
         let store_builder = self.store_builder.to_owned().with_properties(properties);
         let wasi_nn = self.store_builder.make_wasi_nn_ctx()?;
@@ -192,19 +192,7 @@ where
         builder.body(body).map(|r| (r, used)).map_err(anyhow::Error::msg)
     }
 
-    fn get_properties(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
-        let mut properties = HashMap::new();
-        if let Some(client_ip) = headers.get(X_REAL_IP).and_then(|v| v.to_str().ok()) {
-            properties.insert("client_ip".to_owned(), client_ip.to_owned());
-        }
-        if let Some(traceparent) = headers.get(TRACEPARENT).and_then(|v| v.to_str().ok()) {
-            properties.insert("traceparent".to_owned(), traceparent.to_owned());
-        }
-        if let Some(requestor) = headers.get(X_CDN_REQUESTOR).and_then(|v| v.to_str().ok()) {
-            properties.insert("requestor".to_owned(), requestor.to_owned());
-        }
-        properties
-    }
+
 }
 
 fn to_fastedge_http_method(method: &Method) -> Result<fastedge::http::Method> {
@@ -218,4 +206,19 @@ fn to_fastedge_http_method(method: &Method) -> Result<fastedge::http::Method> {
         &Method::OPTIONS => fastedge::http::Method::Options,
         method => bail!("unsupported method: {}", method),
     })
+}
+
+
+pub(crate) fn get_properties(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
+    let mut properties = HashMap::new();
+    if let Some(client_ip) = headers.get(X_REAL_IP).and_then(|v| v.to_str().ok()) {
+        properties.insert("client_ip".to_owned(), client_ip.to_owned());
+    }
+    if let Some(traceparent) = headers.get(TRACEPARENT).and_then(|v| v.to_str().ok()) {
+        properties.insert("traceparent".to_owned(), traceparent.to_owned());
+    }
+    if let Some(requestor) = headers.get(X_CDN_REQUESTOR).and_then(|v| v.to_str().ok()) {
+        properties.insert("requestor".to_owned(), requestor.to_owned());
+    }
+    properties
 }
