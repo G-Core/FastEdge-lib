@@ -38,6 +38,9 @@ pub mod state;
 
 pub(crate) static TRACEPARENT: &str = "traceparent";
 
+#[cfg(feature = "metrics")]
+const HTTP_LABEL: &[&str; 1] = &["http"];
+
 const FASTEDGE_INTERNAL_ERROR: u16 = 530;
 const FASTEDGE_OUT_OF_MEMORY: u16 = 531;
 const FASTEDGE_EXECUTION_TIMEOUT: u16 = 532;
@@ -205,7 +208,7 @@ where
         let app_name = match app_name_from_request(&request) {
             Err(error) => {
                 #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::UNKNOWN);
+                metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                 tracing::info!(cause=?error, "App name not provided");
                 return not_found();
             }
@@ -220,7 +223,7 @@ where
         let cfg = match self.context.lookup_by_name(&app_name).await {
             None => {
                 #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::UNKNOWN);
+                metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                 tracing::info!(
                     "Request for unknown application '{}' on URL: {}",
                     app_name,
@@ -263,7 +266,7 @@ where
             Ok(executor) => executor,
             Err(error) => {
                 #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::UNKNOWN);
+                metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                 tracing::warn!(cause=?error,
                     "failure on getting context"
                 );
@@ -301,7 +304,7 @@ where
                     self.context.write_stats(stat_row).await;
                 }
                 #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::SUCCESS);
+                metrics::metrics(AppResult::SUCCESS, &["http"], Some(time_elapsed.as_micros() as u64), Some(memory_used.as_u64()));
 
                 response.headers_mut().extend(app_res_headers(cfg));
                 response
@@ -388,7 +391,7 @@ where
                 tracing::debug!(?fail_reason, request_id, "stats");
 
                 #[cfg(feature = "metrics")]
-                metrics::metrics(fail_reason);
+                metrics::metrics(fail_reason, HTTP_LABEL, Some(time_elapsed.as_micros() as u64), None);
 
                 let builder = Response::builder().status(status_code);
                 let res_headers = app_res_headers(cfg);
