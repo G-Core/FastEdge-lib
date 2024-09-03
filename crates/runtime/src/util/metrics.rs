@@ -1,54 +1,42 @@
 use lazy_static::lazy_static;
-use prometheus::{self, opts, register_int_counter, IntCounter};
+use prometheus::{self, register_int_counter_vec, register_histogram_vec, IntCounterVec, HistogramVec};
 
 use crate::AppResult;
 
 lazy_static! {
-    static ref TOTAL_COUNT: IntCounter =
-        register_int_counter!("fastedge_call_count", "Total number of app calls.").unwrap();
-}
+    static ref TOTAL_COUNT: IntCounterVec =
+        register_int_counter_vec!("fastedge_call_count", "Total number of app calls.", &["executor"]).unwrap();
 
-lazy_static! {
-    static ref ERROR_COUNT: IntCounter = register_int_counter!(opts!(
+    static ref ERROR_COUNT: IntCounterVec = register_int_counter_vec!(
         "fastedge_error_total_count",
-        "Number of failed app calls."
-    ))
+        "Number of failed app calls.", &["executor", "reason"]
+    )
     .unwrap();
-}
-lazy_static! {
-    static ref UNKNOWN_COUNT: IntCounter = register_int_counter!(opts!(
-        "fastedge_error_unknown_count",
-        "Number of calls for unknown app."
-    ))
-    .unwrap();
-}
-lazy_static! {
-    static ref TIMEOUT_COUNT: IntCounter =
-        register_int_counter!(opts!("fastedge_error_timeout_count", "Number of timeouts."))
-            .unwrap();
-}
-lazy_static! {
-    static ref OOM_COUNT: IntCounter =
-        register_int_counter!(opts!("fastedge_error_oom_count", "Number of OOMs.")).unwrap();
-}
-lazy_static! {
-    static ref OTHER_ERROR_COUNT: IntCounter = register_int_counter!(opts!(
-        "fastedge_error_other_count",
-        "Number of other error."
-    ))
-    .unwrap();
+
+    static ref REQUEST_DURATION: HistogramVec = register_histogram_vec!("fastedge_request_duration", "Request duration", &["executor"]).unwrap();
+    static ref MEMORY_USAGE: HistogramVec = register_histogram_vec!("fastedge_wasm_memory_used", "WASM Memory usage", &["executor"]).unwrap();
 }
 
-pub fn metrics(result: AppResult) {
-    TOTAL_COUNT.inc();
+pub fn metrics(result: AppResult, label: &[&str], duration: Option<u64>, memory_used: Option<u64>) {
+    TOTAL_COUNT.with_label_values(label).inc();
+
     if result != AppResult::SUCCESS {
-        ERROR_COUNT.inc();
+        let mut values: Vec<&str> = label.iter().map(|v| *v).collect();
+        match result {
+            AppResult::UNKNOWN => values.push("unknown"),
+            AppResult::TIMEOUT => values.push("timeout"),
+            AppResult::OOM => values.push("oom"),
+            AppResult::OTHER => values.push("other"),
+            _ => {}
+        };
+
+        ERROR_COUNT.with_label_values(values.as_slice()).inc();
     }
-    match result {
-        AppResult::UNKNOWN => UNKNOWN_COUNT.inc(),
-        AppResult::TIMEOUT => TIMEOUT_COUNT.inc(),
-        AppResult::OOM => OOM_COUNT.inc(),
-        AppResult::OTHER => OTHER_ERROR_COUNT.inc(),
-        _ => {}
-    };
+
+    if let Some(duration) = duration {
+        REQUEST_DURATION.with_label_values(label).observe(duration as f64);
+    }
+    if let Some(memory_used) = memory_used {
+        MEMORY_USAGE.with_label_values(label).observe(memory_used as f64);
+    }
 }
