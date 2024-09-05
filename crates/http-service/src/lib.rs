@@ -304,7 +304,7 @@ where
                     self.context.write_stats(stat_row).await;
                 }
                 #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::SUCCESS, &["http"], Some(time_elapsed.as_micros() as u64), Some(memory_used.as_u64()));
+                metrics::metrics(AppResult::SUCCESS, &["http"], Some((time_elapsed.as_micros() as f64) / 1_000_000f64), Some(memory_used.as_u64() as f64));
 
                 response.headers_mut().extend(app_res_headers(cfg));
                 response
@@ -391,7 +391,7 @@ where
                 tracing::debug!(?fail_reason, request_id, "stats");
 
                 #[cfg(feature = "metrics")]
-                metrics::metrics(fail_reason, HTTP_LABEL, Some(time_elapsed.as_micros() as u64), None);
+                metrics::metrics(fail_reason, HTTP_LABEL, Some((time_elapsed.as_micros() as f64) / 1_000_000f64), None);
 
                 let builder = Response::builder().status(status_code);
                 let res_headers = app_res_headers(cfg);
