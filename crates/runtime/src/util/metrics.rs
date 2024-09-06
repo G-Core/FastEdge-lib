@@ -14,10 +14,15 @@ lazy_static! {
     .unwrap();
 
     static ref REQUEST_DURATION: HistogramVec = register_histogram_vec!("fastedge_request_duration", "Request duration", &["executor"]).unwrap();
-    static ref MEMORY_USAGE: HistogramVec = register_histogram_vec!("fastedge_wasm_memory_used", "WASM Memory usage", &["executor"]).unwrap();
+
+    static ref MEMORY_USAGE: IntCounterVec = register_int_counter_vec!(
+        "fastedge_wasm_memory_used",
+        "WASM Memory usage", &["executor"]
+    )
+    .unwrap();
 }
 
-pub fn metrics(result: AppResult, label: &[&str], duration: Option<f64>, memory_used: Option<f64>) {
+pub fn metrics(result: AppResult, label: &[&str], duration: Option<u64>, memory_used: Option<u64>) {
     TOTAL_COUNT.with_label_values(label).inc();
 
     if result != AppResult::SUCCESS {
@@ -34,9 +39,9 @@ pub fn metrics(result: AppResult, label: &[&str], duration: Option<f64>, memory_
     }
 
     if let Some(duration) = duration {
-        REQUEST_DURATION.with_label_values(label).observe(duration);
+        REQUEST_DURATION.with_label_values(label).observe((duration as f64)/ 1_000_000.0);
     }
     if let Some(memory_used) = memory_used {
-        MEMORY_USAGE.with_label_values(label).observe(memory_used);
+        MEMORY_USAGE.with_label_values(label).inc_by(memory_used);
     }
 }
