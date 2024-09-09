@@ -25,4 +25,5 @@ jobs:
         with:
           command: release-pr
         env:
+          RUST_LOG: debug
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
