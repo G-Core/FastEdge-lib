@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.7-rc.2] - 2024-09-09
+
+### 🐛 Bug Fixes
+
+- Release pipeline
+
 ## [0.5.7-rc.1] - 2024-09-09
 
 ### 🚀 Features
@@ -19,6 +25,10 @@ All notable changes to this project will be documented in this file.
 - Print execution error and set proper process status code on error
 - Change release pipeline
 - Adding cargo realease settings
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.5.2-3] - 2024-08-05
 
