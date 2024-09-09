@@ -141,8 +141,8 @@ async fn main() -> anyhow::Result<()> {
                 backoff: 64,
             });
             tokio::select! {
-                _ = http => {
-
+                res = http => {
+                    res?
                 },
                 _ = tokio::signal::ctrl_c() => {
                     shutdown_coordinator.shutdown().await
