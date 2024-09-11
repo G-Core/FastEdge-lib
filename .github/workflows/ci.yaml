@@ -1,0 +1,48 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches-ignore:
+      - 'main'
+      - 'releases/**'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          target: wasm32-wasi
+          components: rustfmt, clippy
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.2.1
+
+      - name: Run cargo-audit binary crate
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Unit Tests
+        run: cargo test --all --exclude http-backend
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features
+

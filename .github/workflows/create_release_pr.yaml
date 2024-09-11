@@ -1,0 +1,23 @@
+name: Create release pull request
+on:
+  push:
+    branches:
+      - 'releases/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create_release_pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Create GitHub PR for release branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr create --base main --title ${{ github.ref_name }} --body ${{ github.ref_name }}

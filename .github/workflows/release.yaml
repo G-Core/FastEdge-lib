@@ -1,29 +1,93 @@
-name: Release-plz
+name: Release
 
 permissions:
-  pull-requests: write
   contents: write
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v[0-9]+.*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  release-plz:
-    name: Release-plz
+  create-release:
+    name: Create release
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Create GitHub Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+  build-release:
+    name: Build release
+    needs: ['create-release']
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - build: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+
+          - build: macos
+            os: macos-latest
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Clone repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Install Rust toolchain
+          submodules: recursive
+
+      - name: Get the release version from the tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-      - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@v0.5
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2.2.1
+
+      - name: Release build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build archive
+        shell: bash
+        run: |
+          # Replace with the name of your binary
+          binary_name="test_release_2"
+
+          dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
+          mkdir "$dirname"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+          else
+            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+          fi
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "$dirname.zip" "$dirname"
+            certutil -hashfile "$dirname.zip" SHA256 > "$dirname.zip.sha256"
+            echo "ASSET=$dirname.zip" >> $GITHUB_ENV
+            echo "ASSET_SUM=$dirname.tar.gz.sha256" >> $GITHUB_ENV
+          else
+            tar -czf "$dirname.tar.gz" "$dirname"
+            shasum -a 256 "$dirname.tar.gz" > "$dirname.tar.gz.sha256"
+            echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+            echo "ASSET_SUM=$dirname.tar.gz.sha256" >> $GITHUB_ENV
+          fi
+
+      - name: Upload release archive
+        uses: softprops/action-gh-release@v2
         with:
-          command: release-pr
-        env:
-          RUST_LOG: debug
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            ${{ env.ASSET }}
+            ${{ env.ASSET_SUM }}
+
