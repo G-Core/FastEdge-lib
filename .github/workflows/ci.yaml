@@ -4,12 +4,14 @@ on:
   push:
     branches-ignore:
       - 'main'
+      - 'releases/**'
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
-  build:
+  pipeline:
     runs-on: ubuntu-latest
 
     steps:
@@ -37,6 +39,9 @@ jobs:
 
       - name: Unit Tests
         run: cargo test --all --exclude http-backend
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
 
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features
