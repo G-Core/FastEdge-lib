@@ -131,7 +131,6 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
         };
         default_send_request(self, outgoing_request)
     }
-
 }
 
 impl<T> Data<T> {

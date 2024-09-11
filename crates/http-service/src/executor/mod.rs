@@ -3,9 +3,11 @@ mod wasi_http;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use crate::state::HttpState;
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use bytesize::ByteSize;
+use dictionary::Dictionary;
 use http::{HeaderMap, HeaderValue, Method, Response};
 use http_backend::Backend;
 use http_body_util::combinators::BoxBody;
@@ -16,8 +18,6 @@ use runtime::store::StoreBuilder;
 use runtime::{App, InstancePre, WasmEngine};
 use smol_str::SmolStr;
 use wasmtime_wasi::StdoutStream;
-use dictionary::Dictionary;
-use crate::state::HttpState;
 
 pub use wasi_http::WasiHttpExecutorImpl;
 
@@ -52,7 +52,7 @@ pub struct HttpExecutorImpl<C> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
-    dictionary: Dictionary
+    dictionary: Dictionary,
 }
 
 #[async_trait]
@@ -189,10 +189,11 @@ where
             .body
             .map(|b| Full::from(b).map_err(|never| match never {}).boxed())
             .unwrap_or_default();
-        builder.body(body).map(|r| (r, used)).map_err(anyhow::Error::msg)
+        builder
+            .body(body)
+            .map(|r| (r, used))
+            .map_err(anyhow::Error::msg)
     }
-
-
 }
 
 fn to_fastedge_http_method(method: &Method) -> Result<fastedge::http::Method> {
@@ -207,7 +208,6 @@ fn to_fastedge_http_method(method: &Method) -> Result<fastedge::http::Method> {
         method => bail!("unsupported method: {}", method),
     })
 }
-
 
 pub(crate) fn get_properties(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
     let mut properties = HashMap::new();

@@ -1,23 +1,23 @@
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Context};
-use async_trait::async_trait;
-use bytesize::ByteSize;
-use http::uri::Scheme;
-use http::{header, HeaderMap, Response, Uri};
-use http_body_util::combinators::BoxBody;
-use http_body_util::{BodyExt, Full};
-use hyper::body::{Body, Bytes};
-use smol_str::ToSmolStr;
-use tracing::error;
-use wasmtime_wasi_http::{ WasiHttpView};
-use dictionary::Dictionary;
-use http_backend::Backend;
-use runtime::store::StoreBuilder;
-use runtime::InstancePre;
 use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
+use anyhow::{anyhow, bail, Context};
+use async_trait::async_trait;
+use bytesize::ByteSize;
+use dictionary::Dictionary;
+use http::uri::Scheme;
+use http::{header, HeaderMap, Response, Uri};
+use http_backend::Backend;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Body, Bytes};
+use runtime::store::StoreBuilder;
+use runtime::InstancePre;
+use smol_str::ToSmolStr;
+use tracing::error;
+use wasmtime_wasi_http::WasiHttpView;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -25,7 +25,7 @@ pub struct WasiHttpExecutorImpl<C> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
-    dictionary: Dictionary
+    dictionary: Dictionary,
 }
 
 #[async_trait]
@@ -125,7 +125,6 @@ where
             })
             .collect();
 
-
         propagate_headers.insert(header::HOST, be_base_domain(server_name).parse()?);
 
         let backend_uri = http_backend.uri();
@@ -173,7 +172,7 @@ where
         match receiver.await {
             Ok(Ok(resp)) => {
                 let (parts, body) = resp.into_parts();
-                let body  = body.map_err(anyhow::Error::msg).boxed();
+                let body = body.map_err(anyhow::Error::msg).boxed();
                 let used = task.await.context("task await")?.context("byte size")?;
                 Ok((Response::from_parts(parts, body), used))
             }
