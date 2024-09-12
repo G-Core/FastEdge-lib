@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Error};
+use dictionary::Dictionary;
 use http::request::Parts;
 use http::uri::Scheme;
 use http::{header, HeaderMap, HeaderName, Uri};
@@ -7,7 +8,6 @@ use runtime::BackendRequest;
 use smol_str::{SmolStr, ToSmolStr};
 use tracing::instrument;
 use wasmtime_wasi_nn::WasiNnCtx;
-use dictionary::Dictionary;
 
 pub struct HttpState<C> {
     pub(super) wasi_nn: WasiNnCtx,
@@ -15,7 +15,7 @@ pub struct HttpState<C> {
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<SmolStr>,
-    pub(super) dictionary: Dictionary
+    pub(super) dictionary: Dictionary,
 }
 
 impl<C> BackendRequest for HttpState<C> {
@@ -25,13 +25,12 @@ impl<C> BackendRequest for HttpState<C> {
         tracing::trace!("send request original url: {:?}", original_url);
         let original_host = original_url.authority().map(|a| {
             match (original_url.scheme_str(), a.port().map(|p| p.as_u16())) {
-                (None,  Some(80))
-                | (Some("http"),  Some(80))
-                | (Some("https"),  Some(443))
+                (None, Some(80))
+                | (Some("http"), Some(80))
+                | (Some("https"), Some(443))
                 | (_, None) => a.host().to_string(),
-                (_,  Some(port)) => format!("{}:{}", a.host(), port),
+                (_, Some(port)) => format!("{}:{}", a.host(), port),
             }
-
         });
         let original_host = original_host
             .or_else(|| {

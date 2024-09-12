@@ -304,7 +304,12 @@ where
                     self.context.write_stats(stat_row).await;
                 }
                 #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::SUCCESS, &["http"], Some(time_elapsed.as_micros() as u64), Some(memory_used.as_u64()));
+                metrics::metrics(
+                    AppResult::SUCCESS,
+                    &["http"],
+                    Some(time_elapsed.as_micros() as u64),
+                    Some(memory_used.as_u64()),
+                );
 
                 response.headers_mut().extend(app_res_headers(cfg));
                 response
@@ -391,7 +396,12 @@ where
                 tracing::debug!(?fail_reason, request_id, "stats");
 
                 #[cfg(feature = "metrics")]
-                metrics::metrics(fail_reason, HTTP_LABEL, Some(time_elapsed.as_micros() as u64), None);
+                metrics::metrics(
+                    fail_reason,
+                    HTTP_LABEL,
+                    Some(time_elapsed.as_micros() as u64),
+                    None,
+                );
 
                 let builder = Response::builder().status(status_code);
                 let res_headers = app_res_headers(cfg);
@@ -528,16 +538,16 @@ fn app_req_headers(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
 #[cfg(test)]
 mod tests {
     use claims::*;
-    use smol_str::ToSmolStr;
-    use std::collections::HashMap;
-    use test_case::test_case;
-    use wasmtime::component::Component;
-    use wasmtime::{Engine, Module};
     use dictionary::Dictionary;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
     use runtime::{componentize_if_necessary, PreCompiledLoader, WasiVersion, WasmConfig};
+    use smol_str::ToSmolStr;
+    use std::collections::HashMap;
+    use test_case::test_case;
+    use wasmtime::component::Component;
+    use wasmtime::{Engine, Module};
 
     use crate::executor::HttpExecutorImpl;
     use runtime::util::stats::StatRow;
@@ -726,7 +736,7 @@ mod tests {
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("1",req).await);
+        let res = assert_ok!(http_service.handle_request("1", req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -823,7 +833,7 @@ mod tests {
         let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("3",req).await);
+        let res = assert_ok!(http_service.handle_request("3", req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
