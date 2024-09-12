@@ -2,11 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.7] - 2024-09-12
+
+### 🐛 Bug Fixes
+
+- Adding support for cargo release and auto PR on new release
+- Adding release process description
+- Formatting check
+- Setting prerelease flag for release candidates
+
 ## [0.5.7-rc.2] - 2024-09-09
 
 ### 🐛 Bug Fixes
 
 - Release pipeline
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.5.7-rc.1] - 2024-09-09
 
