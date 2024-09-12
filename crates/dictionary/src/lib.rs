@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::ops::{Deref, DerefMut};
 use async_trait::async_trait;
 use reactor::gcore::fastedge::dictionary;
+use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Clone)]
-pub struct Dictionary{
-    inner: HashMap<String, String>
+pub struct Dictionary {
+    inner: HashMap<String, String>,
 }
 
 #[async_trait]
@@ -17,16 +17,16 @@ impl dictionary::Host for Dictionary {
 
 impl Default for Dictionary {
     fn default() -> Self {
-        Self{
-            inner: Default::default()
+        Self {
+            inner: Default::default(),
         }
     }
 }
 
 impl Dictionary {
     pub fn new() -> Self {
-        Self{
-            inner: Default::default()
+        Self {
+            inner: Default::default(),
         }
     }
 }
@@ -44,4 +44,3 @@ impl DerefMut for Dictionary {
         &mut self.inner
     }
 }
-

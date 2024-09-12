@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use bytesize::{ByteSize, MB};
 use clap::{Args, Parser, Subcommand};
+use dictionary::Dictionary;
 use http::{Request, Response};
 use http_backend::{Backend, BackendStrategy};
 use http_body_util::combinators::BoxBody;
@@ -28,7 +29,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
-use dictionary::Dictionary;
 
 #[derive(Debug, Parser)]
 #[command(name = "cli")]
@@ -260,14 +260,14 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
                 instance_pre,
                 store_builder,
                 self.backend(),
-                dictionary
+                dictionary,
             )))
         } else {
             Ok(CliExecutor::Http(HttpExecutorImpl::new(
                 instance_pre,
                 store_builder,
                 self.backend(),
-                dictionary
+                dictionary,
             )))
         }
     }
