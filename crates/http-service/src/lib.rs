@@ -29,6 +29,7 @@ use smol_str::SmolStr;
 use state::HttpState;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
+use tokio::time::error::Elapsed;
 use tracing::Instrument;
 use wasi_common::I32Exit;
 use wasmtime::Trap;
@@ -359,6 +360,22 @@ where
                                     .boxed(),
                             ),
                         }
+                    } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
+                        (
+                            FASTEDGE_EXECUTION_TIMEOUT,
+                            AppResult::TIMEOUT,
+                            Full::new(Bytes::from("fastedge: Execution timeout"))
+                                .map_err(|never| match never {})
+                                .boxed(),
+                        )
+                    } else if root_cause.to_string().ends_with("deadline has elapsed") {
+                        (
+                            FASTEDGE_EXECUTION_TIMEOUT,
+                            AppResult::TIMEOUT,
+                            Full::new(Bytes::from("fastedge: Execution timeout"))
+                                .map_err(|never| match never {})
+                                .boxed(),
+                        )
                     } else {
                         (
                             FASTEDGE_INTERNAL_ERROR,

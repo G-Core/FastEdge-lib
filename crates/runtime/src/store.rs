@@ -9,7 +9,7 @@ use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_nn::WasiNnCtx;
 
-use crate::{Data, Wasi, WasiVersion};
+use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 
 use crate::limiter::ProxyLimiter;
 use crate::logger::Logger;
@@ -225,6 +225,7 @@ impl StoreBuilder {
                 inner,
                 wasi,
                 store_limits: self.store_limits,
+                timeout: (self.max_duration + 1) * DEFAULT_EPOCH_TICK_INTERVAL,
                 table,
                 logger,
                 http: WasiHttpCtx,

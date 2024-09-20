@@ -31,13 +31,13 @@ use http::request::Parts;
 use http::Request;
 use smol_str::SmolStr;
 use std::borrow::Cow;
-use std::sync::mpsc::TryRecvError;
-use std::thread;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
 use wasmtime_wasi_http::bindings::http::types::ErrorCode;
 use wasmtime_wasi_http::types::{
     default_send_request, HostFutureIncomingResponse, OutgoingRequest,
 };
+
+pub const DEFAULT_EPOCH_TICK_INTERVAL: u64 = 10;
 
 const PREVIEW1_ADAPTER: &[u8] = include_bytes!("adapters/wasi_snapshot_preview1.reactor.wasm");
 
@@ -78,6 +78,7 @@ pub struct Data<T> {
     wasi: Wasi,
     // memory usage limiter
     store_limits: ProxyLimiter,
+    pub timeout: u64,
     table: ResourceTable,
     pub logger: Option<Logger>,
     http: WasiHttpCtx,
@@ -235,8 +236,6 @@ pub type ComponentLinker<T> = wasmtime::component::Linker<Data<T>>;
 /// An alias for [`wasmtime::Linker`]
 pub type ModuleLinker<T> = wasmtime::Linker<Data<T>>;
 
-pub const DEFAULT_EPOCH_TICK_INTERVAL: Duration = Duration::from_millis(10);
-
 /// An `WasmEngine` is a global context for the initialization and execution of WASM application.
 pub struct WasmEngine<T> {
     inner: Engine,
@@ -245,8 +244,6 @@ pub struct WasmEngine<T> {
 
     // WASI-NN global Graph Registry
     graph_registry: CachedGraphRegistry,
-    // Matching receiver closes on drop
-    _epoch_tick_handler: std::sync::mpsc::Sender<()>,
 }
 
 /// A builder interface for configuring a new [`WasmEngine`].
@@ -256,7 +253,6 @@ pub struct WasmEngineBuilder<T> {
     engine: Engine,
     component_linker: ComponentLinker<T>,
     module_linker: ModuleLinker<T>,
-    epoch_tick_interval: Duration,
 }
 
 impl<T: Send + Sync> WasmEngine<T> {
@@ -292,7 +288,6 @@ impl<T: Send + Sync> WasmEngineBuilder<T> {
             engine: Engine::clone(engine),
             component_linker,
             module_linker,
-            epoch_tick_interval: DEFAULT_EPOCH_TICK_INTERVAL,
         })
     }
 
@@ -304,32 +299,13 @@ impl<T: Send + Sync> WasmEngineBuilder<T> {
         &mut self.module_linker
     }
 
-    fn spawn_epoch_ticker(&self) -> std::sync::mpsc::Sender<()> {
-        let engine = self.engine.clone();
-        let interval = self.epoch_tick_interval;
-        let (send, recv) = std::sync::mpsc::channel();
-        thread::spawn(move || loop {
-            thread::sleep(interval);
-            match recv.try_recv() {
-                Ok(_) | Err(TryRecvError::Disconnected) => {
-                    break;
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-            engine.increment_epoch();
-        });
-        send
-    }
-
     /// Builds an [`WasmEngine`] from this builder.
     pub fn build(self) -> WasmEngine<T> {
-        let handler = self.spawn_epoch_ticker();
         WasmEngine {
             inner: self.engine,
             component_linker: self.component_linker,
             module_linker: self.module_linker,
             graph_registry: CachedGraphRegistry::new(),
-            _epoch_tick_handler: handler,
         }
     }
 }
