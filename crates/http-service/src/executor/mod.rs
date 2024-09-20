@@ -166,7 +166,7 @@ where
         let func = tokio::time::timeout(duration, func.call_async(&mut store, (request,)));
         let (resp,) = match func.await? {
             Ok(res) => res,
-            Err(error)  => {
+            Err(error) => {
                 // log to application logger  error
                 if let Some(ref logger) = store.data().logger {
                     if let Err(e) = logger.stream().write(error.to_string().into()) {

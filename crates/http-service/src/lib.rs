@@ -361,11 +361,21 @@ where
                             ),
                         }
                     } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
-                        (FASTEDGE_EXECUTION_TIMEOUT,
-                        AppResult::TIMEOUT,
-                        Full::new(Bytes::from("fastedge: Execution timeout"))
-                            .map_err(|never| match never {})
-                            .boxed(),)
+                        (
+                            FASTEDGE_EXECUTION_TIMEOUT,
+                            AppResult::TIMEOUT,
+                            Full::new(Bytes::from("fastedge: Execution timeout"))
+                                .map_err(|never| match never {})
+                                .boxed(),
+                        )
+                    } else if root_cause.to_string().ends_with("deadline has elapsed") {
+                        (
+                            FASTEDGE_EXECUTION_TIMEOUT,
+                            AppResult::TIMEOUT,
+                            Full::new(Bytes::from("fastedge: Execution timeout"))
+                                .map_err(|never| match never {})
+                                .boxed(),
+                        )
                     } else {
                         (
                             FASTEDGE_INTERNAL_ERROR,

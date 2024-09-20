@@ -158,10 +158,13 @@ where
             .await?;
 
             let duration = Duration::from_millis(store.data().timeout);
-            if let Err(e) = tokio::time::timeout(duration, proxy
-                .wasi_http_incoming_handler()
-                .call_handle(&mut store, req, out))
-                .await?
+            if let Err(e) = tokio::time::timeout(
+                duration,
+                proxy
+                    .wasi_http_incoming_handler()
+                    .call_handle(&mut store, req, out),
+            )
+            .await?
             {
                 error!(cause=?e, "incoming handler");
                 return Err(e);
