@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2024-09-20
+
+### 🐛 Bug Fixes
+
+- Stopping execution of blocking wasm code on timeout
+- Formatting and handle wasi-http timeouts
+
 ## [0.5.7] - 2024-09-12
 
 ### 🐛 Bug Fixes
@@ -10,6 +17,10 @@ All notable changes to this project will be documented in this file.
 - Adding release process description
 - Formatting check
 - Setting prerelease flag for release candidates
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.5.7-rc.2] - 2024-09-09
 
