@@ -323,7 +323,7 @@ dependencies = [
 
 [[package]]
 name = "candle-wasi-nn"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "candle-core",
  "candle-nn",
@@ -491,7 +491,7 @@ checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
 name = "cli"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -790,7 +790,7 @@ dependencies = [
 
 [[package]]
 name = "dictionary"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1346,7 +1346,7 @@ dependencies = [
 
 [[package]]
 name = "http-backend"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1403,7 +1403,7 @@ dependencies = [
 
 [[package]]
 name = "http-service"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2361,7 +2361,7 @@ dependencies = [
 
 [[package]]
 name = "reactor"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "tracing",
@@ -2480,7 +2480,7 @@ dependencies = [
 
 [[package]]
 name = "runtime"
-version = "0.5.7"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
