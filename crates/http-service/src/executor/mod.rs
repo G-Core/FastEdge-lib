@@ -162,9 +162,11 @@ where
             .instance("gcore:fastedge/http-handler")
             .ok_or_else(|| anyhow!("gcore:fastedge/http-handler instance not found"))?
             .typed_func::<(fastedge::http::Request,), (fastedge::http::Response,)>("process")?;
-        let (resp,) = match func.call_async(&mut store, (request,)).await {
+        let duration = Duration::from_millis(store.data().timeout);
+        let func = tokio::time::timeout(duration, func.call_async(&mut store, (request,)));
+        let (resp,) = match func.await? {
             Ok(res) => res,
-            Err(error) => {
+            Err(error)  => {
                 // log to application logger  error
                 if let Some(ref logger) = store.data().logger {
                     if let Err(e) = logger.stream().write(error.to_string().into()) {
