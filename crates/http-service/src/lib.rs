@@ -24,6 +24,7 @@ use runtime::util::metrics;
 use runtime::util::stats::StatRow;
 use runtime::util::stats::StatsWriter;
 use runtime::{App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder};
+use secret::SecretStrategy;
 use shellflip::ShutdownHandle;
 use smol_str::SmolStr;
 use state::HttpState;
@@ -56,8 +57,8 @@ pub struct HttpConfig {
     pub backoff: u64,
 }
 
-pub struct HttpService<T: ContextT> {
-    engine: WasmEngine<HttpState<T::BackendConnector>>,
+pub struct HttpService<T: ContextT, S: SecretStrategy> {
+    engine: WasmEngine<HttpState<T::BackendConnector, S>>,
     context: T,
 }
 
@@ -65,20 +66,21 @@ pub trait ContextHeaders {
     fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
 
-impl<T> Service for HttpService<T>
+impl<T, S> Service for HttpService<T, S>
 where
     T: ContextT
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState<T::BackendConnector, S>>
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Connect + Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
+    S: SecretStrategy + Send + Sync + 'static,
 {
-    type State = HttpState<T::BackendConnector>;
+    type State = HttpState<T::BackendConnector, S>;
     type Config = HttpConfig;
     type Context = T;
 
@@ -147,22 +149,25 @@ where
             &mut data.as_mut().dictionary
         })?;
 
+        reactor::gcore::fastedge::secret::add_to_linker(linker, |data| &mut data.as_mut().secret)?;
+
         Ok(())
     }
 }
 
-impl<T> HttpService<T>
+impl<T, U> HttpService<T, U>
 where
     T: ContextT
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState<T::BackendConnector, U>>
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
+    U: SecretStrategy,
 {
     async fn serve<S>(self: Arc<Self>, stream: S, _cancel: Arc<ShutdownHandle>)
     where

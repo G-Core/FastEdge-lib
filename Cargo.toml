@@ -58,6 +58,7 @@ runtime = { path = "crates/runtime", default-features = false }
 http-service = { path = "crates/http-service" }
 http-backend = { path = "crates/http-backend" }
 dictionary = { path = "crates/dictionary" }
+secret = { path = "crates/secret" }
 hyper-tls = "0.6"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 http-body-util = "0.1"

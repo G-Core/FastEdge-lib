@@ -26,7 +26,7 @@ pub mod util;
 
 use crate::logger::Logger;
 use anyhow::{anyhow, bail};
-pub use app::App;
+pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
 use http::Request;
 use smol_str::SmolStr;

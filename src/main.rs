@@ -1,3 +1,7 @@
+mod secret;
+
+use crate::secret::SecretImpl;
+use ::secret::Secret;
 use async_trait::async_trait;
 use bytesize::{ByteSize, MB};
 use clap::{Args, Parser, Subcommand};
@@ -20,7 +24,7 @@ use runtime::service::{Service, ServiceBuilder};
 use runtime::util::stats::{StatRow, StatsWriter};
 use runtime::{
     componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
-    WasiVersion, WasmConfig, WasmEngine,
+    SecretValue, WasiVersion, WasmConfig, WasmEngine,
 };
 use shellflip::ShutdownCoordinator;
 use smol_str::{SmolStr, ToSmolStr};
@@ -53,8 +57,8 @@ struct HttpRunArgs {
     #[arg(short, long)]
     wasm: PathBuf,
     /// Environment variable list
-    #[arg(long, value_parser = parse_key_value::<SmolStr, SmolStr >)]
-    envs: Option<Vec<(SmolStr, SmolStr)>>,
+    #[arg(short, long, value_parser = parse_key_value::<SmolStr, SmolStr >)]
+    env: Option<Vec<(SmolStr, SmolStr)>>,
     /// Add header from original request
     #[arg(long = "propagate-header", num_args = 0..)]
     propagate_headers: Vec<SmolStr>,
@@ -73,6 +77,9 @@ struct HttpRunArgs {
     /// Enable WASI HTTP interface
     #[arg(long)]
     wasi_http: Option<bool>,
+    /// Secret variable list
+    #[arg(short, long, value_parser = parse_key_value::<SmolStr, SmolStr >)]
+    secret: Option<Vec<(SmolStr, SmolStr)>>,
 }
 
 /// Test tool execution context
@@ -108,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
                 binary_id: 0,
                 max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
                 mem_limit: run.mem_limit.unwrap_or((128 * MB) as usize),
-                env: run.envs.unwrap_or_default().into_iter().collect(),
+                env: run.env.unwrap_or_default().into_iter().collect(),
                 rsp_headers: Default::default(),
                 log: Default::default(),
                 app_id: 0,
@@ -116,6 +123,20 @@ async fn main() -> anyhow::Result<()> {
                 plan: SmolStr::new("cli"),
                 status: Status::Enabled,
                 debug_until: None,
+                secrets: run
+                    .secret
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            k,
+                            vec![SecretValue {
+                                effective_from: 0,
+                                value: v.to_string(),
+                            }],
+                        )
+                    })
+                    .collect(),
             };
 
             let mut headers: HashMap<SmolStr, SmolStr> =
@@ -132,7 +153,7 @@ async fn main() -> anyhow::Result<()> {
                 wasi_http: run.wasi_http.unwrap_or_default(),
             };
 
-            let http: HttpService<CliContext> = ServiceBuilder::new(context).build()?;
+            let http: HttpService<CliContext, SecretImpl> = ServiceBuilder::new(context).build()?;
             let http = http.run(HttpConfig {
                 all_interfaces: false,
                 port: run.port,
@@ -206,8 +227,8 @@ impl ContextT for CliContext {
 }
 
 enum CliExecutor {
-    Http(HttpExecutorImpl<HttpsConnector<HttpConnector>>),
-    Wasi(WasiHttpExecutorImpl<HttpsConnector<HttpConnector>>),
+    Http(HttpExecutorImpl<HttpsConnector<HttpConnector>, SecretImpl>),
+    Wasi(WasiHttpExecutorImpl<HttpsConnector<HttpConnector>, SecretImpl>),
 }
 
 #[async_trait]
@@ -227,19 +248,26 @@ impl HttpExecutor for CliExecutor {
     }
 }
 
-impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
+impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>, SecretImpl>> for CliContext {
     type Executor = CliExecutor;
 
     fn get_executor(
         &self,
         name: SmolStr,
         app: &App,
-        engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
+        engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>, SecretImpl>>,
     ) -> anyhow::Result<Self::Executor> {
         let mut dictionary = Dictionary::new();
         for (k, v) in app.env.iter() {
             dictionary.insert(k.to_string(), v.to_string());
         }
+        let mut secret_impl = SecretImpl::new();
+        for (k, v) in app.secrets.iter() {
+            if let Some(value) = v.first() {
+                secret_impl.insert(k.to_string(), value.value.to_string());
+            }
+        }
+        let secret = Secret::new(secret_impl);
 
         let env = app.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
@@ -261,6 +289,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
                 store_builder,
                 self.backend(),
                 dictionary,
+                secret,
             )))
         } else {
             Ok(CliExecutor::Http(HttpExecutorImpl::new(
@@ -268,6 +297,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for CliContext {
                 store_builder,
                 self.backend(),
                 dictionary,
+                secret,
             )))
         }
     }

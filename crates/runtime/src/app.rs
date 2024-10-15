@@ -25,6 +25,16 @@ pub struct App {
     pub status: Status,
     #[serde(default)]
     pub debug_until: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub secrets: HashMap<SmolStr, SecretValues>,
+}
+
+pub type SecretValues = Vec<SecretValue>;
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SecretValue {
+    pub effective_from: u64,
+    pub value: String,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Deserialize)]
