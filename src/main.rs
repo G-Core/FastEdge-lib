@@ -300,7 +300,7 @@ impl Router for CliContext {
 }
 
 impl StatsWriter for CliContext {
-    async fn write_stats(&self, _stat: StatRow) {}
+    fn write_stats(&self, _stat: StatRow) {}
 }
 
 fn parse_key_value<T, U>(
