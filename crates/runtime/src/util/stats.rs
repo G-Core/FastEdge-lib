@@ -24,5 +24,5 @@ pub struct StatRow {
 pub struct StatRow;
 
 pub trait StatsWriter {
-    fn write_stats(&self, stat: StatRow) -> impl std::future::Future<Output = ()> + Send;
+    fn write_stats(&self, stat: StatRow);
 }

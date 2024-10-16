@@ -302,7 +302,7 @@ where
                         request_id: request_id.to_string(),
                         ..Default::default()
                     };
-                    self.context.write_stats(stat_row).await;
+                    self.context.write_stats(stat_row);
                 }
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
@@ -407,7 +407,7 @@ where
                         request_id: request_id.to_string(),
                         ..Default::default()
                     };
-                    self.context.write_stats(stat_row).await;
+                    self.context.write_stats(stat_row);
                 }
                 #[cfg(not(feature = "stats"))]
                 tracing::debug!(?fail_reason, request_id, "stats");
@@ -637,7 +637,7 @@ mod tests {
     }
 
     impl StatsWriter for TestContext {
-        async fn write_stats(&self, _stat: StatRow) {}
+        fn write_stats(&self, _stat: StatRow) {}
     }
 
     impl Router for TestContext {
