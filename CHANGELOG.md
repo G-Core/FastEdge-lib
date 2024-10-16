@@ -2,12 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2024-10-16
+
+### 🚜 Refactor
+
+- Drop async from write_stats method
+
 ## [0.6.0] - 2024-09-20
 
 ### 🐛 Bug Fixes
 
 - Stopping execution of blocking wasm code on timeout
 - Formatting and handle wasi-http timeouts
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.5.7] - 2024-09-12
 
