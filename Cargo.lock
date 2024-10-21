@@ -513,6 +513,7 @@ dependencies = [
  "hyper-util",
  "pretty_env_logger",
  "runtime",
+ "secret",
  "shellflip",
  "smol_str",
  "tokio",
@@ -1421,6 +1422,7 @@ dependencies = [
  "prometheus",
  "reactor",
  "runtime",
+ "secret",
  "serde",
  "shellflip",
  "smol_str",
@@ -2616,6 +2618,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "secret"
+version = "0.7.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "reactor",
+ "runtime",
+ "tracing",
+ "wasmtime",
 ]
 
 [[package]]

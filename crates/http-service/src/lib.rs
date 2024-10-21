@@ -24,6 +24,7 @@ use runtime::util::metrics;
 use runtime::util::stats::StatRow;
 use runtime::util::stats::StatsWriter;
 use runtime::{App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder};
+use secret::SecretStrategy;
 use shellflip::ShutdownHandle;
 use smol_str::SmolStr;
 use state::HttpState;
@@ -56,8 +57,8 @@ pub struct HttpConfig {
     pub backoff: u64,
 }
 
-pub struct HttpService<T: ContextT> {
-    engine: WasmEngine<HttpState<T::BackendConnector>>,
+pub struct HttpService<T: ContextT, S: SecretStrategy> {
+    engine: WasmEngine<HttpState<T::BackendConnector, S>>,
     context: T,
 }
 
@@ -65,20 +66,21 @@ pub trait ContextHeaders {
     fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
 
-impl<T> Service for HttpService<T>
+impl<T, S> Service for HttpService<T, S>
 where
     T: ContextT
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState<T::BackendConnector, S>>
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Connect + Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
+    S: SecretStrategy + Send + Sync + 'static,
 {
-    type State = HttpState<T::BackendConnector>;
+    type State = HttpState<T::BackendConnector, S>;
     type Config = HttpConfig;
     type Context = T;
 
@@ -147,22 +149,25 @@ where
             &mut data.as_mut().dictionary
         })?;
 
+        reactor::gcore::fastedge::secret::add_to_linker(linker, |data| &mut data.as_mut().secret)?;
+
         Ok(())
     }
 }
 
-impl<T> HttpService<T>
+impl<T, U> HttpService<T, U>
 where
     T: ContextT
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState<T::BackendConnector, U>>
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
+    U: SecretStrategy,
 {
     async fn serve<S>(self: Arc<Self>, stream: S, _cancel: Arc<ShutdownHandle>)
     where
@@ -566,10 +571,10 @@ mod tests {
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
 
+    use super::*;
     use crate::executor::HttpExecutorImpl;
     use runtime::util::stats::StatRow;
-
-    use super::*;
+    use secret::Secret;
 
     #[test_case("app.server.com", "server.com", "app"; "get app name from server_name header")]
     fn test_app_name_from_request(server_name: &str, uri: &str, expected: &str) {
@@ -656,19 +661,29 @@ mod tests {
         }
     }
 
-    impl ExecutorFactory<HttpState<FastEdgeConnector>> for TestContext {
-        type Executor = HttpExecutorImpl<FastEdgeConnector>;
+    #[derive(Clone)]
+    struct TestSecret;
+
+    impl SecretStrategy for TestSecret {
+        fn get(&self, _key: String) -> Result<Option<Vec<u8>>> {
+            Ok(Some(b"secret".to_vec()))
+        }
+    }
+
+    impl ExecutorFactory<HttpState<FastEdgeConnector, TestSecret>> for TestContext {
+        type Executor = HttpExecutorImpl<FastEdgeConnector, TestSecret>;
 
         fn get_executor(
             &self,
             name: SmolStr,
             cfg: &App,
-            engine: &WasmEngine<HttpState<FastEdgeConnector>>,
+            engine: &WasmEngine<HttpState<FastEdgeConnector, TestSecret>>,
         ) -> Result<Self::Executor> {
             let mut dictionary = Dictionary::new();
             for (k, v) in cfg.env.iter() {
                 dictionary.insert(k.to_string(), v.to_string());
             }
+            let secret = Secret::new(TestSecret);
 
             let env = cfg.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
@@ -690,6 +705,7 @@ mod tests {
                 store_builder,
                 self.backend(),
                 dictionary,
+                secret,
             ))
         }
     }
@@ -710,6 +726,7 @@ mod tests {
             plan: "test_plan".to_smolstr(),
             status,
             debug_until: None,
+            secrets: vec![],
         })
     }
 
@@ -750,7 +767,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request("1", req).await);
@@ -791,6 +808,7 @@ mod tests {
             plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: None,
+            secrets: vec![],
         });
 
         let context = TestContext {
@@ -799,7 +817,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request("2", req).await);
@@ -839,6 +857,7 @@ mod tests {
             plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: None,
+            secrets: vec![],
         });
 
         let context = TestContext {
@@ -847,7 +866,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request("3", req).await);
@@ -881,7 +900,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("4", req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
@@ -907,7 +926,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("5", req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
@@ -933,7 +952,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("6", req).await);
         assert_eq!(StatusCode::TOO_MANY_REQUESTS, res.status());
@@ -959,7 +978,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestSecret> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("7", req).await);
         assert_eq!(StatusCode::NOT_ACCEPTABLE, res.status());

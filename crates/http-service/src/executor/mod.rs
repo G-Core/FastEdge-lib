@@ -16,10 +16,10 @@ use hyper::body::{Body, Bytes};
 use reactor::gcore::fastedge;
 use runtime::store::StoreBuilder;
 use runtime::{App, InstancePre, WasmEngine};
+use secret::{Secret, SecretStrategy};
 use smol_str::SmolStr;
-use wasmtime_wasi::StdoutStream;
-
 pub use wasi_http::WasiHttpExecutorImpl;
+use wasmtime_wasi::StdoutStream;
 
 pub(crate) static X_REAL_IP: &str = "x-real-ip";
 pub(crate) static TRACEPARENT: &str = "traceparent";
@@ -48,17 +48,19 @@ pub trait ExecutorFactory<C> {
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct HttpExecutorImpl<C> {
-    instance_pre: InstancePre<HttpState<C>>,
+pub struct HttpExecutorImpl<C, T: SecretStrategy> {
+    instance_pre: InstancePre<HttpState<C, T>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
     dictionary: Dictionary,
+    secret: Secret<T>,
 }
 
 #[async_trait]
-impl<C> HttpExecutor for HttpExecutorImpl<C>
+impl<C, T> HttpExecutor for HttpExecutorImpl<C, T>
 where
     C: Clone + Send + Sync + 'static,
+    T: SecretStrategy + Clone + Send + Sync,
 {
     async fn execute<B>(
         &self,
@@ -75,21 +77,24 @@ where
     }
 }
 
-impl<C> HttpExecutorImpl<C>
+impl<C, T> HttpExecutorImpl<C, T>
 where
     C: Clone + Send + Sync + 'static,
+    T: SecretStrategy + Clone + Send,
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState<C>>,
+        instance_pre: InstancePre<HttpState<C, T>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
         dictionary: Dictionary,
+        secret: Secret<T>,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
             dictionary,
+            secret,
         }
     }
 
@@ -152,6 +157,7 @@ where
             propagate_headers: parts.headers,
             propagate_header_names,
             dictionary: self.dictionary.clone(),
+            secret: self.secret.clone(),
         };
 
         let mut store = store_builder.build(state)?;

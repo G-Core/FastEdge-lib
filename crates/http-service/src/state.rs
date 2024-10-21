@@ -5,20 +5,22 @@ use http::uri::Scheme;
 use http::{header, HeaderMap, HeaderName, Uri};
 use http_backend::Backend;
 use runtime::BackendRequest;
+use secret::{Secret, SecretStrategy};
 use smol_str::{SmolStr, ToSmolStr};
 use tracing::instrument;
 use wasmtime_wasi_nn::WasiNnCtx;
 
-pub struct HttpState<C> {
+pub struct HttpState<C, T: SecretStrategy> {
     pub(super) wasi_nn: WasiNnCtx,
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<SmolStr>,
     pub(super) dictionary: Dictionary,
+    pub(super) secret: Secret<T>,
 }
 
-impl<C> BackendRequest for HttpState<C> {
+impl<C, T: SecretStrategy> BackendRequest for HttpState<C, T> {
     #[instrument(skip(self), ret, err)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<(String, Parts)> {
         let original_url = head.uri;
