@@ -32,4 +32,3 @@ impl<T: SecretStrategy> Secret<T> {
         Self { strategy }
     }
 }
-

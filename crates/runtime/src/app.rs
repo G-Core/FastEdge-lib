@@ -26,7 +26,7 @@ pub struct App {
     #[serde(default)]
     pub debug_until: Option<DateTime<Utc>>,
     #[serde(default)]
-    pub secrets: HashMap<SmolStr, SecretValues>,
+    pub secrets: Vec<Secret>,
 }
 
 pub type SecretValues = Vec<SecretValue>;
@@ -35,6 +35,12 @@ pub type SecretValues = Vec<SecretValue>;
 pub struct SecretValue {
     pub effective_from: u64,
     pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct Secret {
+    pub name: SmolStr,
+    pub secret_values: SecretValues,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Deserialize)]
@@ -71,7 +77,7 @@ impl<'de> Visitor<'de> for StatusVisitor {
         formatter.write_str("unsigned integer value")
     }
 
-    fn visit_u64<E>(self, v: u64) -> std::result::Result<Self::Value, E>
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
@@ -124,7 +130,8 @@ mod tests {
             "client_id": 23456,
             "plan": "test_plan",
             "status": 1,
-            "debug_until": "2037-01-01T12:00:27.87Z"
+            "debug_until": "2037-01-01T12:00:27.87Z",
+            "secrets":[{"name":"SECRET","secret_values":[{"effective_from":0,"value":"encrypted"}]}]
 
         });
         let json = assert_ok!(serde_json::to_string_pretty(&json));
@@ -141,6 +148,13 @@ mod tests {
             plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: Some(assert_ok!("2037-01-01T12:00:27.87Z".parse())),
+            secrets: vec![Secret {
+                name: "SECRET".to_smolstr(),
+                secret_values: vec![SecretValue {
+                    effective_from: 0,
+                    value: "encrypted".to_string(),
+                }],
+            }],
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));

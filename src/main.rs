@@ -111,6 +111,19 @@ async fn main() -> anyhow::Result<()> {
             builder.propagate_headers_names(run.propagate_headers);
 
             let backend = builder.build(backend_connector);
+            let mut secrets = vec![];
+            if let Some(secret) = run.secret {
+                for (name, s) in secret.into_iter() {
+                    secrets.push(runtime::app::Secret {
+                        name,
+                        secret_values: vec![SecretValue {
+                            effective_from: 0,
+                            value: s.to_string(),
+                        }],
+                    });
+                }
+            }
+
             let cli_app = App {
                 binary_id: 0,
                 max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
@@ -123,20 +136,7 @@ async fn main() -> anyhow::Result<()> {
                 plan: SmolStr::new("cli"),
                 status: Status::Enabled,
                 debug_until: None,
-                secrets: run
-                    .secret
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(k, v)| {
-                        (
-                            k,
-                            vec![SecretValue {
-                                effective_from: 0,
-                                value: v.to_string(),
-                            }],
-                        )
-                    })
-                    .collect(),
+                secrets,
             };
 
             let mut headers: HashMap<SmolStr, SmolStr> =
@@ -262,9 +262,9 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>, SecretImpl>> for C
             dictionary.insert(k.to_string(), v.to_string());
         }
         let mut secret_impl = SecretImpl::new();
-        for (k, v) in app.secrets.iter() {
-            if let Some(value) = v.first() {
-                secret_impl.insert(k.to_string(), value.value.to_string());
+        for s in app.secrets.iter() {
+            if let Some(value) = s.secret_values.first() {
+                secret_impl.insert(s.name.to_string(), value.value.to_string());
             }
         }
         let secret = Secret::new(secret_impl);
