@@ -2,11 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2024-10-21
+
+### 🚀 Features
+
+- Impl draft secret libs
+- Secret common lib implementation
+
+### 🐛 Bug Fixes
+
+- Minor clippy error fix
+
 ## [0.7.0] - 2024-10-16
 
 ### 🚜 Refactor
 
 - Drop async from write_stats method
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.6.0] - 2024-09-20
 
