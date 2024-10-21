@@ -261,7 +261,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>, SecretImpl>> for C
         for (k, v) in app.env.iter() {
             dictionary.insert(k.to_string(), v.to_string());
         }
-        let mut secret_impl = SecretImpl::new();
+        let mut secret_impl = SecretImpl::default();
         for s in app.secrets.iter() {
             if let Some(value) = s.secret_values.first() {
                 secret_impl.insert(s.name.to_string(), value.value.to_string());

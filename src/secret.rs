@@ -2,7 +2,7 @@ use secret::SecretStrategy;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct SecretImpl {
     inner: HashMap<String, String>,
 }
@@ -10,22 +10,6 @@ pub struct SecretImpl {
 impl SecretStrategy for SecretImpl {
     fn get(&self, key: String) -> anyhow::Result<Option<Vec<u8>>> {
         Ok(self.inner.get(&key).map(|v| v.as_bytes().to_vec()))
-    }
-}
-
-impl Default for SecretImpl {
-    fn default() -> Self {
-        Self {
-            inner: Default::default(),
-        }
-    }
-}
-
-impl SecretImpl {
-    pub fn new() -> Self {
-        Self {
-            inner: Default::default(),
-        }
     }
 }
 
