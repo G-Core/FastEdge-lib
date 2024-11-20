@@ -8,11 +8,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use dictionary::Dictionary;
-use http::{HeaderMap, HeaderValue, Method, Response};
+use http::{HeaderMap, HeaderValue, Method};
 use http_backend::Backend;
-use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Body, Bytes};
+use hyper::body::{Body};
 use reactor::gcore::fastedge;
 use runtime::store::StoreBuilder;
 use runtime::{App, InstancePre, WasmEngine};
@@ -20,6 +19,7 @@ use secret::{Secret, SecretStrategy};
 use smol_str::SmolStr;
 pub use wasi_http::WasiHttpExecutorImpl;
 use wasmtime_wasi::StdoutStream;
+use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 pub(crate) static X_REAL_IP: &str = "x-real-ip";
 pub(crate) static TRACEPARENT: &str = "traceparent";
@@ -30,7 +30,7 @@ pub trait HttpExecutor {
     async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
+    ) -> Result<(hyper::Response<HyperOutgoingBody>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send;
@@ -65,7 +65,7 @@ where
     async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
+    ) -> Result<(hyper::Response<HyperOutgoingBody>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -101,7 +101,7 @@ where
     async fn execute_impl<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> Result<(Response<BoxBody<Bytes, anyhow::Error>>, ByteSize)>
+    ) -> Result<(hyper::Response<HyperOutgoingBody>, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,

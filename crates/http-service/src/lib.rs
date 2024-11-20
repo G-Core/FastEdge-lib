@@ -8,8 +8,7 @@ use crate::executor::HttpExecutor;
 use anyhow::{bail, Result};
 use bytes::Bytes;
 use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
-use http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
-use http_body_util::combinators::BoxBody;
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::body::Body;
 use hyper::server::conn::http1;
@@ -34,6 +33,7 @@ use tokio::time::error::Elapsed;
 use tracing::Instrument;
 use wasi_common::I32Exit;
 use wasmtime::Trap;
+pub use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 pub mod executor;
 pub mod state;
@@ -185,7 +185,7 @@ where
                     .await
             }
         });
-        if let Err(error) = http1::Builder::new().serve_connection(io, service).await {
+        if let Err(error) = http1::Builder::new().keep_alive(true).serve_connection(io, service).await {
             tracing::warn!(cause=?error, "Error serving connection");
         }
     }
@@ -194,8 +194,8 @@ where
     async fn handle_request<B>(
         &self,
         request_id: &str,
-        mut request: Request<B>,
-    ) -> Result<Response<BoxBody<Bytes, anyhow::Error>>>
+        mut request: hyper::Request<B>,
+    ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -425,7 +425,7 @@ where
                     None,
                 );
 
-                let builder = Response::builder().status(status_code);
+                let builder = hyper::Response::builder().status(status_code);
                 let res_headers = app_res_headers(cfg);
                 let builder = res_headers
                     .iter()
@@ -438,7 +438,7 @@ where
     }
 }
 
-fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
+fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> String {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
@@ -447,8 +447,8 @@ fn remote_traceparent(req: &Request<hyper::body::Incoming>) -> String {
 }
 
 /// Creates an HTTP 500 response.
-fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
-    Ok(Response::builder().status(FASTEDGE_INTERNAL_ERROR).body(
+fn internal_fastedge_error(msg: &'static str) -> Result<hyper::Response<HyperOutgoingBody>> {
+    Ok(hyper::Response::builder().status(FASTEDGE_INTERNAL_ERROR).body(
         Full::new(Bytes::from(format!("fastedge: {}", msg)))
             .map_err(|never| match never {})
             .boxed(),
@@ -456,8 +456,8 @@ fn internal_fastedge_error(msg: &'static str) -> Result<Response<BoxBody<Bytes, 
 }
 
 /// Creates an HTTP 404 response.
-fn not_found() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
-    Ok(Response::builder().status(StatusCode::NOT_FOUND).body(
+fn not_found() -> Result<hyper::Response<HyperOutgoingBody>> {
+    Ok(hyper::Response::builder().status(StatusCode::NOT_FOUND).body(
         Full::new(Bytes::from("fastedge: Unknown app"))
             .map_err(|never| match never {})
             .boxed(),
@@ -465,15 +465,15 @@ fn not_found() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
 }
 
 /// Creates an HTTP 429 response.
-fn too_many_requests() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
-    Ok(Response::builder()
+fn too_many_requests() -> Result<hyper::Response<HyperOutgoingBody>> {
+    Ok(hyper::Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
         .body(Empty::new().map_err(|never| match never {}).boxed())?)
 }
 
 /// Creates an HTTP 406 response.
-fn not_acceptable() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
-    Ok(Response::builder()
+fn not_acceptable() -> Result<hyper::Response<HyperOutgoingBody>> {
+    Ok(hyper::Response::builder()
         .status(StatusCode::NOT_ACCEPTABLE)
         .body(Empty::new().map_err(|never| match never {}).boxed())?)
 }
@@ -481,7 +481,7 @@ fn not_acceptable() -> Result<Response<BoxBody<Bytes, anyhow::Error>>> {
 /// borrows the request and returns the apps name
 /// app name can be either as sub-domain in a format '<app_name>.<domain>' (from `Server_name` header)
 /// or '<domain>/<app_name>' (from URL)
-fn app_name_from_request(req: &Request<impl Body>) -> Result<SmolStr> {
+fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<SmolStr> {
     match req.headers().get("server_name") {
         None => {}
         Some(h) => {

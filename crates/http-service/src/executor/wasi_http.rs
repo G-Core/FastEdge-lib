@@ -8,16 +8,15 @@ use async_trait::async_trait;
 use bytesize::ByteSize;
 use dictionary::Dictionary;
 use http::uri::Scheme;
-use http::{header, HeaderMap, Response, Uri};
+use http::{header, HeaderMap, Uri};
 use http_backend::Backend;
-use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Body, Bytes};
+use hyper::body::{Body};
 use runtime::store::StoreBuilder;
 use runtime::InstancePre;
 use secret::{Secret, SecretStrategy};
 use smol_str::ToSmolStr;
-use tracing::error;
+use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::WasiHttpView;
 
 /// Execute context used by ['HttpService']
@@ -39,7 +38,7 @@ where
     async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
+    ) -> anyhow::Result<(hyper::Response<HyperOutgoingBody>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
@@ -75,7 +74,7 @@ where
     async fn execute_impl<B>(
         &self,
         req: hyper::Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, ByteSize)>
+    ) -> anyhow::Result<(hyper::Response<HyperOutgoingBody>, ByteSize)>
     where
         B: BodyExt,
     {
@@ -98,6 +97,7 @@ where
             parts.uri = Uri::from_parts(uparts)?;
         }
 
+        //FIXME send streamed request body
         let body = body
             .collect()
             .await
@@ -147,24 +147,27 @@ where
         let mut store = store_builder.build(state).context("store build")?;
         let instance_pre = self.instance_pre.clone();
 
-        let task = tokio::task::spawn(async move {
-            let request = hyper::Request::from_parts(parts, body);
-            let req = store
-                .data_mut()
-                .new_incoming_request(request)
-                .context("new incoming request")?;
-            let out = store
-                .data_mut()
-                .new_response_outparam(sender)
-                .context("new response outparam")?;
+        let request = hyper::Request::from_parts(parts, body);
+        let req = store
+            .data_mut()
+            .new_incoming_request(request)
+            .context("new incoming request")?;
+        let out = store
+            .data_mut()
+            .new_response_outparam(sender)
+            .context("new response outparam")?;
 
-            let (proxy, _inst) = wasmtime_wasi_http::proxy::Proxy::instantiate_pre(
-                &mut store,
-                instance_pre.as_ref(),
-            )
+        let (proxy, _inst) = wasmtime_wasi_http::proxy::Proxy::instantiate_pre(
+            &mut store,
+            instance_pre.as_ref(),
+        )
             .await?;
 
-            let duration = Duration::from_millis(store.data().timeout);
+        let duration = Duration::from_millis(store.data().timeout);
+        
+        let task = tokio::task::spawn(async move {
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
             if let Err(e) = tokio::time::timeout(
                 duration,
                 proxy
@@ -173,7 +176,7 @@ where
             )
             .await?
             {
-                error!(cause=?e, "incoming handler");
+                tracing::warn!(cause=?e, "incoming handler");
                 return Err(e);
             };
             let used = ByteSize::b(store.memory_used() as u64);
@@ -182,11 +185,18 @@ where
 
         match receiver.await {
             Ok(Ok(resp)) => {
+                println!("##############################################   receiver response: {:?}", resp);
+                let used = ByteSize::b(0 as u64);
+                Ok((resp ,used))
+            },
+            /*Ok(Ok(resp)) => {
+                tracing::info!("##############################################   resp");
                 let (parts, body) = resp.into_parts();
                 let body = body.map_err(anyhow::Error::msg).boxed();
-                let used = task.await.context("task await")?.context("byte size")?;
+                //let used = task.await.context("task await")?.context("byte size")?;
+                let used = ByteSize::b(0 as u64);
                 Ok((Response::from_parts(parts, body), used))
-            }
+            }*/
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {
                 let e = match task.await {

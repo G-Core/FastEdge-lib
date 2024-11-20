@@ -6,16 +6,14 @@ use async_trait::async_trait;
 use bytesize::{ByteSize, MB};
 use clap::{Args, Parser, Subcommand};
 use dictionary::Dictionary;
-use http::{Request, Response};
 use http_backend::{Backend, BackendStrategy};
-use http_body_util::combinators::BoxBody;
 use http_body_util::BodyExt;
 use http_service::executor::{
     ExecutorFactory, HttpExecutor, HttpExecutorImpl, WasiHttpExecutorImpl,
 };
 use http_service::state::HttpState;
-use http_service::{ContextHeaders, HttpConfig, HttpService};
-use hyper::body::{Body, Bytes};
+use http_service::{ContextHeaders, HttpConfig, HttpService, HyperOutgoingBody};
+use hyper::body::{Body};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::Status;
@@ -235,8 +233,8 @@ enum CliExecutor {
 impl HttpExecutor for CliExecutor {
     async fn execute<B>(
         &self,
-        req: Request<B>,
-    ) -> anyhow::Result<(Response<BoxBody<Bytes, anyhow::Error>>, Duration, ByteSize)>
+        req: hyper::Request<B>,
+    ) -> anyhow::Result<(hyper::Response<HyperOutgoingBody>, Duration, ByteSize)>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
