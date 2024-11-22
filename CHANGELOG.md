@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2024-11-22
+
+### 🐛 Bug Fixes
+
+- Process http body chunks
+- Adding on_response handler to process the end of body chunks
+- Moving unit test to http sub-module
+
+## [0.8.1] - 2024-11-11
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
+
 ## [0.8.0] - 2024-10-21
 
 ### 🚀 Features
