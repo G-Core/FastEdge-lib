@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use bytesize::{ByteSize, MB};
 use clap::{Args, Parser, Subcommand};
 use dictionary::Dictionary;
+use http::{Request, Response, StatusCode};
 use http_backend::{Backend, BackendStrategy};
 use http_body_util::BodyExt;
 use http_service::executor::{
@@ -13,7 +14,7 @@ use http_service::executor::{
 };
 use http_service::state::HttpState;
 use http_service::{ContextHeaders, HttpConfig, HttpService, HyperOutgoingBody};
-use hyper::body::{Body};
+use hyper::body::Body;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::Status;
@@ -81,6 +82,7 @@ struct HttpRunArgs {
 }
 
 /// Test tool execution context
+#[derive(Clone)]
 struct CliContext {
     headers: HashMap<SmolStr, SmolStr>,
     engine: Engine,
@@ -231,17 +233,19 @@ enum CliExecutor {
 
 #[async_trait]
 impl HttpExecutor for CliExecutor {
-    async fn execute<B>(
+    async fn execute<B, R>(
         &self,
-        req: hyper::Request<B>,
-    ) -> anyhow::Result<(hyper::Response<HyperOutgoingBody>, Duration, ByteSize)>
+        req: Request<B>,
+        on_response: R,
+    ) -> anyhow::Result<Response<HyperOutgoingBody>>
     where
+        R: FnOnce(StatusCode, ByteSize, Duration) + Send + 'static,
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
         match self {
-            CliExecutor::Http(ref executor) => executor.execute(req).await,
-            CliExecutor::Wasi(ref executor) => executor.execute(req).await,
+            CliExecutor::Http(ref executor) => executor.execute(req, on_response).await,
+            CliExecutor::Wasi(ref executor) => executor.execute(req, on_response).await,
         }
     }
 }

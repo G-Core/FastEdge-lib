@@ -5,34 +5,33 @@ use std::time::Duration;
 
 pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
-use anyhow::{bail, Result};
+use anyhow::{bail, Error, Result};
 use bytes::Bytes;
-use http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL};
-use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use bytesize::ByteSize;
+use http::{
+    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
+    HeaderMap, HeaderName, HeaderValue, StatusCode,
+};
 use http_body_util::{BodyExt, Empty, Full};
-use hyper::body::Body;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
-use hyper_util::client::legacy::connect::Connect;
-use hyper_util::rt::TokioIo;
-use runtime::app::Status;
-use runtime::service::Service;
+use hyper::{body::Body, server::conn::http1, service::service_fn};
+use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 #[cfg(feature = "metrics")]
 use runtime::util::metrics;
 #[cfg(feature = "stats")]
 use runtime::util::stats::StatRow;
-use runtime::util::stats::StatsWriter;
-use runtime::{App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder};
+use runtime::{
+    app::Status, service::Service, util::stats::StatsWriter, App, AppResult, ContextT, Router,
+    WasmEngine, WasmEngineBuilder,
+};
 use secret::SecretStrategy;
 use shellflip::ShutdownHandle;
 use smol_str::SmolStr;
 use state::HttpState;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tokio::time::error::Elapsed;
-use tracing::Instrument;
-use wasi_common::I32Exit;
-use wasmtime::Trap;
+use tokio::{
+    io::{AsyncRead, AsyncWrite},
+    net::TcpListener,
+    time::error::Elapsed,
+};
 pub use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 pub mod executor;
@@ -73,6 +72,7 @@ where
         + Router
         + ContextHeaders
         + ExecutorFactory<HttpState<T::BackendConnector, S>>
+        + Clone
         + Sync
         + Send
         + 'static,
@@ -110,13 +110,13 @@ where
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
-                    tracing::trace!("new http connection");
+                    tracing::debug!(remote=?stream.peer_addr(), "new http connection");
                     let connection = self_.clone();
                     if let Some(cancel) = config.cancel.upgrade() {
                         tokio::spawn(connection.serve(stream, cancel));
                         backoff = 1;
                     } else {
-                        tracing::debug!("weak cancel handler");
+                        tracing::trace!("weak cancel handler");
                         backoff *= 2;
                     }
                 }
@@ -164,7 +164,8 @@ where
         + ExecutorFactory<HttpState<T::BackendConnector, U>>
         + Sync
         + Send
-        + 'static,
+        + 'static
+        + Clone,
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
     U: SecretStrategy,
@@ -173,6 +174,7 @@ where
     where
         S: AsyncRead + AsyncWrite + Unpin,
     {
+        use tracing::Instrument;
         let io = TokioIo::new(stream);
 
         let service = service_fn(move |req| {
@@ -181,18 +183,22 @@ where
             async move {
                 self_
                     .handle_request(&request_id, req)
-                    .instrument(tracing::info_span!("http_handler", request_id))
+                    .instrument(tracing::debug_span!("http", request_id))
                     .await
             }
         });
-        if let Err(error) = http1::Builder::new().keep_alive(true).serve_connection(io, service).await {
+        if let Err(error) = http1::Builder::new()
+            .keep_alive(true)
+            .serve_connection(io, service)
+            .await
+        {
             tracing::warn!(cause=?error, "Error serving connection");
         }
     }
 
     /// handle HTTP request.
     async fn handle_request<B>(
-        &self,
+        self: Arc<Self>,
         request_id: &str,
         mut request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
@@ -280,116 +286,90 @@ where
             }
         };
 
+        /*
+           Channel to receive http status code for asynchronious response processing of WASI-HTTP.
+        */
+        let (status_code_tx, mut status_code_rx) = tokio::sync::oneshot::channel();
         let start_ = std::time::Instant::now();
 
-        let response = match executor.execute(request).await {
-            Ok((mut response, time_elapsed, memory_used)) => {
+        let response_handler = {
+            let app_name = app_name.to_string();
+            #[cfg(feature = "stats")]
+            let billing_plan = cfg.plan.to_string();
+            #[cfg(feature = "stats")]
+            let request_id = request_id.to_string();
+            #[cfg(feature = "stats")]
+            let context = self.context.clone();
+
+            move |status_code: StatusCode, mem_used: ByteSize, time_elapsed: Duration| {
+                tracing::trace!(?status_code, ?mem_used, ?time_elapsed, "response handler");
+                /*
+                   Used by WASI-HTTP to send status code prior response processing.
+                   If there is no status code then default value is returned.
+                   For synchronious HTTP processing the status_code parameter is set and no value in the channel.
+                */
+                let status_code = status_code_rx.try_recv().unwrap_or_else(|error| {
+                    tracing::trace!(cause=?error, "unknown status code");
+                    status_code
+                });
                 tracing::info!(
                     "'{}' completed with status code: '{}' in {:.0?} using {} of WebAssembly heap",
                     app_name,
-                    response.status(),
+                    status_code,
                     time_elapsed,
-                    memory_used
+                    mem_used
                 );
-
                 #[cfg(feature = "stats")]
                 {
                     let stat_row = StatRow {
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name: app_name.to_string(),
-                        status_code: response.status().as_u16() as u32,
+                        app_name,
+                        status_code: status_code.as_u16() as u32,
                         fail_reason: 0, // TODO: use AppResult
-                        billing_plan: cfg.plan.to_string(),
+                        billing_plan,
                         time_elapsed: time_elapsed.as_micros() as u64,
-                        memory_used: memory_used.as_u64(),
-                        request_id: request_id.to_string(),
+                        memory_used: mem_used.as_u64(),
+                        request_id,
                         ..Default::default()
                     };
-                    self.context.write_stats(stat_row);
+                    context.write_stats(stat_row);
                 }
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
                     AppResult::SUCCESS,
                     &["http"],
                     Some(time_elapsed.as_micros() as u64),
-                    Some(memory_used.as_u64()),
+                    Some(mem_used.as_u64()),
                 );
+            }
+        };
+
+        let response = match executor.execute(request, response_handler).await {
+            Ok(mut response) => {
+                /*
+                   Status code sender is closed if response handler processing was done.
+                */
+                if !status_code_tx.is_closed() {
+                    if let Err(error) = status_code_tx.send(response.status()) {
+                        tracing::warn!(cause=?error, "sending status code")
+                    }
+                    tracing::info!(
+                        "'{}' returned status code: '{}'",
+                        app_name,
+                        response.status(),
+                    );
+                }
 
                 response.headers_mut().extend(app_res_headers(cfg));
                 response
             }
             Err(error) => {
                 tracing::warn!(cause=?error, "execute");
-                let root_cause = error.root_cause();
                 let time_elapsed = std::time::Instant::now().duration_since(start_);
-                let (status_code, fail_reason, msg) =
-                    if let Some(exit) = root_cause.downcast_ref::<I32Exit>() {
-                        if exit.0 == 0 {
-                            (
-                                StatusCode::OK.as_u16(),
-                                AppResult::SUCCESS,
-                                Empty::new().map_err(|never| match never {}).boxed(),
-                            )
-                        } else {
-                            (
-                                FASTEDGE_EXECUTION_PANIC,
-                                AppResult::OTHER,
-                                Full::new(Bytes::from("fastedge: App failed"))
-                                    .map_err(|never| match never {})
-                                    .boxed(),
-                            )
-                        }
-                    } else if let Some(trap) = root_cause.downcast_ref::<Trap>() {
-                        match trap {
-                            Trap::Interrupt => (
-                                FASTEDGE_EXECUTION_TIMEOUT,
-                                AppResult::TIMEOUT,
-                                Full::new(Bytes::from("fastedge: Execution timeout"))
-                                    .map_err(|never| match never {})
-                                    .boxed(),
-                            ),
-                            Trap::UnreachableCodeReached => (
-                                FASTEDGE_OUT_OF_MEMORY,
-                                AppResult::OOM,
-                                Full::new(Bytes::from("fastedge: Out of memory"))
-                                    .map_err(|never| match never {})
-                                    .boxed(),
-                            ),
-                            _ => (
-                                FASTEDGE_EXECUTION_PANIC,
-                                AppResult::OTHER,
-                                Full::new(Bytes::from("fastedge: App failed"))
-                                    .map_err(|never| match never {})
-                                    .boxed(),
-                            ),
-                        }
-                    } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
-                        (
-                            FASTEDGE_EXECUTION_TIMEOUT,
-                            AppResult::TIMEOUT,
-                            Full::new(Bytes::from("fastedge: Execution timeout"))
-                                .map_err(|never| match never {})
-                                .boxed(),
-                        )
-                    } else if root_cause.to_string().ends_with("deadline has elapsed") {
-                        (
-                            FASTEDGE_EXECUTION_TIMEOUT,
-                            AppResult::TIMEOUT,
-                            Full::new(Bytes::from("fastedge: Execution timeout"))
-                                .map_err(|never| match never {})
-                                .boxed(),
-                        )
-                    } else {
-                        (
-                            FASTEDGE_INTERNAL_ERROR,
-                            AppResult::OTHER,
-                            Full::new(Bytes::from("fastedge: Execute error"))
-                                .map_err(|never| match never {})
-                                .boxed(),
-                        )
-                    };
+
+                let (status_code, fail_reason, msg) = map_err(error);
                 tracing::info!(
                     "'{}' failed with status code: '{}' in {:.0?}",
                     app_name,
@@ -438,6 +418,77 @@ where
     }
 }
 
+fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
+    let root_cause = error.root_cause();
+    let (status_code, fail_reason, msg) =
+        if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+            if exit.0 == 0 {
+                (
+                    StatusCode::OK.as_u16(),
+                    AppResult::SUCCESS,
+                    Empty::new().map_err(|never| match never {}).boxed(),
+                )
+            } else {
+                (
+                    FASTEDGE_EXECUTION_PANIC,
+                    AppResult::OTHER,
+                    Full::new(Bytes::from("fastedge: App failed"))
+                        .map_err(|never| match never {})
+                        .boxed(),
+                )
+            }
+        } else if let Some(trap) = root_cause.downcast_ref::<wasmtime::Trap>() {
+            match trap {
+                wasmtime::Trap::Interrupt => (
+                    FASTEDGE_EXECUTION_TIMEOUT,
+                    AppResult::TIMEOUT,
+                    Full::new(Bytes::from("fastedge: Execution timeout"))
+                        .map_err(|never| match never {})
+                        .boxed(),
+                ),
+                wasmtime::Trap::UnreachableCodeReached => (
+                    FASTEDGE_OUT_OF_MEMORY,
+                    AppResult::OOM,
+                    Full::new(Bytes::from("fastedge: Out of memory"))
+                        .map_err(|never| match never {})
+                        .boxed(),
+                ),
+                _ => (
+                    FASTEDGE_EXECUTION_PANIC,
+                    AppResult::OTHER,
+                    Full::new(Bytes::from("fastedge: App failed"))
+                        .map_err(|never| match never {})
+                        .boxed(),
+                ),
+            }
+        } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
+            (
+                FASTEDGE_EXECUTION_TIMEOUT,
+                AppResult::TIMEOUT,
+                Full::new(Bytes::from("fastedge: Execution timeout"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+            )
+        } else if root_cause.to_string().ends_with("deadline has elapsed") {
+            (
+                FASTEDGE_EXECUTION_TIMEOUT,
+                AppResult::TIMEOUT,
+                Full::new(Bytes::from("fastedge: Execution timeout"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+            )
+        } else {
+            (
+                FASTEDGE_INTERNAL_ERROR,
+                AppResult::OTHER,
+                Full::new(Bytes::from("fastedge: Execute error"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+            )
+        };
+    (status_code, fail_reason, msg)
+}
+
 fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> String {
     req.headers()
         .get(TRACEPARENT)
@@ -448,20 +499,24 @@ fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> String {
 
 /// Creates an HTTP 500 response.
 fn internal_fastedge_error(msg: &'static str) -> Result<hyper::Response<HyperOutgoingBody>> {
-    Ok(hyper::Response::builder().status(FASTEDGE_INTERNAL_ERROR).body(
-        Full::new(Bytes::from(format!("fastedge: {}", msg)))
-            .map_err(|never| match never {})
-            .boxed(),
-    )?)
+    Ok(hyper::Response::builder()
+        .status(FASTEDGE_INTERNAL_ERROR)
+        .body(
+            Full::new(Bytes::from(format!("fastedge: {}", msg)))
+                .map_err(|never| match never {})
+                .boxed(),
+        )?)
 }
 
 /// Creates an HTTP 404 response.
 fn not_found() -> Result<hyper::Response<HyperOutgoingBody>> {
-    Ok(hyper::Response::builder().status(StatusCode::NOT_FOUND).body(
-        Full::new(Bytes::from("fastedge: Unknown app"))
-            .map_err(|never| match never {})
-            .boxed(),
-    )?)
+    Ok(hyper::Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(
+            Full::new(Bytes::from("fastedge: Unknown app"))
+                .map_err(|never| match never {})
+                .boxed(),
+        )?)
 }
 
 /// Creates an HTTP 429 response.
@@ -572,7 +627,7 @@ mod tests {
     use wasmtime::{Engine, Module};
 
     use super::*;
-    use crate::executor::HttpExecutorImpl;
+    use crate::executor::http::HttpExecutorImpl;
     use runtime::util::stats::StatRow;
     use secret::Secret;
 

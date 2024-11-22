@@ -1,23 +1,19 @@
 use std::time::{Duration, Instant};
 
-use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
+use ::http::{header, uri::Scheme, HeaderMap, Request, Response, StatusCode, Uri};
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bytesize::ByteSize;
 use dictionary::Dictionary;
-use http::uri::Scheme;
-use http::{header, HeaderMap, Uri};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
-use hyper::body::{Body};
-use runtime::store::StoreBuilder;
-use runtime::InstancePre;
+use hyper::body::Body;
+use runtime::{store::StoreBuilder, InstancePre};
 use secret::{Secret, SecretStrategy};
 use smol_str::ToSmolStr;
-use wasmtime_wasi_http::body::HyperOutgoingBody;
-use wasmtime_wasi_http::WasiHttpView;
+use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -35,49 +31,19 @@ where
     C: Clone + Send + Sync + 'static,
     T: SecretStrategy + Clone + Send + Sync + 'static,
 {
-    async fn execute<B>(
+    async fn execute<B, R>(
         &self,
-        req: hyper::Request<B>,
-    ) -> anyhow::Result<(hyper::Response<HyperOutgoingBody>, Duration, ByteSize)>
+        req: Request<B>,
+        on_response: R,
+    ) -> anyhow::Result<Response<HyperOutgoingBody>>
     where
+        R: FnOnce(StatusCode, ByteSize, Duration) + Send + 'static,
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
+        tracing::trace!("start execute");
         let start_ = Instant::now();
-        let response = self.execute_impl(req).await;
-        let elapsed = Instant::now().duration_since(start_);
-        response.map(|(r, used)| (r, elapsed, used))
-    }
-}
 
-impl<C, T> WasiHttpExecutorImpl<C, T>
-where
-    C: Clone + Send + Sync + 'static,
-    T: SecretStrategy + Clone + Send + 'static,
-{
-    pub fn new(
-        instance_pre: InstancePre<HttpState<C, T>>,
-        store_builder: StoreBuilder,
-        backend: Backend<C>,
-        dictionary: Dictionary,
-        secret: Secret<T>,
-    ) -> Self {
-        Self {
-            instance_pre,
-            store_builder,
-            backend,
-            dictionary,
-            secret,
-        }
-    }
-
-    async fn execute_impl<B>(
-        &self,
-        req: hyper::Request<B>,
-    ) -> anyhow::Result<(hyper::Response<HyperOutgoingBody>, ByteSize)>
-    where
-        B: BodyExt,
-    {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let (mut parts, body) = req.into_parts();
 
@@ -106,7 +72,7 @@ where
         let body = Full::new(body).map_err(|never| match never {});
         let body = body.boxed();
 
-        let properties = executor::get_properties(&parts.headers);
+        let properties = crate::executor::get_properties(&parts.headers);
         let store_builder = self.store_builder.to_owned().with_properties(properties);
         let wasi_nn = self
             .store_builder
@@ -157,17 +123,13 @@ where
             .new_response_outparam(sender)
             .context("new response outparam")?;
 
-        let (proxy, _inst) = wasmtime_wasi_http::proxy::Proxy::instantiate_pre(
-            &mut store,
-            instance_pre.as_ref(),
-        )
-            .await?;
+        let (proxy, _inst) =
+            wasmtime_wasi_http::proxy::Proxy::instantiate_pre(&mut store, instance_pre.as_ref())
+                .await?;
 
         let duration = Duration::from_millis(store.data().timeout);
-        
-        let task = tokio::task::spawn(async move {
 
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        let task = tokio::task::spawn(async move {
             if let Err(e) = tokio::time::timeout(
                 duration,
                 proxy
@@ -179,24 +141,17 @@ where
                 tracing::warn!(cause=?e, "incoming handler");
                 return Err(e);
             };
-            let used = ByteSize::b(store.memory_used() as u64);
-            Ok(used)
+            let elapsed = Instant::now().duration_since(start_);
+            on_response(
+                StatusCode::default(),
+                ByteSize::b(store.memory_used() as u64),
+                elapsed,
+            );
+            Ok(())
         });
 
         match receiver.await {
-            Ok(Ok(resp)) => {
-                println!("##############################################   receiver response: {:?}", resp);
-                let used = ByteSize::b(0 as u64);
-                Ok((resp ,used))
-            },
-            /*Ok(Ok(resp)) => {
-                tracing::info!("##############################################   resp");
-                let (parts, body) = resp.into_parts();
-                let body = body.map_err(anyhow::Error::msg).boxed();
-                //let used = task.await.context("task await")?.context("byte size")?;
-                let used = ByteSize::b(0 as u64);
-                Ok((Response::from_parts(parts, body), used))
-            }*/
+            Ok(Ok(response)) => Ok(response),
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {
                 let e = match task.await {
@@ -207,6 +162,28 @@ where
                 };
                 bail!("guest never invoked `response-outparam::set` method: {e:?}")
             }
+        }
+    }
+}
+
+impl<C, T> WasiHttpExecutorImpl<C, T>
+where
+    C: Clone + Send + Sync + 'static,
+    T: SecretStrategy + Clone + Send + 'static,
+{
+    pub fn new(
+        instance_pre: InstancePre<HttpState<C, T>>,
+        store_builder: StoreBuilder,
+        backend: Backend<C>,
+        dictionary: Dictionary,
+        secret: Secret<T>,
+    ) -> Self {
+        Self {
+            instance_pre,
+            store_builder,
+            backend,
+            dictionary,
+            secret,
         }
     }
 }
