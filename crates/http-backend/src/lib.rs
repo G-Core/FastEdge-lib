@@ -199,16 +199,15 @@ impl<C> Backend<C> {
                         a.host().to_string()
                     }
                 });
+                let request_host_header = req.headers.iter().find_map(|(k, v)| {
+                    if k.eq_ignore_ascii_case("host") {
+                        Some(v.to_owned())
+                    } else {
+                        None
+                    }
+                });
                 let original_host = original_host
-                    .or_else(|| {
-                        req.headers.iter().find_map(|(k, v)| {
-                            if k.eq_ignore_ascii_case("host") {
-                                Some(v.to_owned())
-                            } else {
-                                None
-                            }
-                        })
-                    })
+                    .or_else(|| request_host_header.clone())
                     .unwrap_or_default();
                 // filter headers
                 let mut headers = req
@@ -238,6 +237,10 @@ impl<C> Backend<C> {
                     "fastedge-scheme".to_string(),
                     original_url.scheme_str().unwrap_or("http").to_string(),
                 ));
+                //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
+                if let Some(request_host_header) = request_host_header {
+                    headers.push(("Fastedge_Header_Hostname".to_string(), request_host_header));
+                }
                 headers.extend(self.propagate_headers_vec());
 
                 let host = canonical_host_name(&headers, &original_url)?;
