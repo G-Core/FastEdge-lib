@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2024-12-06
+
+### 🐛 Bug Fixes
+
+- Remove usage of CI rust cache
+- Raise and alert for secret decryption errors
+- Set Fastedge_Header_Hostname header for backend
+
 ## [0.9.0] - 2024-11-22
 
 ### 🐛 Bug Fixes
@@ -9,6 +17,10 @@ All notable changes to this project will be documented in this file.
 - Process http body chunks
 - Adding on_response handler to process the end of body chunks
 - Moving unit test to http sub-module
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.8.1] - 2024-11-11
 
