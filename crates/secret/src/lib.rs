@@ -20,7 +20,7 @@ impl<T: SecretStrategy + Send> secret::Host for Secret<T> {
             Ok(None) => Ok(None),
             Ok(Some(plaintext)) => Ok(Some(String::from_utf8(plaintext)?)),
             Err(error) => {
-                tracing::warn!(cause=?error, "error reading secret");
+                tracing::error!(cause=?error, "decryption error");
                 Err(secret::Error::DecryptError)
             }
         })
