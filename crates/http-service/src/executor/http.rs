@@ -283,6 +283,10 @@ mod tests {
         fn get(&self, _key: String) -> anyhow::Result<Option<Vec<u8>>> {
             Ok(Some(b"secret".to_vec()))
         }
+
+        fn get_effective_at(&self, _key: String, _at: u64) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(Some(b"secret".to_vec()))
+        }
     }
 
     impl ExecutorFactory<HttpState<FastEdgeConnector, TestSecret>> for TestContext {
