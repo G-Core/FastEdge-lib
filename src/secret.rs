@@ -11,6 +11,10 @@ impl SecretStrategy for SecretImpl {
     fn get(&self, key: String) -> anyhow::Result<Option<Vec<u8>>> {
         Ok(self.inner.get(&key).map(|v| v.as_bytes().to_vec()))
     }
+
+    fn get_effective_at(&self, key: String, _at: u64) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(self.inner.get(&key).map(|v| v.as_bytes().to_vec()))
+    }
 }
 
 impl Deref for SecretImpl {
