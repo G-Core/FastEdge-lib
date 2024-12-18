@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2024-12-18
+
+### 🚀 Features
+
+- Adding secret get_effective_at method host implementation
+
 ## [0.9.1] - 2024-12-06
 
 ### 🐛 Bug Fixes
@@ -9,6 +15,10 @@ All notable changes to this project will be documented in this file.
 - Remove usage of CI rust cache
 - Raise and alert for secret decryption errors
 - Set Fastedge_Header_Hostname header for backend
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.9.0] - 2024-11-22
 
