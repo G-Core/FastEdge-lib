@@ -78,9 +78,8 @@ where
 
         let properties = crate::executor::get_properties(&parts.headers);
 
-        let store_builder = self.store_builder.to_owned().with_properties(properties);
-        let wasi_nn = self.store_builder.make_wasi_nn_ctx()?;
-        let mut http_backend = self.backend.to_owned();
+        let store_builder = self.store_builder.clone().with_properties(properties);
+        let mut http_backend = self.backend.clone();
 
         http_backend
             .propagate_headers(parts.headers.clone())
@@ -89,7 +88,6 @@ where
         let propagate_header_names = http_backend.propagate_header_names();
         let backend_uri = http_backend.uri();
         let state = HttpState {
-            wasi_nn,
             http_backend,
             uri: backend_uri,
             propagate_headers: parts.headers,
@@ -101,11 +99,15 @@ where
         let mut store = store_builder.build(state)?;
 
         let instance = self.instance_pre.instantiate_async(&mut store).await?;
+        let http_handler = instance.get_export(&mut store, None, "gcore:fastedge/http-handler");
+        let process = instance
+            .get_export(&mut store, http_handler.as_ref(), "process")
+            .ok_or_else(|| anyhow!("gcore:fastedge/http-handler instance not found"))?;
         let func = instance
-            .exports(&mut store)
-            .instance("gcore:fastedge/http-handler")
-            .ok_or_else(|| anyhow!("gcore:fastedge/http-handler instance not found"))?
-            .typed_func::<(fastedge::http::Request,), (fastedge::http::Response,)>("process")?;
+            .get_typed_func::<(fastedge::http::Request,), (fastedge::http::Response,)>(
+                &mut store, process,
+            )?;
+
         let duration = Duration::from_millis(store.data().timeout);
         let func = tokio::time::timeout(duration, func.call_async(&mut store, (request,)));
         let (resp,) = match func.await? {

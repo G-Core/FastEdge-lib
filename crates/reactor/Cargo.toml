@@ -8,5 +8,3 @@ description = "Main reactor module with world exports and all generated bindgen 
 
 [dependencies]
 wasmtime = { workspace = true, features = ["component-model"] }
-tracing = {workspace = true}
-anyhow = { workspace = true }

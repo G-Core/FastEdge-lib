@@ -1,14 +1,10 @@
-use std::fmt::Debug;
-use std::ops::Deref;
-use std::sync::Arc;
+use std::{fmt::Debug, ops::Deref, sync::Arc};
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 
-use crate::registry::CachedGraphRegistry;
 use crate::store::StoreBuilder;
 use http_backend::Backend;
 use limiter::ProxyLimiter;
-use std::time::Duration;
-use wasmtime::component::{Component, Resource, ResourceTable};
+use wasmtime::component::{Component, ResourceTable};
 use wasmtime::{
     Engine, InstanceAllocationStrategy, Module, PoolingAllocationConfig, ProfilingStrategy,
     WasmBacktraceDetails,
@@ -18,7 +14,7 @@ use wit_component::ComponentEncoder;
 pub mod app;
 mod limiter;
 pub mod logger;
-pub mod registry;
+mod registry;
 pub mod service;
 pub mod store;
 pub mod stub;
@@ -32,10 +28,13 @@ use http::Request;
 use smol_str::SmolStr;
 use std::borrow::Cow;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
-use wasmtime_wasi_http::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::types::{
-    default_send_request, HostFutureIncomingResponse, OutgoingRequest,
+use wasmtime_wasi_http::body::HyperOutgoingBody;
+use wasmtime_wasi_http::types::OutgoingRequestConfig;
+use wasmtime_wasi_http::{
+    bindings::http::types::ErrorCode,
+    types::{default_send_request, HostFutureIncomingResponse},
 };
+use wasmtime_wasi_nn::wit::WasiNnCtx;
 
 pub const DEFAULT_EPOCH_TICK_INTERVAL: u64 = 10;
 
@@ -76,10 +75,11 @@ pub enum Wasi {
 pub struct Data<T> {
     inner: T,
     wasi: Wasi,
+    pub wasi_nn: WasiNnCtx,
     // memory usage limiter
     store_limits: ProxyLimiter,
     pub timeout: u64,
-    table: ResourceTable,
+    pub table: ResourceTable,
     pub logger: Option<Logger>,
     http: WasiHttpCtx,
 }
@@ -111,26 +111,19 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
 
     fn send_request(
         &mut self,
-        request: OutgoingRequest,
-    ) -> HttpResult<Resource<HostFutureIncomingResponse>>
+        request: Request<HyperOutgoingBody>,
+        config: OutgoingRequestConfig,
+    ) -> HttpResult<HostFutureIncomingResponse>
     where
         Self: Sized,
     {
-        let default_timeout = Duration::from_millis(3000);
-        let (head, body) = request.request.into_parts();
-        let (authority, head) = self.inner.backend_request(head).map_err(|e| {
+        let (head, body) = request.into_parts();
+        let (_, head) = self.inner.backend_request(head).map_err(|e| {
             tracing::warn!(cause=?e, "backend request");
             ErrorCode::InternalError(Some(e.to_string()))
         })?;
-        let outgoing_request = OutgoingRequest {
-            use_tls: false,
-            authority,
-            request: Request::from_parts(head, body),
-            connect_timeout: default_timeout,
-            first_byte_timeout: default_timeout,
-            between_bytes_timeout: default_timeout,
-        };
-        default_send_request(self, outgoing_request)
+        let request = Request::from_parts(head, body);
+        Ok(default_send_request(request, config))
     }
 }
 
@@ -207,7 +200,7 @@ impl Default for WasmConfig {
         //pooling_allocation_config.max_memories_per_module(1);
 
         // allow for up to 128MiB of linear memory. Wasm pages are 64k
-        pooling_allocation_config.memory_pages(128 * (MB as u64) / (64 * 1024));
+        //pooling_allocation_config.memory_pages(128 * (MB as u64) / (64 * 1024));
 
         // Core wasm programs have 1 table
         pooling_allocation_config.max_tables_per_module(1);
@@ -241,9 +234,6 @@ pub struct WasmEngine<T> {
     inner: Engine,
     component_linker: ComponentLinker<T>,
     module_linker: ModuleLinker<T>,
-
-    // WASI-NN global Graph Registry
-    graph_registry: CachedGraphRegistry,
 }
 
 /// A builder interface for configuring a new [`WasmEngine`].
@@ -262,7 +252,7 @@ impl<T: Send + Sync> WasmEngine<T> {
     }
 
     pub fn store_builder(&self, version: WasiVersion) -> StoreBuilder {
-        StoreBuilder::new(self.inner.clone(), version, self.graph_registry.clone())
+        StoreBuilder::new(self.inner.clone(), version)
     }
 
     /// Creates a new [`InstancePre`] for the given [`Component`].
@@ -305,7 +295,6 @@ impl<T: Send + Sync> WasmEngineBuilder<T> {
             inner: self.engine,
             component_linker: self.component_linker,
             module_linker: self.module_linker,
-            graph_registry: CachedGraphRegistry::new(),
         }
     }
 }
