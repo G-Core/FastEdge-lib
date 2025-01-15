@@ -37,7 +37,7 @@ clickhouse = { version = "0.13", optional = true }
 chrono = "0.4"
 async-trait = "0.1"
 wasmtime-wasi-http = "20.0.2"
-hyper-util = "0.1"
+hyper-util = { version = "0.1", features = ["server", "server-graceful"] }
 http-body-util = "0.1"
 shellflip = {workspace = true}
 bytes = "1.6"
