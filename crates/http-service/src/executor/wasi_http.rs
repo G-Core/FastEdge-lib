@@ -129,6 +129,11 @@ where
 
         let duration = Duration::from_millis(store.data().timeout);
 
+        /*
+            Channel to receive http status code for asynchronious response processing of WASI-HTTP.
+        */
+        let (status_code_tx, status_code_rx) = tokio::sync::oneshot::channel();
+
         let task = tokio::task::spawn(async move {
             if let Err(e) = tokio::time::timeout(
                 duration,
@@ -142,8 +147,18 @@ where
                 return Err(e);
             };
             let elapsed = Instant::now().duration_since(start_);
+            /*
+                Used by WASI-HTTP to send status code prior response processing.
+                If there is no status code then default value is returned.
+                For synchronious HTTP processing the status_code parameter is set and no value in the channel.
+            */
+            let status_code = status_code_rx.await.unwrap_or_else(|error| {
+                tracing::trace!(cause=?error, "unknown status code");
+                StatusCode::default()
+            });
+
             on_response(
-                StatusCode::default(),
+                status_code,
                 ByteSize::b(store.memory_used() as u64),
                 elapsed,
             );
@@ -151,7 +166,21 @@ where
         });
 
         match receiver.await {
-            Ok(Ok(response)) => Ok(response),
+            Ok(Ok(response)) => {
+                /*
+                   Status code sender is closed if response handler processing was done.
+                */
+                if !status_code_tx.is_closed() {
+                    if let Err(error) = status_code_tx.send(response.status()) {
+                        tracing::warn!(cause=?error, "sending status code")
+                    }
+                    tracing::debug!("returned status code: '{}'", response.status(),);
+                } else {
+                    tracing::warn!("status code sender is closed");
+                }
+
+                Ok(response)
+            }
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {
                 let e = match task.await {
