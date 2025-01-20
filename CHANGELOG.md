@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.3-rc.4] - 2025-01-20
+
+### 🐛 Bug Fixes
+
+- Compilation errors after rebase
+
 ## [0.9.3-rc.3] - 2025-01-20
 
 ### 🐛 Bug Fixes
@@ -14,6 +20,7 @@ All notable changes to this project will be documented in this file.
 
 ### ⚙️ Miscellaneous Tasks
 
+- Release
 - Release
 - Release
 
