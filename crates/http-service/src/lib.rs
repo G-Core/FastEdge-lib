@@ -90,6 +90,7 @@ where
 
     /// Run hyper http service
     async fn run(self, config: Self::Config) -> Result<()> {
+        #[allow(unused_variables)]
         let listener = if let Some(fd) = config.listen_fd {
             #[cfg(target_family = "unix")]
             {
