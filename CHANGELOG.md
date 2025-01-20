@@ -2,17 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.3-rc.2] - 2025-01-20
+## [0.9.3-rc.3] - 2025-01-20
 
 ### 🐛 Bug Fixes
 
 - Graceful shutdown for http service
 - Incorrect stats written for failing wasi-http app
 - Shellflip conditional compilation for non unix platform
+- Shellflip conditional compilation for non unix platform
 - Add to gitignore cargo/config.toml
 
 ### ⚙️ Miscellaneous Tasks
 
+- Release
 - Release
 
 ## [0.9.2] - 2024-12-18
