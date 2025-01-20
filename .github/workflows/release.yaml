@@ -40,6 +40,10 @@ jobs:
             os: macos-latest
             target: aarch64-apple-darwin
 
+          - build: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+
     steps:
       - name: Clone repo
         uses: actions/checkout@v4
@@ -74,7 +78,7 @@ jobs:
             7z a "$dirname.zip" "$dirname"
             certutil -hashfile "$dirname.zip" SHA256 > "$dirname.zip.sha256"
             echo "ASSET=$dirname.zip" >> $GITHUB_ENV
-            echo "ASSET_SUM=$dirname.tar.gz.sha256" >> $GITHUB_ENV
+            echo "ASSET_SUM=$dirname.zip.sha256" >> $GITHUB_ENV
           else
             tar -czf "$dirname.tar.gz" "$dirname"
             shasum -a 256 "$dirname.tar.gz" > "$dirname.tar.gz.sha256"
