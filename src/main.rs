@@ -25,7 +25,6 @@ use runtime::{
     componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
     SecretValue, WasiVersion, WasmConfig, WasmEngine,
 };
-use shellflip::ShutdownCoordinator;
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -95,7 +94,8 @@ struct CliContext {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     pretty_env_logger::init();
-    let shutdown_coordinator = ShutdownCoordinator::new();
+    #[cfg(target_family = "unix")]
+    let shutdown_coordinator = shellflip::ShutdownCoordinator::new();
     let args = Cli::parse();
     let config = WasmConfig::default();
     let engine = Engine::new(&config)?;
@@ -157,6 +157,7 @@ async fn main() -> anyhow::Result<()> {
             let http = http.run(HttpConfig {
                 all_interfaces: false,
                 port: run.port,
+                #[cfg(target_family = "unix")]
                 cancel: shutdown_coordinator.handle_weak(),
                 listen_fd: None,
                 backoff: 64,
@@ -166,6 +167,7 @@ async fn main() -> anyhow::Result<()> {
                     res?
                 },
                 _ = tokio::signal::ctrl_c() => {
+                    #[cfg(target_family = "unix")]
                     shutdown_coordinator.shutdown().await
                 }
             }

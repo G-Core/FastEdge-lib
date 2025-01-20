@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
-use std::os::fd::OwnedFd;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::Duration;
 
 pub use crate::executor::ExecutorFactory;
@@ -24,7 +23,6 @@ use runtime::{
     WasmEngine, WasmEngineBuilder,
 };
 use secret::SecretStrategy;
-use shellflip::{ShutdownHandle, ShutdownSignal};
 use smol_str::SmolStr;
 use state::HttpState;
 use tokio::{net::TcpListener, time::error::Elapsed};
@@ -34,6 +32,11 @@ pub mod executor;
 pub mod state;
 
 pub(crate) static TRACEPARENT: &str = "traceparent";
+
+#[cfg(target_family = "unix")]
+type OwnedFd = std::os::fd::OwnedFd;
+#[cfg(not(target_family = "unix"))]
+type OwnedFd = u16;
 
 #[cfg(feature = "metrics")]
 const HTTP_LABEL: &[&str; 1] = &["http"];
@@ -47,7 +50,8 @@ const FASTEDGE_EXECUTION_PANIC: u16 = 533;
 pub struct HttpConfig {
     pub all_interfaces: bool,
     pub port: u16,
-    pub cancel: Weak<ShutdownHandle>,
+    #[cfg(target_family = "unix")]
+    pub cancel: std::sync::Weak<shellflip::ShutdownHandle>,
     pub listen_fd: Option<OwnedFd>,
     pub backoff: u64,
 }
@@ -99,16 +103,21 @@ where
             let listen_addr = SocketAddr::from((interface, config.port));
             TcpListener::bind(listen_addr).await?
         };
+
         let listen_addr = listener.local_addr()?;
         tracing::info!("Listening on http://{}", listen_addr);
         let mut backoff = 1;
         let self_ = Arc::new(self);
         let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+        #[cfg(target_family = "unix")]
         let mut signal = config
             .cancel
             .upgrade()
-            .map(|s| ShutdownSignal::from(s.as_ref()))
+            .map(|s| shellflip::ShutdownSignal::from(s.as_ref()))
             .unwrap_or_default();
+
+        #[cfg(not(target_family = "unix"))]
+        let signal = signal::Signal {};
 
         loop {
             tokio::select! {
@@ -131,7 +140,7 @@ where
                                 }
                             });
 
-                             let connection = http1::Builder::new().keep_alive(true).serve_connection(io, service);
+                            let connection = http1::Builder::new().keep_alive(true).serve_connection(io, service);
                             let connection = graceful.watch(connection);
                             tokio::spawn(async move {
                                 if let Err(error) = connection.await {
@@ -584,6 +593,17 @@ fn app_req_headers(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
         }
     }
     headers
+}
+
+#[cfg(not(target_family = "unix"))]
+pub(crate) mod signal {
+    pub(crate) struct Signal;
+
+    impl Signal {
+        pub(crate) async fn on_shutdown(&self) {
+            tokio::signal::ctrl_c().await.expect("ctrl-c");
+        }
+    }
 }
 
 #[cfg(test)]
