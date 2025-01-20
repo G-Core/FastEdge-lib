@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::os::fd::OwnedFd;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 pub use crate::executor::ExecutorFactory;
