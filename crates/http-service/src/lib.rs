@@ -288,10 +288,6 @@ where
             }
         };
 
-        /*
-           Channel to receive http status code for asynchronious response processing of WASI-HTTP.
-        */
-        let (status_code_tx, mut status_code_rx) = tokio::sync::oneshot::channel();
         let start_ = std::time::Instant::now();
 
         let response_handler = {
@@ -304,16 +300,6 @@ where
             let context = self.context.clone();
 
             move |status_code: StatusCode, mem_used: ByteSize, time_elapsed: Duration| {
-                tracing::trace!(?status_code, ?mem_used, ?time_elapsed, "response handler");
-                /*
-                   Used by WASI-HTTP to send status code prior response processing.
-                   If there is no status code then default value is returned.
-                   For synchronious HTTP processing the status_code parameter is set and no value in the channel.
-                */
-                let status_code = status_code_rx.try_recv().unwrap_or_else(|error| {
-                    tracing::trace!(cause=?error, "unknown status code");
-                    status_code
-                });
                 tracing::info!(
                     "'{}' completed with status code: '{}' in {:.0?} using {} of WebAssembly heap",
                     app_name,
@@ -350,20 +336,6 @@ where
 
         let response = match executor.execute(request, response_handler).await {
             Ok(mut response) => {
-                /*
-                   Status code sender is closed if response handler processing was done.
-                */
-                if !status_code_tx.is_closed() {
-                    if let Err(error) = status_code_tx.send(response.status()) {
-                        tracing::warn!(cause=?error, "sending status code")
-                    }
-                    tracing::info!(
-                        "'{}' returned status code: '{}'",
-                        app_name,
-                        response.status(),
-                    );
-                }
-
                 response.headers_mut().extend(app_res_headers(cfg));
                 response
             }
