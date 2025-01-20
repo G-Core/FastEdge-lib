@@ -2,11 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.3-rc.1] - 2025-01-20
+
+### 🐛 Bug Fixes
+
+- Graceful shutdown for http service
+- Incorrect stats written for failing wasi-http app
+- Add to gitignore cargo/config.toml
+
 ## [0.9.2] - 2024-12-18
 
 ### 🚀 Features
 
 - Adding secret get_effective_at method host implementation
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.9.1] - 2024-12-06
 
