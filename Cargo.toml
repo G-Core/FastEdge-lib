@@ -34,7 +34,7 @@ unused_import_braces = 'warn'
 all = 'allow'
 
 [package]
-name = "cli"
+name = "fastedge-run"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
