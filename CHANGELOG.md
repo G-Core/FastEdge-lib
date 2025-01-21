@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.4] - 2025-01-21
+
+### 🐛 Bug Fixes
+
+- Use ubuntu-22.04 as runner for cli to avoid glibc not found error
+- Change cli tool name to fastedge-run
+
 ## [0.9.3] - 2025-01-20
 
 ### 🐛 Bug Fixes
@@ -10,6 +17,10 @@ All notable changes to this project will be documented in this file.
 - Incorrect stats written for failing wasi-http app
 - Shellflip conditional compilation for non unix platform
 - Windows compilation for unused variable
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.9.2] - 2024-12-18
 
