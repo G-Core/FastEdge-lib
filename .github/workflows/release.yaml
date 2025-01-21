@@ -33,7 +33,7 @@ jobs:
       matrix:
         include:
           - build: linux
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
 
           - build: macos
@@ -64,7 +64,7 @@ jobs:
         shell: bash
         run: |
           # Replace with the name of your binary
-          binary_name="cli"
+          binary_name="fastedge-run"
 
           dirname="$binary_name-${{ env.VERSION }}-${{ matrix.target }}"
           mkdir "$dirname"

@@ -1,4 +1,4 @@
-FastEdge CLI and common runtime libraries
+FastEdge run tool and common runtime libraries
 
 # Setting up
 
@@ -17,11 +17,11 @@ Run `git submodule update --init --recursive -f`
 
 ## Building
 
-Run `cargo build --release` to build CLI tool and all required dependencies.
+Run `cargo build --release` to build fastedge app run tool and all required dependencies.
 
 ## Releasing
 
-CLI tool and FastEdge lib are released with GitHub using [cargo-release](https://github.com/crate-ci/cargo-release) tool. 
+Fastedge run tool and FastEdge lib are released with GitHub using [cargo-release](https://github.com/crate-ci/cargo-release) tool. 
 The release process includes next steps:
 * increment crate version in Cargo.toml
 * generate CHANGELOG.md file
@@ -67,5 +67,5 @@ Note: It also creates a PR for `releases/**` branch to merge it to `main` as soo
 
 # Running
 
-## CLI
-* run with `cargo run --bin cli -- --help` flag to list CLI commands and options
+## Fastedge Run Tool
+* run with `cargo run --bin fastedge-run -- --help` flag to list run commands and options

@@ -33,7 +33,7 @@ use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
 
 #[derive(Debug, Parser)]
-#[command(name = "cli")]
+#[command(name = "fastedge-run")]
 #[command(about = "FastEdge test tool", long_about = None)]
 struct Cli {
     #[command(subcommand)]
