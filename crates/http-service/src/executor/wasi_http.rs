@@ -13,7 +13,6 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::{store::StoreBuilder, InstancePre};
 use secret::{Secret, SecretStrategy};
-use smol_str::ToSmolStr;
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
@@ -88,7 +87,7 @@ where
             .headers
             .iter()
             .filter_map(|(k, v)| {
-                if propagate_header_names.contains(&k.to_smolstr()) {
+                if propagate_header_names.contains(k) {
                     Some((k.to_owned(), v.to_owned()))
                 } else {
                     None

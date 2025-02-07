@@ -22,4 +22,4 @@ smol_str = {workspace = true}
 [dev-dependencies]
 claims = "0.8"
 tracing-test = "0.2"
-mock-http-connector = "0.3"
+mock-http-connector = { git = "https://github.com/nmoutschen/mock-http-connector.git", branch = "hyper-1.0", default-features = false, features = ["hyper_1"]}

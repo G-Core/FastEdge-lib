@@ -13,7 +13,6 @@ use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
 use pin_project::pin_project;
-use smol_str::{SmolStr, ToSmolStr};
 use tokio::net::TcpStream;
 use tower_service::Service;
 use tracing::{debug, trace, warn};
@@ -24,7 +23,7 @@ use reactor::gcore::fastedge::{
     http_client::Host,
 };
 
-type HeaderNameList = Vec<SmolStr>;
+type HeaderNameList = Vec<HeaderName>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendStrategy {
@@ -112,8 +111,8 @@ impl<C> Backend<C> {
         self.uri.to_owned()
     }
 
-    pub fn propagate_header_names(&self) -> Vec<SmolStr> {
-        self.propagate_header_names.to_owned()
+    pub fn propagate_header_names(&self) -> HeaderNameList {
+        self.propagate_header_names.clone()
     }
 
     /// Propagate filtered headers from original requests
@@ -132,7 +131,7 @@ impl<C> Backend<C> {
         }
         let headers = headers.into_iter().filter(|(k, _)| {
             if let Some(name) = k {
-                self.propagate_header_names.contains(&name.to_smolstr())
+                self.propagate_header_names.contains(name)
             } else {
                 false
             }
@@ -227,7 +226,7 @@ impl<C> Backend<C> {
                         !self
                             .propagate_header_names
                             .iter()
-                            .any(|name| name.eq_ignore_ascii_case(k))
+                            .any(|name| name.eq(k.as_str()))
                     })
                     .collect::<Vec<(String, String)>>();
 
@@ -279,14 +278,14 @@ where
             self.max_sub_requests -= 1;
         }
 
-        let request = self
-            .make_request(req)
-            .map_err(|_| HttpError::RequestError)?;
-        let res = self
-            .client
-            .request(request)
-            .await
-            .map_err(|_| HttpError::RequestError)?;
+        let request = self.make_request(req).map_err(|error| {
+            warn!(cause=?error, "making request to backend");
+            HttpError::RequestError
+        })?;
+        let res = self.client.request(request).await.map_err(|error| {
+            warn!(cause=?error, "sending request to backend");
+            HttpError::RequestError
+        })?;
 
         let status = res.status().as_u16();
         let (parts, body) = res.into_parts();
@@ -311,7 +310,10 @@ where
         let body_bytes = body
             .collect()
             .await
-            .map_err(|_| HttpError::RequestError)?
+            .map_err(|error| {
+                warn!(cause=?error, "receiving body from backend");
+                HttpError::RequestError
+            })?
             .to_bytes();
         let body = Some(body_bytes.to_vec());
 
@@ -494,7 +496,7 @@ mod tests {
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "http://example.com/path".to_string(),
@@ -502,7 +504,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
@@ -527,7 +528,7 @@ mod tests {
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "http://example.com/path".to_string(),
@@ -535,7 +536,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::REQUEST_TIMEOUT, res.status);
     }
 
@@ -560,7 +560,7 @@ mod tests {
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "/path".to_string(),
@@ -571,7 +571,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
@@ -599,7 +598,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
@@ -623,7 +621,7 @@ mod tests {
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "http://rust-lang.org".to_string(),
@@ -638,7 +636,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
@@ -661,7 +658,7 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
-                .propagate_headers_names(vec!["Propagate-Header".to_string()])
+                .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
@@ -670,7 +667,7 @@ mod tests {
             claims::assert_ok!("VALUE".try_into()),
         );
         headers.insert("Propagate-Header", claims::assert_ok!("VALUE".try_into()));
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "http://example.com".to_string(),
@@ -678,7 +675,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
@@ -700,13 +696,13 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
-                .propagate_headers_names(vec!["Propagate-Header".to_string()])
+                .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .uri(assert_ok!("http://be.server/backend_path/".parse()))
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
 
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "http://example.com/path/".to_string(),
@@ -714,7 +710,6 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
@@ -736,13 +731,13 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
-                .propagate_headers_names(vec!["Propagate-Header".to_string()])
+                .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .max_sub_requests(2)
                 .build(connector);
         let mut headers = HeaderMap::new();
         headers.insert("Server_name", claims::assert_ok!("server".try_into()));
 
-        claims::assert_ok!(backend.propagate_headers(&headers));
+        claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
             uri: "http://example.com/".to_string(),
@@ -750,15 +745,12 @@ mod tests {
             body: None,
         };
         let res = claims::assert_ok!(backend.send_request(req.clone()).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
 
         let res = claims::assert_ok!(backend.send_request(req.clone()).await);
-        let res = claims::assert_ok!(res);
         assert_eq!(http::StatusCode::OK, res.status);
 
-        let res = claims::assert_ok!(backend.send_request(req).await);
-        let res = claims::assert_err!(res);
-        assert_eq!("too-many-requests", res.name());
+        let error = claims::assert_err!(backend.send_request(req).await);
+        assert_eq!("too-many-requests", error.name());
     }
 }
