@@ -9,7 +9,6 @@ description = "Client component for outbound http requests"
 [dependencies]
 reactor = { path = "../reactor" }
 http = {workspace = true}
-async-trait = {workspace = true}
 anyhow = {workspace = true}
 tracing = {workspace = true}
 hyper = { workspace = true }

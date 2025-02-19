@@ -5,7 +5,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::{anyhow, Error, Result};
-use async_trait::async_trait;
 use http::{header, uri::Scheme, HeaderMap, HeaderName, Uri};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -268,7 +267,6 @@ impl<C> Backend<C> {
     }
 }
 
-#[async_trait]
 impl<C> Host for Backend<C>
 where
     C: Connect + Clone + Send + Sync + 'static,

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use reactor::gcore::fastedge::secret;
 
 pub trait SecretStrategy {
@@ -11,7 +10,6 @@ pub struct Secret<T: SecretStrategy> {
     strategy: T,
 }
 
-#[async_trait]
 impl<T: SecretStrategy + Send> secret::Host for Secret<T> {
     async fn get(&mut self, key: String) -> Result<Option<String>, secret::Error> {
         match self.strategy.get(key) {
