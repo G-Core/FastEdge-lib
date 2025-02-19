@@ -5,14 +5,13 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
 use moka::sync::Cache;
+use wasmtime_wasi_nn::backend::candle::CandleBackend;
 use wasmtime_wasi_nn::wit::types::GraphEncoding;
 use wasmtime_wasi_nn::{
     backend::{openvino::OpenvinoBackend, BackendFromDir},
     wit::types::ExecutionTarget,
     GraphRegistry, Registry, {Backend, Graph},
 };
-
-use candle_wasi_nn::CandleBackend;
 
 #[derive(Clone)]
 pub struct CachedGraphRegistry(Cache<String, Graph>);
@@ -27,6 +26,10 @@ pub fn backends() -> Vec<Backend> {
 }
 
 impl GraphRegistry for StoreRegistry {
+    fn get(&self, name: &str) -> Option<&Graph> {
+        self.0.get(name)
+    }
+
     fn get_mut(&mut self, name: &str) -> Option<&mut Graph> {
         self.0.get_mut(name)
     }

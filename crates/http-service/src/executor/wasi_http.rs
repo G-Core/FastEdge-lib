@@ -1,8 +1,9 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
-use ::http::{header, uri::Scheme, HeaderMap, Request, Response, StatusCode, Uri};
+use ::http::{header, HeaderMap, Request, Response, StatusCode, Uri};
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bytesize::ByteSize;
@@ -13,6 +14,8 @@ use hyper::body::Body;
 use runtime::{store::StoreBuilder, InstancePre};
 use secret::{Secret, SecretStrategy};
 use smol_str::ToSmolStr;
+use wasmtime_wasi_http::bindings::http::types::Scheme;
+use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
 
 /// Execute context used by ['HttpService']
@@ -56,7 +59,7 @@ where
         // fix relative uri to absolute
         if parts.uri.scheme().is_none() {
             let mut uparts = parts.uri.clone().into_parts();
-            uparts.scheme = Some(Scheme::HTTP);
+            //uparts.scheme = Some(http::Scheme::HTTP);
             if uparts.authority.is_none() {
                 uparts.authority = server_name.parse().ok()
             }
@@ -74,10 +77,6 @@ where
 
         let properties = crate::executor::get_properties(&parts.headers);
         let store_builder = self.store_builder.to_owned().with_properties(properties);
-        let wasi_nn = self
-            .store_builder
-            .make_wasi_nn_ctx()
-            .context("make_wasi_nn_ctx")?;
         let mut http_backend = self.backend.to_owned();
 
         http_backend
@@ -101,7 +100,6 @@ where
 
         let backend_uri = http_backend.uri();
         let state = HttpState {
-            wasi_nn,
             http_backend,
             uri: backend_uri,
             propagate_headers,
@@ -116,16 +114,17 @@ where
         let request = hyper::Request::from_parts(parts, body);
         let req = store
             .data_mut()
-            .new_incoming_request(request)
+            .new_incoming_request(Scheme::Http, request)
             .context("new incoming request")?;
         let out = store
             .data_mut()
             .new_response_outparam(sender)
             .context("new response outparam")?;
+        let instance_pre =
+            Arc::into_inner(instance_pre).ok_or(anyhow!("dropped instance_pre ref"))?;
+        let proxy_pre = ProxyPre::new(instance_pre)?;
 
-        let (proxy, _inst) =
-            wasmtime_wasi_http::proxy::Proxy::instantiate_pre(&mut store, instance_pre.as_ref())
-                .await?;
+        let proxy = proxy_pre.instantiate_async(&mut store).await?;
 
         let duration = Duration::from_millis(store.data().timeout);
 

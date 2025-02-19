@@ -19,27 +19,26 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 wasi-common = { workspace = true }
 wasmtime-wasi-nn = { workspace = true }
+wasmtime-wasi-http = { workspace = true }
+wasmtime-environ = { workspace = true }
 smol_str = { workspace = true }
 moka = { workspace = true }
 http = {workspace = true}
-wasmtime-environ = "20.0.2"
-wit-component = "0.214.0"
+wit-component = "0.223.0"
 tracing = { workspace = true }
 bytesize = "1"
 http-backend = { path = "../http-backend" }
-candle-wasi-nn = { path = "../candle-wasi-nn" }
 async-trait = "0.1"
-bytes = "1.5"
+bytes = "1.9"
 serde = "1.0"
-serde_json = "1.0.108"
+serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-prometheus = { version = "0.13.3", features = ["process"], optional = true }
+prometheus = { version = "0.13.4", features = ["process"], optional = true }
 clickhouse = { version = "0.13", optional = true }
-lazy_static = { version = "1.4.0", optional = true }
-wasmtime-wasi-http = "20.0.2"
+lazy_static = { version = "1.5.0", optional = true }
 
 [dev-dependencies]
-claims = "0.7"
+claims = "0.8"
 
 [lints]
 workspace = true

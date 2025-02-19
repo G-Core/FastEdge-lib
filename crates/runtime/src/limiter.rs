@@ -52,7 +52,12 @@ impl ResourceLimiter for ProxyLimiter {
         self.inner.memory_grow_failed(error)
     }
 
-    fn table_growing(&mut self, current: u32, desired: u32, maximum: Option<u32>) -> Result<bool> {
+    fn table_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> Result<bool> {
         self.inner.table_growing(current, desired, maximum)
     }
 

@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use wasmtime_wasi_nn::wit::WasiNnView;
 
 pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
@@ -179,11 +180,14 @@ where
 
     fn configure_engine(builder: &mut WasmEngineBuilder<Self::State>) -> Result<()> {
         let linker = builder.component_linker_ref();
-        wasmtime_wasi_nn::wit::ML::add_to_linker(linker, |data| &mut data.as_mut().wasi_nn)?;
         // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
         wasmtime_wasi::add_to_linker_async(linker)?;
         linker.allow_shadowing(true);
-        wasmtime_wasi_http::proxy::add_to_linker(linker)?;
+        wasmtime_wasi_http::add_to_linker_async(linker)?;
+
+        wasmtime_wasi_nn::wit::add_to_linker(linker, |data: &mut runtime::Data<Self::State>| {
+            WasiNnView::new(&mut data.table, &mut data.wasi_nn)
+        })?;
 
         reactor::gcore::fastedge::http_client::add_to_linker(linker, |data| {
             &mut data.as_mut().http_backend

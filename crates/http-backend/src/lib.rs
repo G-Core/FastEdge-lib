@@ -5,7 +5,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::{anyhow, Error, Result};
-use async_trait::async_trait;
 use http::{header, uri::Scheme, HeaderMap, HeaderName, Uri};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
@@ -268,21 +267,26 @@ impl<C> Backend<C> {
     }
 }
 
-#[async_trait]
 impl<C> Host for Backend<C>
 where
     C: Connect + Clone + Send + Sync + 'static,
 {
-    async fn send_request(&mut self, req: Request) -> Result<Result<Response, HttpError>> {
+    async fn send_request(&mut self, req: Request) -> Result<Response, HttpError> {
         // check the limit of sub requests
         if self.max_sub_requests == 0 {
-            return Ok(Err(HttpError::TooManyRequests));
+            return Err(HttpError::TooManyRequests);
         } else {
             self.max_sub_requests -= 1;
         }
 
-        let request = self.make_request(req)?;
-        let res = self.client.request(request).await?;
+        let request = self
+            .make_request(req)
+            .map_err(|_| HttpError::RequestError)?;
+        let res = self
+            .client
+            .request(request)
+            .await
+            .map_err(|_| HttpError::RequestError)?;
 
         let status = res.status().as_u16();
         let (parts, body) = res.into_parts();
@@ -304,16 +308,20 @@ where
             None
         };
 
-        let body_bytes = body.collect().await?.to_bytes();
+        let body_bytes = body
+            .collect()
+            .await
+            .map_err(|_| HttpError::RequestError)?
+            .to_bytes();
         let body = Some(body_bytes.to_vec());
 
         trace!(?status, ?headers, len = body_bytes.len(), "reply");
 
-        Ok(Ok(Response {
+        Ok(Response {
             status,
             headers,
             body,
-        }))
+        })
     }
 }
 

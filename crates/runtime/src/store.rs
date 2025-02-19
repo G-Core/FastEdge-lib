@@ -1,13 +1,12 @@
+use anyhow::Result;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
-
-use anyhow::Result;
 use tracing::{debug, instrument, trace};
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_nn::WasiNnCtx;
+use wasmtime_wasi_nn::wit::WasiNnCtx;
 
 use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 
@@ -79,17 +78,13 @@ pub struct StoreBuilder {
     env: Vec<(String, String)>,
     logger: Option<Logger>,
     version: WasiVersion,
-    global_registry: CachedGraphRegistry,
     properties: HashMap<String, String>,
+    registry: CachedGraphRegistry,
 }
 
 impl StoreBuilder {
     // Called by Engine::store_builder.
-    pub(crate) fn new(
-        engine: wasmtime::Engine,
-        version: WasiVersion,
-        registry: CachedGraphRegistry,
-    ) -> Self {
+    pub(crate) fn new(engine: wasmtime::Engine, version: WasiVersion) -> Self {
         Self {
             engine,
             max_duration: 100,
@@ -97,8 +92,8 @@ impl StoreBuilder {
             env: vec![],
             logger: None,
             version,
-            global_registry: registry,
             properties: Default::default(),
+            registry: CachedGraphRegistry::new(),
         }
     }
 
@@ -151,7 +146,7 @@ impl StoreBuilder {
         Self { properties, ..self }
     }
 
-    pub fn make_wasi_nn_ctx(&self) -> Result<WasiNnCtx> {
+    pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
         // initialize application specific graph
         let backends: Vec<&str> = self
             .env
@@ -177,7 +172,7 @@ impl StoreBuilder {
             .collect();
         debug!("preload graphs: {:?}", preload_graphs);
 
-        let (backends, registry) = self.global_registry.preload_graphs(preload_graphs)?;
+        let (backends, registry) = self.registry.preload_graphs(preload_graphs)?;
 
         Ok(WasiNnCtx::new(backends, registry))
     }
@@ -197,10 +192,13 @@ impl StoreBuilder {
     ) -> Result<Store<T>> {
         let table = ResourceTable::new();
 
-        debug!("ENV: {:?}", self.env);
         wasi_ctx_builder.envs(&self.env);
-        debug!("WasiNnCtxBuilder: {:?}", self.version);
-        //wasi_ctx_builder.inherit_env();
+
+        let wasi = match self.version {
+            WasiVersion::Preview1 => Wasi::Preview1(wasi_ctx_builder.build_p1()),
+            WasiVersion::Preview2 => Wasi::Preview2(wasi_ctx_builder.build()),
+        };
+        let wasi_nn = self.make_wasi_nn()?;
 
         let logger = if let Some(mut logger) = self.logger {
             logger.extend(self.properties);
@@ -214,21 +212,17 @@ impl StoreBuilder {
             None
         };
 
-        let wasi = match self.version {
-            WasiVersion::Preview1 => Wasi::Preview1(wasi_ctx_builder.build_p1()),
-            WasiVersion::Preview2 => Wasi::Preview2(wasi_ctx_builder.build()),
-        };
-
         let mut inner = wasmtime::Store::new(
             &self.engine,
             Data {
                 inner,
                 wasi,
+                wasi_nn,
                 store_limits: self.store_limits,
                 timeout: (self.max_duration + 1) * DEFAULT_EPOCH_TICK_INTERVAL,
                 table,
                 logger,
-                http: WasiHttpCtx,
+                http: WasiHttpCtx::new(),
             },
         );
         inner.limiter(|state| &mut state.store_limits);

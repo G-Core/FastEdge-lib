@@ -8,10 +8,8 @@ use runtime::BackendRequest;
 use secret::{Secret, SecretStrategy};
 use smol_str::{SmolStr, ToSmolStr};
 use tracing::instrument;
-use wasmtime_wasi_nn::WasiNnCtx;
 
 pub struct HttpState<C, T: SecretStrategy> {
-    pub(super) wasi_nn: WasiNnCtx,
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,

@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use reactor::gcore::fastedge::dictionary;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
@@ -8,10 +7,9 @@ pub struct Dictionary {
     inner: HashMap<String, String>,
 }
 
-#[async_trait]
 impl dictionary::Host for Dictionary {
-    async fn get(&mut self, name: String) -> anyhow::Result<Option<String>> {
-        Ok(self.inner.get(&name).map(|v| v.to_string()))
+    async fn get(&mut self, name: String) -> Option<String> {
+        self.inner.get(&name).map(|v| v.to_string())
     }
 }
 

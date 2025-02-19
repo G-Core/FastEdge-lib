@@ -8,10 +8,7 @@ description = "dictionary host function"
 
 [dependencies]
 reactor = { path = "../reactor" }
-anyhow = {workspace = true}
-tracing = {workspace = true}
 async-trait = {workspace = true}
-wasmtime = {workspace = true}
 
 [lints]
 workspace = true
