@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::executor::HttpExecutor;
@@ -59,7 +58,7 @@ where
         // fix relative uri to absolute
         if parts.uri.scheme().is_none() {
             let mut uparts = parts.uri.clone().into_parts();
-            //uparts.scheme = Some(http::Scheme::HTTP);
+            uparts.scheme = Some(::http::uri::Scheme::HTTP);
             if uparts.authority.is_none() {
                 uparts.authority = server_name.parse().ok()
             }
@@ -120,8 +119,6 @@ where
             .data_mut()
             .new_response_outparam(sender)
             .context("new response outparam")?;
-        let instance_pre =
-            Arc::into_inner(instance_pre).ok_or(anyhow!("dropped instance_pre ref"))?;
         let proxy_pre = ProxyPre::new(instance_pre)?;
 
         let proxy = proxy_pre.instantiate_async(&mut store).await?;
