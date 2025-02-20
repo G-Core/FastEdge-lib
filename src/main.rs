@@ -108,7 +108,12 @@ async fn main() -> anyhow::Result<()> {
             let mut builder =
                 Backend::<HttpsConnector<HttpConnector>>::builder(BackendStrategy::Direct);
 
-            builder.propagate_headers_names(run.propagate_headers);
+            builder.propagate_headers_names(
+                run.propagate_headers
+                    .into_iter()
+                    .filter_map(|h| h.parse().ok())
+                    .collect(),
+            );
 
             let backend = builder.build(backend_connector);
             let mut secrets = vec![];

@@ -35,7 +35,7 @@ jobs:
         run: cargo build --all-features
 
       - name: Unit Tests
-        run: cargo test --all --exclude http-backend
+        run: cargo test --all
 
       - name: Check formatting
         run: cargo fmt --all -- --check

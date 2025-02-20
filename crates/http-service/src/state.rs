@@ -6,14 +6,13 @@ use http::{header, HeaderMap, HeaderName, Uri};
 use http_backend::Backend;
 use runtime::BackendRequest;
 use secret::{Secret, SecretStrategy};
-use smol_str::{SmolStr, ToSmolStr};
 use tracing::instrument;
 
 pub struct HttpState<C, T: SecretStrategy> {
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
-    pub(super) propagate_header_names: Vec<SmolStr>,
+    pub(super) propagate_header_names: Vec<HeaderName>,
     pub(super) dictionary: Dictionary,
     pub(super) secret: Secret<T>,
 }
@@ -59,8 +58,7 @@ impl<C, T: SecretStrategy> BackendRequest for HttpState<C, T> {
             .into_iter()
             .filter_map(|(k, v)| k.map(|k| (k, v)))
             .filter(|(k, _)| {
-                !FILTER_HEADERS.contains(k)
-                    && !self.propagate_header_names.contains(&k.to_smolstr())
+                !FILTER_HEADERS.contains(k) && !self.propagate_header_names.contains(k)
             })
             .collect::<HeaderMap>();
 
