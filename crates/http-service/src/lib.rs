@@ -25,6 +25,8 @@ use runtime::{
 };
 use secret::SecretStrategy;
 use smol_str::SmolStr;
+#[cfg(feature = "stats")]
+use smol_str::ToSmolStr;
 use state::HttpState;
 use tokio::{net::TcpListener, time::error::Elapsed};
 pub use wasmtime_wasi_http::body::HyperOutgoingBody;
@@ -311,11 +313,11 @@ where
         let start_ = std::time::Instant::now();
 
         let response_handler = {
-            let app_name = app_name.to_string();
+            let app_name = app_name.clone();
             #[cfg(feature = "stats")]
-            let billing_plan = cfg.plan.to_string();
+            let billing_plan = cfg.plan.clone();
             #[cfg(feature = "stats")]
-            let request_id = request_id.to_string();
+            let request_id = request_id.to_smolstr();
             #[cfg(feature = "stats")]
             let context = self.context.clone();
 
@@ -340,7 +342,6 @@ where
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: mem_used.as_u64(),
                         request_id,
-                        ..Default::default()
                     };
                     context.write_stats(stat_row);
                 }
@@ -377,14 +378,13 @@ where
                         app_id: cfg.app_id,
                         client_id: cfg.client_id,
                         timestamp: timestamp as u32,
-                        app_name: app_name.to_string(),
+                        app_name: app_name,
                         status_code: status_code as u32,
                         fail_reason: fail_reason as u32,
-                        billing_plan: cfg.plan.to_string(),
+                        billing_plan: cfg.plan.clone(),
                         time_elapsed: time_elapsed.as_micros() as u64,
                         memory_used: 0,
-                        request_id: request_id.to_string(),
-                        ..Default::default()
+                        request_id: request_id.to_smolstr(),
                     };
                     self.context.write_stats(stat_row);
                 }
