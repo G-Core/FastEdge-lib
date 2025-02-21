@@ -2,12 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.1] - 2025-02-20
+
+### 🐛 Bug Fixes
+
+- Mixing of http scheme and cloning of InstancePre obj
+
 ## [0.10.0] - 2025-02-19
 
 ### 🚜 Refactor
 
 - Wasmtime update
 - Updating wasmtime dependency to 29.0.1
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.9.4] - 2025-01-21
 

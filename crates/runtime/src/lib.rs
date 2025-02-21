@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::Deref, sync::Arc};
+use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 
 use crate::store::StoreBuilder;
@@ -50,8 +50,8 @@ pub enum AppResult {
     OTHER,
 }
 
-pub type InstancePre<T> = Arc<wasmtime::component::InstancePre<Data<T>>>;
-pub type ModuleInstancePre<T> = Arc<wasmtime::InstancePre<Data<T>>>;
+pub type InstancePre<T> = wasmtime::component::InstancePre<Data<T>>;
+pub type ModuleInstancePre<T> = wasmtime::InstancePre<Data<T>>;
 
 /// The version of Wasi being used
 #[allow(dead_code)]
@@ -260,12 +260,12 @@ impl<T: Send + Sync> WasmEngine<T> {
         &self,
         component: &Component,
     ) -> anyhow::Result<InstancePre<T>> {
-        Ok(Arc::new(self.component_linker.instantiate_pre(component)?))
+        Ok(self.component_linker.instantiate_pre(component)?)
     }
 
     /// Creates a new [`InstancePre`] for the given [`Module`].
     pub fn module_instantiate_pre(&self, module: &Module) -> anyhow::Result<ModuleInstancePre<T>> {
-        Ok(Arc::new(self.module_linker.instantiate_pre(module)?))
+        Ok(self.module_linker.instantiate_pre(module)?)
     }
 }
 
