@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.2] - 2025-02-21
+
+### 🐛 Bug Fixes
+
+- Wasm app logging
+
 ## [0.10.1] - 2025-02-20
 
 ### 🐛 Bug Fixes
 
 - Mixing of http scheme and cloning of InstancePre obj
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.10.0] - 2025-02-19
 
