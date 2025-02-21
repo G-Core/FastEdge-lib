@@ -193,11 +193,6 @@ impl StoreBuilder {
         let table = ResourceTable::new();
 
         wasi_ctx_builder.envs(&self.env);
-
-        let wasi = match self.version {
-            WasiVersion::Preview1 => Wasi::Preview1(wasi_ctx_builder.build_p1()),
-            WasiVersion::Preview2 => Wasi::Preview2(wasi_ctx_builder.build()),
-        };
         let wasi_nn = self.make_wasi_nn()?;
 
         let logger = if let Some(mut logger) = self.logger {
@@ -210,6 +205,11 @@ impl StoreBuilder {
                 wasi_ctx_builder.inherit_stderr();
             }
             None
+        };
+
+        let wasi = match self.version {
+            WasiVersion::Preview1 => Wasi::Preview1(wasi_ctx_builder.build_p1()),
+            WasiVersion::Preview2 => Wasi::Preview2(wasi_ctx_builder.build()),
         };
 
         let mut inner = wasmtime::Store::new(
