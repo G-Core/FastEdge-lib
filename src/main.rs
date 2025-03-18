@@ -29,6 +29,7 @@ use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::signal;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
 
@@ -167,11 +168,16 @@ async fn main() -> anyhow::Result<()> {
                 listen_fd: None,
                 backoff: 64,
             });
+            let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())?;
             tokio::select! {
                 res = http => {
                     res?
                 },
-                _ = tokio::signal::ctrl_c() => {
+                _ = signal::ctrl_c() => {
+                    #[cfg(target_family = "unix")]
+                    shutdown_coordinator.shutdown().await
+                }
+                _ = terminate.recv() => {
                     #[cfg(target_family = "unix")]
                     shutdown_coordinator.shutdown().await
                 }

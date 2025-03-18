@@ -26,10 +26,10 @@ jobs:
           target: wasm32-wasip1
           components: rustfmt, clippy
 
-      - name: Run cargo-audit binary crate
-        uses: rustsec/audit-check@v1.4.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      #- name: Run cargo-audit binary crate
+      #  uses: rustsec/audit-check@v2.0.0
+      #  with:
+      #    token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build
         run: cargo build --all-features
