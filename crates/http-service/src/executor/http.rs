@@ -10,26 +10,23 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use reactor::gcore::fastedge;
 use runtime::{store::StoreBuilder, InstancePre};
-use secret::{Secret, SecretStrategy};
 use std::time::{Duration, Instant};
 use wasmtime_wasi::StdoutStream;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct HttpExecutorImpl<C, T: SecretStrategy> {
-    instance_pre: InstancePre<HttpState<C, T>>,
+pub struct HttpExecutorImpl<C> {
+    instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
     dictionary: Dictionary,
-    secret: Secret<T>,
 }
 
 #[async_trait]
-impl<C, T> HttpExecutor for HttpExecutorImpl<C, T>
+impl<C> HttpExecutor for HttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
-    T: SecretStrategy + Clone + Send + Sync,
 {
     async fn execute<B, R>(
         &self,
@@ -93,7 +90,6 @@ where
             propagate_headers: parts.headers,
             propagate_header_names,
             dictionary: self.dictionary.clone(),
-            secret: self.secret.clone(),
         };
 
         let mut store = store_builder.build(state)?;
@@ -147,24 +143,21 @@ where
     }
 }
 
-impl<C, T> HttpExecutorImpl<C, T>
+impl<C> HttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
-    T: SecretStrategy + Clone + Send,
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState<C, T>>,
+        instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
         dictionary: Dictionary,
-        secret: Secret<T>,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
             dictionary,
-            secret,
         }
     }
 }
@@ -195,7 +188,8 @@ mod tests {
     use dictionary::Dictionary;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use http_body_util::Empty;
-    use runtime::app::Status;
+    use key_value_store::KeyValueStore;
+    use runtime::app::{KvStoreOption, SecretOption, Status};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
     use runtime::util::stats::{StatRow, StatsWriter};
@@ -203,7 +197,7 @@ mod tests {
         componentize_if_necessary, App, ContextT, PreCompiledLoader, Router, WasiVersion,
         WasmConfig, WasmEngine,
     };
-    use secret::Secret;
+    use secret::SecretStore;
     use smol_str::{SmolStr, ToSmolStr};
     use std::collections::HashMap;
     use wasmtime::component::Component;
@@ -236,6 +230,14 @@ mod tests {
 
         fn engine_ref(&self) -> &Engine {
             &self.engine
+        }
+
+        fn make_secret_store(&self, _secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore> {
+            todo!()
+        }
+
+        fn make_key_value_store(&self, _stores: &Vec<KvStoreOption>) -> KeyValueStore {
+            todo!()
         }
     }
 
@@ -278,34 +280,19 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
-    struct TestSecret;
-
-    impl SecretStrategy for TestSecret {
-        fn get(&self, _key: String) -> anyhow::Result<Option<Vec<u8>>> {
-            Ok(Some(b"secret".to_vec()))
-        }
-
-        fn get_effective_at(&self, _key: String, _at: u64) -> anyhow::Result<Option<Vec<u8>>> {
-            Ok(Some(b"secret".to_vec()))
-        }
-    }
-
-    impl ExecutorFactory<HttpState<FastEdgeConnector, TestSecret>> for TestContext {
-        type Executor = HttpExecutorImpl<FastEdgeConnector, TestSecret>;
+    impl ExecutorFactory<HttpState<FastEdgeConnector>> for TestContext {
+        type Executor = HttpExecutorImpl<FastEdgeConnector>;
 
         fn get_executor(
             &self,
             name: SmolStr,
             cfg: &App,
-            engine: &WasmEngine<HttpState<FastEdgeConnector, TestSecret>>,
+            engine: &WasmEngine<HttpState<FastEdgeConnector>>,
         ) -> anyhow::Result<Self::Executor> {
             let mut dictionary = Dictionary::new();
             for (k, v) in cfg.env.iter() {
                 dictionary.insert(k.to_string(), v.to_string());
             }
-            let secret = Secret::new(TestSecret);
-
             let env = cfg.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
 
             let logger = self.make_logger(name.clone(), cfg);
@@ -326,7 +313,6 @@ mod tests {
                 store_builder,
                 self.backend(),
                 dictionary,
-                secret,
             ))
         }
     }
@@ -348,6 +334,7 @@ mod tests {
             status,
             debug_until: None,
             secrets: vec![],
+            kv_stores: vec![],
         })
     }
 
@@ -388,7 +375,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request("1", req).await);
@@ -430,6 +417,7 @@ mod tests {
             status: Status::Enabled,
             debug_until: None,
             secrets: vec![],
+            kv_stores: vec![],
         });
 
         let context = TestContext {
@@ -438,7 +426,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request("2", req).await);
@@ -479,6 +467,7 @@ mod tests {
             status: Status::Enabled,
             debug_until: None,
             secrets: vec![],
+            kv_stores: vec![],
         });
 
         let context = TestContext {
@@ -487,7 +476,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
 
         let res = assert_ok!(http_service.handle_request("3", req).await);
@@ -521,7 +510,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("4", req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
@@ -547,7 +536,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("5", req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
@@ -573,7 +562,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("6", req).await);
         assert_eq!(StatusCode::TOO_MANY_REQUESTS, res.status());
@@ -599,7 +588,7 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext, TestSecret> =
+        let http_service: HttpService<TestContext> =
             assert_ok!(ServiceBuilder::new(context).build());
         let res = assert_ok!(http_service.handle_request("7", req).await);
         assert_eq!(StatusCode::NOT_ACCEPTABLE, res.status());

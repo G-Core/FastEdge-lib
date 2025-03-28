@@ -23,7 +23,6 @@ use runtime::{
     app::Status, service::Service, util::stats::StatsWriter, App, AppResult, ContextT, Router,
     WasmEngine, WasmEngineBuilder,
 };
-use secret::SecretStrategy;
 use smol_str::SmolStr;
 #[cfg(feature = "stats")]
 use smol_str::ToSmolStr;
@@ -59,8 +58,8 @@ pub struct HttpConfig {
     pub backoff: u64,
 }
 
-pub struct HttpService<T: ContextT, S: SecretStrategy> {
-    engine: WasmEngine<HttpState<T::BackendConnector, S>>,
+pub struct HttpService<T: ContextT> {
+    engine: WasmEngine<HttpState<T::BackendConnector>>,
     context: T,
 }
 
@@ -68,22 +67,21 @@ pub trait ContextHeaders {
     fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
 
-impl<T, S> Service for HttpService<T, S>
+impl<T> Service for HttpService<T>
 where
     T: ContextT
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector, S>>
+        + ExecutorFactory<HttpState<T::BackendConnector>>
         + Clone
         + Sync
         + Send
         + 'static,
     T::BackendConnector: Connect + Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
-    S: SecretStrategy + Send + Sync + 'static,
 {
-    type State = HttpState<T::BackendConnector, S>;
+    type State = HttpState<T::BackendConnector>;
     type Config = HttpConfig;
     type Context = T;
 
@@ -199,26 +197,29 @@ where
             &mut data.as_mut().dictionary
         })?;
 
-        reactor::gcore::fastedge::secret::add_to_linker(linker, |data| &mut data.as_mut().secret)?;
+        reactor::gcore::fastedge::secret::add_to_linker(linker, |data| &mut data.secret_store)?;
+
+        reactor::gcore::fastedge::key_value::add_to_linker(linker, |data| {
+            &mut data.key_value_store
+        })?;
 
         Ok(())
     }
 }
 
-impl<T, U> HttpService<T, U>
+impl<T> HttpService<T>
 where
     T: ContextT
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector, U>>
+        + ExecutorFactory<HttpState<T::BackendConnector>>
         + Sync
         + Send
         + 'static
         + Clone,
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
-    U: SecretStrategy,
 {
     /// handle HTTP request.
     async fn handle_request<B>(

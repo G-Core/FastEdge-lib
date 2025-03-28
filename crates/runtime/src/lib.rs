@@ -1,3 +1,5 @@
+use crate::app::KvStoreOption;
+use key_value_store::KeyValueStore;
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 
@@ -20,11 +22,13 @@ pub mod store;
 pub mod stub;
 pub mod util;
 
+use crate::app::SecretOption;
 use crate::logger::Logger;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
 use http::Request;
+use secret::SecretStore;
 use smol_str::SmolStr;
 use std::borrow::Cow;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
@@ -82,6 +86,8 @@ pub struct Data<T> {
     pub table: ResourceTable,
     pub logger: Option<Logger>,
     http: WasiHttpCtx,
+    pub secret_store: SecretStore,
+    pub key_value_store: KeyValueStore,
 }
 
 pub trait BackendRequest {
@@ -140,6 +146,14 @@ impl<T> Data<T> {
             Wasi::Preview1(_) => unreachable!("using WASI Preview 1 functions with Preview 2 ctx"),
             Wasi::Preview2(ctx) => ctx,
         }
+    }
+
+    pub fn secret_store_ref(&self) -> &SecretStore {
+        &self.secret_store
+    }
+
+    pub fn key_value_store_ref(&self) -> &KeyValueStore {
+        &self.key_value_store
     }
 }
 
@@ -322,6 +336,10 @@ pub trait ContextT {
     fn loader(&self) -> &dyn PreCompiledLoader<u64>;
 
     fn engine_ref(&self) -> &Engine;
+
+    fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore>;
+
+    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore;
 }
 
 pub trait ExecutorCache {

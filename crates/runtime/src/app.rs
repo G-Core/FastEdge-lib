@@ -26,7 +26,33 @@ pub struct App {
     #[serde(default)]
     pub debug_until: Option<DateTime<Utc>>,
     #[serde(default)]
-    pub secrets: Vec<Secret>,
+    pub secrets: Vec<SecretOption>,
+    #[serde(default)]
+    pub kv_stores: Vec<KvStoreOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct KvStoreOption {
+    /// The url
+    pub param: SmolStr,
+    #[serde(default)]
+    pub name: SmolStr,
+    #[serde(default)]
+    pub prefix: SmolStr,
+    #[serde(default = "KvStoreOption::default_cache_size")]
+    pub cache_size: u64,
+    #[serde(default = "KvStoreOption::default_cache_ttl")]
+    pub cache_ttl: u64,
+}
+
+impl KvStoreOption {
+    fn default_cache_size() -> u64 {
+        1000
+    }
+
+    fn default_cache_ttl() -> u64 {
+        60
+    }
 }
 
 pub type SecretValues = Vec<SecretValue>;
@@ -38,7 +64,7 @@ pub struct SecretValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct Secret {
+pub struct SecretOption {
     pub name: SmolStr,
     pub secret_values: SecretValues,
 }
@@ -148,13 +174,14 @@ mod tests {
             plan: "test_plan".to_smolstr(),
             status: Status::Enabled,
             debug_until: Some(assert_ok!("2037-01-01T12:00:27.87Z".parse())),
-            secrets: vec![Secret {
+            secrets: vec![SecretOption {
                 name: "SECRET".to_smolstr(),
                 secret_values: vec![SecretValue {
                     effective_from: 0,
                     value: "encrypted".to_string(),
                 }],
             }],
+            kv_stores: vec![],
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));

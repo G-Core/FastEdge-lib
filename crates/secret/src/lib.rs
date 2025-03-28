@@ -1,16 +1,20 @@
 use reactor::gcore::fastedge::secret;
+use std::ops::Deref;
+use std::sync::Arc;
 
-pub trait SecretStrategy {
+/// Secret strategy trait
+pub trait SecretStrategy: Send + Sync {
     fn get(&self, key: String) -> anyhow::Result<Option<Vec<u8>>>;
     fn get_effective_at(&self, key: String, at: u64) -> anyhow::Result<Option<Vec<u8>>>;
 }
 
+/// Secret store implementation
 #[derive(Clone)]
-pub struct Secret<T: SecretStrategy> {
-    strategy: T,
+pub struct SecretStore {
+    strategy: Arc<dyn SecretStrategy>,
 }
 
-impl<T: SecretStrategy + Send> secret::Host for Secret<T> {
+impl secret::Host for SecretStore {
     async fn get(&mut self, key: String) -> Result<Option<String>, secret::Error> {
         match self.strategy.get(key) {
             Ok(None) => Ok(None),
@@ -42,8 +46,37 @@ impl<T: SecretStrategy + Send> secret::Host for Secret<T> {
     }
 }
 
-impl<T: SecretStrategy> Secret<T> {
-    pub fn new(strategy: T) -> Self {
+impl SecretStore {
+    pub fn new(strategy: Arc<dyn SecretStrategy>) -> Self {
         Self { strategy }
+    }
+}
+
+impl Deref for SecretStore {
+    type Target = dyn SecretStrategy;
+
+    fn deref(&self) -> &Self::Target {
+        self.strategy.as_ref()
+    }
+}
+
+/// Default secret strategy that does not decrypt anything and always returns None
+struct DefaultSecretStrategy {}
+
+impl SecretStrategy for DefaultSecretStrategy {
+    fn get(&self, _key: String) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+
+    fn get_effective_at(&self, _key: String, _at: u64) -> anyhow::Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
+}
+
+impl Default for SecretStore {
+    fn default() -> Self {
+        Self {
+            strategy: Arc::new(DefaultSecretStrategy {}),
+        }
     }
 }
