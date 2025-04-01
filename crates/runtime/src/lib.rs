@@ -123,7 +123,13 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
             ErrorCode::InternalError(Some(e.to_string()))
         })?;
         let request = Request::from_parts(head, body);
-        Ok(default_send_request(request, config))
+        Ok(default_send_request(
+            request,
+            OutgoingRequestConfig {
+                use_tls: false,
+                ..config
+            },
+        ))
     }
 }
 
