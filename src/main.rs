@@ -16,7 +16,6 @@ use runtime::{App, SecretValue, WasmConfig};
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tokio::signal;
 use wasmtime::Engine;
 
 #[derive(Debug, Parser)]
@@ -144,12 +143,17 @@ async fn main() -> anyhow::Result<()> {
                 listen_fd: None,
                 backoff: 64,
             });
-            let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())?;
+            #[cfg(target_family = "unix")]
+            let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
+            #[cfg(target_family = "windows")]
+            let mut terminate = tokio::signal::windows::ctrl_close()?;
+            
             tokio::select! {
                 res = http => {
                     res?
                 },
-                _ = signal::ctrl_c() => {
+                _ = tokio::signal::ctrl_c() => {
                     #[cfg(target_family = "unix")]
                     shutdown_coordinator.shutdown().await
                 }

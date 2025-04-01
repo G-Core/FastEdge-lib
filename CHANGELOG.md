@@ -2,17 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.1] - 2025-04-01
+
+### 🐛 Bug Fixes
+
+- Fixing catching close signal on windows platform
+
+## [0.11.0] - 2025-04-01
+
+### 🐛 Bug Fixes
+
+- Fastedge-run handler for terminate signal
+- Updated audit-check version
+- Disabling cargo audit
+- Setting use_tls to false in OutgoingRequestConfig
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
+
 ## [0.10.2] - 2025-02-21
 
 ### 🐛 Bug Fixes
 
 - Wasm app logging
 
+### ⚙️ Miscellaneous Tasks
+
+- Release
+
 ## [0.10.1] - 2025-02-20
 
 ### 🐛 Bug Fixes
 
+- Log backend send error and fixing unit tests
 - Mixing of http scheme and cloning of InstancePre obj
+
+### 🚜 Refactor
+
+- StatRow structure
 
 ### ⚙️ Miscellaneous Tasks
 
