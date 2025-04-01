@@ -1,18 +1,20 @@
+use crate::limiter::ProxyLimiter;
+use crate::logger::Logger;
+use crate::registry::CachedGraphRegistry;
+use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 use anyhow::Result;
-use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
+use key_value_store::KeyValueStore;
+use secret::SecretStore;
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Formatter},
+    ops::{Deref, DerefMut},
+};
 use tracing::{debug, instrument, trace};
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
-
-use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
-
-use crate::limiter::ProxyLimiter;
-use crate::logger::Logger;
-use crate::registry::CachedGraphRegistry;
 
 /// A `Store` holds the runtime state of a app instance.
 ///
@@ -80,6 +82,8 @@ pub struct StoreBuilder {
     version: WasiVersion,
     properties: HashMap<String, String>,
     registry: CachedGraphRegistry,
+    secret_store: SecretStore,
+    key_value_store: KeyValueStore,
 }
 
 impl StoreBuilder {
@@ -94,6 +98,8 @@ impl StoreBuilder {
             version,
             properties: Default::default(),
             registry: CachedGraphRegistry::new(),
+            secret_store: Default::default(),
+            key_value_store: KeyValueStore::default(),
         }
     }
 
@@ -144,6 +150,22 @@ impl StoreBuilder {
 
     pub fn with_properties(self, properties: HashMap<String, String>) -> Self {
         Self { properties, ..self }
+    }
+
+    /// Set secret store
+    pub fn secret_store(self, secret_store: SecretStore) -> Self {
+        Self {
+            secret_store,
+            ..self
+        }
+    }
+
+    /// Set key value store
+    pub fn key_value_store(self, key_value_store: KeyValueStore) -> Self {
+        Self {
+            key_value_store,
+            ..self
+        }
     }
 
     pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
@@ -223,6 +245,8 @@ impl StoreBuilder {
                 table,
                 logger,
                 http: WasiHttpCtx::new(),
+                secret_store: self.secret_store,
+                key_value_store: self.key_value_store,
             },
         );
         inner.limiter(|state| &mut state.store_limits);

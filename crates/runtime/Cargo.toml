@@ -24,12 +24,14 @@ wasmtime-environ = { workspace = true }
 smol_str = { workspace = true }
 moka = { workspace = true }
 http = {workspace = true}
-wit-component = "0.223.0"
+wit-component = "0.227.1"
 tracing = { workspace = true }
-bytesize = "1"
+bytesize = { workspace = true }
 http-backend = { path = "../http-backend" }
+key-value-store = { path = "../key-value-store" }
+secret = { path = "../secret" }
 async-trait = "0.1"
-bytes = "1.9"
+bytes = "1.10"
 serde = "1.0"
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }

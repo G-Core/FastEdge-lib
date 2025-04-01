@@ -5,19 +5,17 @@ use http::uri::Scheme;
 use http::{header, HeaderMap, HeaderName, Uri};
 use http_backend::Backend;
 use runtime::BackendRequest;
-use secret::{Secret, SecretStrategy};
 use tracing::instrument;
 
-pub struct HttpState<C, T: SecretStrategy> {
+pub struct HttpState<C> {
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<HeaderName>,
     pub(super) dictionary: Dictionary,
-    pub(super) secret: Secret<T>,
 }
 
-impl<C, T: SecretStrategy> BackendRequest for HttpState<C, T> {
+impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self), ret, err)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<(String, Parts)> {
         let original_url = head.uri;

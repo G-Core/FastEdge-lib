@@ -1,15 +1,17 @@
 [package]
-name = "secret"
+name = "key-value-store"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 authors.workspace = true
-description = "secret host function"
+description = "key-value store host function"
 
 [dependencies]
 reactor = { path = "../reactor" }
-anyhow = {workspace = true}
-tracing = {workspace = true}
+wasmtime = {workspace = true}
+slab = "0.4"
+async-trait = "0.1.88"
+smol_str = {workspace = true}
 
 [lints]
 workspace = true

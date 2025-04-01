@@ -13,7 +13,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
 hyper = { version = "1", features = ["full"] }
-http = "1.2.0"
+http = "1.3.1"
 async-trait = "0.1"
 wasmtime = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
 wasmtime-wasi = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
@@ -21,6 +21,7 @@ wasi-common = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.gi
 wasmtime-wasi-nn = { version = "29.0.1", features = ["openvino", "candle"], git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
 wasmtime-wasi-http = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
 wasmtime-environ = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
+bytesize = "2.0.1"
 
 clap = { version = "4", features = ["derive"] }
 moka = { version = "0.12", features = ["sync"] }
@@ -59,10 +60,14 @@ http-service = { path = "crates/http-service" }
 http-backend = { path = "crates/http-backend" }
 dictionary = { path = "crates/dictionary" }
 secret = { path = "crates/secret" }
+key-value-store = { path = "crates/key-value-store" }
 hyper-tls = "0.6"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 http-body-util = "0.1"
-bytesize = "1.3.0"
+bytesize = { workspace = true}
 
 [target.'cfg(target_family = "unix")'.dependencies]
-shellflip = "2.1.1"
+shellflip = "2.1.2"
+
+[patch.crates-io]
+half = { git = 'https://github.com/starkat99/half-rs.git', tag = "v2.4.1" }

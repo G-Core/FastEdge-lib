@@ -11,26 +11,23 @@ use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::{store::StoreBuilder, InstancePre};
-use secret::{Secret, SecretStrategy};
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct WasiHttpExecutorImpl<C, T: SecretStrategy> {
-    instance_pre: InstancePre<HttpState<C, T>>,
+pub struct WasiHttpExecutorImpl<C> {
+    instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
     dictionary: Dictionary,
-    secret: Secret<T>,
 }
 
 #[async_trait]
-impl<C, T> HttpExecutor for WasiHttpExecutorImpl<C, T>
+impl<C> HttpExecutor for WasiHttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
-    T: SecretStrategy + Clone + Send + Sync + 'static,
 {
     async fn execute<B, R>(
         &self,
@@ -103,7 +100,6 @@ where
             propagate_headers,
             propagate_header_names,
             dictionary: self.dictionary.clone(),
-            secret: self.secret.clone(),
         };
 
         let mut store = store_builder.build(state).context("store build")?;
@@ -190,24 +186,21 @@ where
     }
 }
 
-impl<C, T> WasiHttpExecutorImpl<C, T>
+impl<C> WasiHttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
-    T: SecretStrategy + Clone + Send + 'static,
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState<C, T>>,
+        instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
         dictionary: Dictionary,
-        secret: Secret<T>,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
             dictionary,
-            secret,
         }
     }
 }
