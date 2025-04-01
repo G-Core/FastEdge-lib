@@ -587,16 +587,9 @@ dependencies = [
 [[package]]
 name = "cranelift-bforest"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
- "cranelift-entity 0.116.1",
-]
-
-[[package]]
-name = "cranelift-bitset"
-version = "0.116.1"
-dependencies = [
- "serde",
- "serde_derive",
+ "cranelift-entity",
 ]
 
 [[package]]
@@ -611,14 +604,15 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "bumpalo",
  "cranelift-bforest",
- "cranelift-bitset 0.116.1",
+ "cranelift-bitset",
  "cranelift-codegen-meta",
  "cranelift-codegen-shared",
  "cranelift-control",
- "cranelift-entity 0.116.1",
+ "cranelift-entity",
  "cranelift-isle",
  "gimli",
  "hashbrown 0.14.5",
@@ -633,6 +627,7 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-meta"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "cranelift-codegen-shared",
 ]
@@ -640,10 +635,12 @@ dependencies = [
 [[package]]
 name = "cranelift-codegen-shared"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 
 [[package]]
 name = "cranelift-control"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "arbitrary",
 ]
@@ -651,18 +648,9 @@ dependencies = [
 [[package]]
 name = "cranelift-entity"
 version = "0.116.1"
-dependencies = [
- "cranelift-bitset 0.116.1",
- "serde",
- "serde_derive",
-]
-
-[[package]]
-name = "cranelift-entity"
-version = "0.116.1"
 source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
- "cranelift-bitset 0.116.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
+ "cranelift-bitset",
  "serde",
  "serde_derive",
 ]
@@ -670,6 +658,7 @@ dependencies = [
 [[package]]
 name = "cranelift-frontend"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "cranelift-codegen",
  "log",
@@ -680,10 +669,12 @@ dependencies = [
 [[package]]
 name = "cranelift-isle"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 
 [[package]]
 name = "cranelift-native"
 version = "0.116.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -2402,8 +2393,9 @@ dependencies = [
 [[package]]
 name = "pulley-interpreter"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
- "cranelift-bitset 0.116.1",
+ "cranelift-bitset",
  "log",
  "sptr",
  "wasmtime-math",
@@ -2648,7 +2640,7 @@ dependencies = [
  "tracing",
  "wasi-common",
  "wasmtime",
- "wasmtime-environ 29.0.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
+ "wasmtime-environ",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
  "wasmtime-wasi-nn",
@@ -3591,7 +3583,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "wasmtime",
- "wiggle 29.0.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
+ "wiggle",
  "windows-sys 0.59.0",
 ]
 
@@ -3731,6 +3723,7 @@ dependencies = [
 [[package]]
 name = "wasmtime"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "addr2line",
  "anyhow",
@@ -3772,7 +3765,7 @@ dependencies = [
  "wasmtime-component-macro",
  "wasmtime-component-util",
  "wasmtime-cranelift",
- "wasmtime-environ 29.0.1",
+ "wasmtime-environ",
  "wasmtime-fiber",
  "wasmtime-jit-debug",
  "wasmtime-jit-icache-coherence",
@@ -3787,6 +3780,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-asm-macros"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "cfg-if",
 ]
@@ -3794,6 +3788,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-cache"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "base64",
@@ -3812,6 +3807,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-component-macro"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -3825,16 +3821,18 @@ dependencies = [
 [[package]]
 name = "wasmtime-component-util"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 
 [[package]]
 name = "wasmtime-cranelift"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "cfg-if",
  "cranelift-codegen",
  "cranelift-control",
- "cranelift-entity 0.116.1",
+ "cranelift-entity",
  "cranelift-frontend",
  "cranelift-native",
  "gimli",
@@ -3845,18 +3843,19 @@ dependencies = [
  "target-lexicon",
  "thiserror",
  "wasmparser 0.221.3",
- "wasmtime-environ 29.0.1",
+ "wasmtime-environ",
  "wasmtime-versioned-export-macros",
 ]
 
 [[package]]
 name = "wasmtime-environ"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "cpp_demangle",
- "cranelift-bitset 0.116.1",
- "cranelift-entity 0.116.1",
+ "cranelift-bitset",
+ "cranelift-entity",
  "gimli",
  "indexmap",
  "log",
@@ -3875,28 +3874,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasmtime-environ"
-version = "29.0.1"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
-dependencies = [
- "anyhow",
- "cranelift-bitset 0.116.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
- "cranelift-entity 0.116.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
- "gimli",
- "indexmap",
- "log",
- "object",
- "postcard",
- "serde",
- "serde_derive",
- "smallvec",
- "target-lexicon",
- "wasmparser 0.221.3",
-]
-
-[[package]]
 name = "wasmtime-fiber"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "cc",
@@ -3910,6 +3890,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-jit-debug"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "object",
  "rustix 0.38.44",
@@ -3919,6 +3900,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-jit-icache-coherence"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -3929,6 +3911,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-math"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "libm",
 ]
@@ -3936,10 +3919,12 @@ dependencies = [
 [[package]]
 name = "wasmtime-slab"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 
 [[package]]
 name = "wasmtime-versioned-export-macros"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3949,6 +3934,7 @@ dependencies = [
 [[package]]
 name = "wasmtime-wasi"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3971,7 +3957,7 @@ dependencies = [
  "trait-variant",
  "url",
  "wasmtime",
- "wiggle 29.0.1",
+ "wiggle",
  "windows-sys 0.59.0",
 ]
 
@@ -4011,13 +3997,14 @@ dependencies = [
  "tracing",
  "walkdir",
  "wasmtime",
- "wiggle 29.0.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
+ "wiggle",
  "windows 0.52.0",
 ]
 
 [[package]]
 name = "wasmtime-winch"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -4026,13 +4013,14 @@ dependencies = [
  "target-lexicon",
  "wasmparser 0.221.3",
  "wasmtime-cranelift",
- "wasmtime-environ 29.0.1",
+ "wasmtime-environ",
  "winch-codegen",
 ]
 
 [[package]]
 name = "wasmtime-wit-bindgen"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "heck",
@@ -4092,19 +4080,6 @@ dependencies = [
 [[package]]
 name = "wiggle"
 version = "29.0.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "bitflags 2.9.0",
- "thiserror",
- "tracing",
- "wasmtime",
- "wiggle-macro 29.0.1",
-]
-
-[[package]]
-name = "wiggle"
-version = "29.0.1"
 source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
@@ -4113,20 +4088,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "wasmtime",
- "wiggle-macro 29.0.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
-]
-
-[[package]]
-name = "wiggle-generate"
-version = "29.0.1"
-dependencies = [
- "anyhow",
- "heck",
- "proc-macro2",
- "quote",
- "shellexpand",
- "syn",
- "witx",
+ "wiggle-macro",
 ]
 
 [[package]]
@@ -4146,22 +4108,12 @@ dependencies = [
 [[package]]
 name = "wiggle-macro"
 version = "29.0.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
- "wiggle-generate 29.0.1",
-]
-
-[[package]]
-name = "wiggle-macro"
-version = "29.0.1"
 source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "wiggle-generate 29.0.1 (git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend)",
+ "wiggle-generate",
 ]
 
 [[package]]
@@ -4198,6 +4150,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 [[package]]
 name = "winch-codegen"
 version = "29.0.1"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=wasi_nn_candle_backend#566d11edfe6d46d4f75472f8713da04598ae3252"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -4208,7 +4161,7 @@ dependencies = [
  "thiserror",
  "wasmparser 0.221.3",
  "wasmtime-cranelift",
- "wasmtime-environ 29.0.1",
+ "wasmtime-environ",
 ]
 
 [[package]]
