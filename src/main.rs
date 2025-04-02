@@ -144,11 +144,12 @@ async fn main() -> anyhow::Result<()> {
                 backoff: 64,
             });
             #[cfg(target_family = "unix")]
-            let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            let mut terminate =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
             #[cfg(target_family = "windows")]
             let mut terminate = tokio::signal::windows::ctrl_close()?;
-            
+
             tokio::select! {
                 res = http => {
                     res?
