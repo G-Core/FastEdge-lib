@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.2] - 2025-04-02
+
+### 🐛 Bug Fixes
+
+- Updating prometheus dependency to fix protobuf licence issue
+
 ## [0.11.1] - 2025-04-01
 
 ### 🐛 Bug Fixes
 
 - Fixing catching close signal on windows platform
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.11.0] - 2025-04-01
 
