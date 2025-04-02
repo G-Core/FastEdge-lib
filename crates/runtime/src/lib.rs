@@ -1,12 +1,14 @@
 use crate::app::KvStoreOption;
 use key_value_store::KeyValueStore;
 use std::{fmt::Debug, ops::Deref};
+use wasmtime::component::ResourceTable;
+use wasmtime_wasi::IoView;
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
 
 use crate::store::StoreBuilder;
 use http_backend::Backend;
 use limiter::ProxyLimiter;
-use wasmtime::component::{Component, ResourceTable};
+use wasmtime::component::Component;
 use wasmtime::{
     Engine, InstanceAllocationStrategy, Module, PoolingAllocationConfig, ProfilingStrategy,
     WasmBacktraceDetails,
@@ -106,13 +108,15 @@ impl<T> AsMut<T> for Data<T> {
     }
 }
 
+impl<T: Send> IoView for Data<T> {
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
+}
+
 impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
-    }
-
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
     }
 
     fn send_request(
@@ -183,10 +187,6 @@ impl AsRef<wasmtime::Config> for WasmConfig {
 }
 
 impl<T: Send> wasmtime_wasi::WasiView for Data<T> {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
     fn ctx(&mut self) -> &mut wasmtime_wasi::WasiCtx {
         match &mut self.wasi {
             Wasi::Preview1(_) => {

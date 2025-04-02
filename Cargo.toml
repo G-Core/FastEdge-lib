@@ -15,12 +15,12 @@ tracing = "0.1"
 hyper = { version = "1", features = ["full"] }
 http = "1.3.1"
 async-trait = "0.1"
-wasmtime = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
-wasmtime-wasi = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
-wasi-common = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
-wasmtime-wasi-nn = { version = "29.0.1", features = ["openvino", "candle"], git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
-wasmtime-wasi-http = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
-wasmtime-environ = { version = "29.0.1", git = "https://github.com/G-Core/wasmtime.git", branch = "wasi_nn_candle_backend"}
+wasmtime = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-31.0.0"}
+wasmtime-wasi = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-31.0.0"}
+wasi-common = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-31.0.0"}
+wasmtime-wasi-nn = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-31.0.0", features = ["openvino", "candle"] }
+wasmtime-wasi-http = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-31.0.0"}
+wasmtime-environ = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-31.0.0"}
 bytesize = "2.0.1"
 
 clap = { version = "4", features = ["derive"] }

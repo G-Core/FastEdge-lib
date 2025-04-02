@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use wasi_common::file::{FdFlags, FileType};
 use wasi_common::{Error, WasiFile};
-use wasmtime_wasi::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
+use wasmtime_wasi::{OutputStream, Pollable, StdoutStream, StreamResult};
 
 #[derive(Clone)]
 pub struct Logger {
@@ -16,12 +16,12 @@ pub struct Logger {
 }
 
 pub trait AppenderBuilder {
-    fn build(&self, properties: HashMap<String, String>) -> Box<dyn HostOutputStream>;
+    fn build(&self, properties: HashMap<String, String>) -> Box<dyn OutputStream>;
 }
 
 #[async_trait]
 impl StdoutStream for Logger {
-    fn stream(&self) -> Box<dyn HostOutputStream> {
+    fn stream(&self) -> Box<dyn OutputStream> {
         self.appender.build(self.properties.clone())
     }
 
@@ -48,17 +48,17 @@ impl Extend<(String, String)> for Logger {
 pub struct NullAppender;
 
 impl AppenderBuilder for NullAppender {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn HostOutputStream> {
+    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn OutputStream> {
         Box::new(NullAppender)
     }
 }
 
 #[async_trait]
-impl Subscribe for NullAppender {
+impl Pollable for NullAppender {
     async fn ready(&mut self) {}
 }
 
-impl HostOutputStream for NullAppender {
+impl OutputStream for NullAppender {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
         if cfg!(debug_assertions) {
             print!("{}", std::str::from_utf8(&bytes).unwrap());
@@ -116,17 +116,17 @@ impl Default for Console {
 }
 
 impl AppenderBuilder for Console {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn HostOutputStream> {
+    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn OutputStream> {
         Box::new(Console::default())
     }
 }
 
 #[async_trait]
-impl Subscribe for Console {
+impl Pollable for Console {
     async fn ready(&mut self) {}
 }
 
-impl HostOutputStream for Console {
+impl OutputStream for Console {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
         if self.limit > 0 {
             print!("{}", std::str::from_utf8(&bytes).unwrap());

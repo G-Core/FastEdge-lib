@@ -13,7 +13,6 @@ stats = ["clickhouse"]
 
 [dependencies]
 anyhow = { workspace = true }
-tokio = { workspace = true }
 tokio-util = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
@@ -24,7 +23,7 @@ wasmtime-environ = { workspace = true }
 smol_str = { workspace = true }
 moka = { workspace = true }
 http = {workspace = true}
-wit-component = "0.227.1"
+wit-component = "0.228.0"
 tracing = { workspace = true }
 bytesize = { workspace = true }
 http-backend = { path = "../http-backend" }
