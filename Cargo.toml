@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.11.1"
+version = "0.11.3"
 edition = "2021"
 publish = false
 authors = ["FastEdge Development Team"]
@@ -68,6 +68,3 @@ bytesize = { workspace = true}
 
 [target.'cfg(target_family = "unix")'.dependencies]
 shellflip = "2.1.2"
-
-[patch.crates-io]
-half = { git = 'https://github.com/starkat99/half-rs.git', tag = "v2.4.1" }
