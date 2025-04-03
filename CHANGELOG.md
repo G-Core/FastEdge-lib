@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.5] - 2025-04-03
+
+### 🐛 Bug Fixes
+
+- Mapping store name with db url
+
 ## [0.11.4] - 2025-04-02
 
 ### 🚜 Refactor
 
 - Updating wasmtime to 31.0.0
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.11.3] - 2025-04-02
 
