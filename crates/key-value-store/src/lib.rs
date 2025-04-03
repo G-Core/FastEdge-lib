@@ -1,7 +1,7 @@
 use reactor::gcore::fastedge::key_value;
 use slab::Slab;
 use smol_str::SmolStr;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 use wasmtime::component::Resource;
 
@@ -18,12 +18,13 @@ pub trait Store: Sync + Send {
 
 #[async_trait::async_trait]
 pub trait StoreManager: Sync + Send {
-    async fn get_store(&self, name: &str) -> Result<Arc<dyn Store>, Error>;
+    /// Get a store by db url.
+    async fn get_store(&self, param: &str) -> Result<Arc<dyn Store>, Error>;
 }
 
 #[derive(Clone)]
 pub struct KeyValueStore {
-    allowed_stores: HashSet<SmolStr>,
+    allowed_stores: HashMap<SmolStr, SmolStr>,
     manager: Arc<dyn StoreManager>,
     stores: Slab<Arc<dyn Store>>,
 }
@@ -73,7 +74,7 @@ impl key_value::HostStore for KeyValueStore {
 impl key_value::Host for KeyValueStore {}
 
 impl KeyValueStore {
-    pub fn new(allowed_stores: Vec<SmolStr>, manager: Arc<dyn StoreManager>) -> Self {
+    pub fn new(allowed_stores: Vec<(SmolStr, SmolStr)>, manager: Arc<dyn StoreManager>) -> Self {
         Self {
             allowed_stores: allowed_stores.into_iter().collect(),
             manager,
@@ -83,8 +84,8 @@ impl KeyValueStore {
 
     /// Open a store by name. Return the store ID.
     pub async fn open(&mut self, name: &str) -> Result<u32, Error> {
-        if self.allowed_stores.contains(name) {
-            let store = self.manager.get_store(name).await?;
+        if let Some(param) = self.allowed_stores.get(name) {
+            let store = self.manager.get_store(&param).await?;
             Ok(self.stores.insert(store) as u32)
         } else {
             Err(Error::AccessDenied)
