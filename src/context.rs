@@ -74,7 +74,10 @@ impl ContextT for Context {
     }
 
     fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore {
-        let stores = stores.iter().map(|s| (s.name.clone(), s.param.clone())).collect();
+        let stores = stores
+            .iter()
+            .map(|s| (s.name.clone(), s.param.clone()))
+            .collect();
         KeyValueStore::new(stores, Arc::new(CliStoreManager))
     }
 }
