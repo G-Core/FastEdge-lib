@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error};
+use anyhow::Error;
 use dictionary::Dictionary;
 use http::request::Parts;
 use http::uri::Scheme;
@@ -71,29 +71,19 @@ impl<C> BackendRequest for HttpState<C> {
 
         headers.extend(self.propagate_headers.clone());
 
-        let host = canonical_host_name(&headers, &original_url)?;
-        let uri = canonical_url(&original_url, &host, self.uri.path())?;
-
-        head.uri = uri;
-        head.headers = headers;
-
         let authority = self
             .http_backend
             .uri()
             .authority()
             .map(|a| a.as_str().to_string())
             .unwrap_or("localhost:10080".to_string());
+        let uri = canonical_url(&original_url, &authority, self.uri.path())?;
+
+        head.uri = uri;
+        head.headers = headers;
 
         Ok((authority, head))
     }
-}
-
-// extract canonical host name
-fn canonical_host_name(headers: &HeaderMap, original_uri: &Uri) -> anyhow::Result<String> {
-    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
-    host.or_else(|| original_uri.host())
-        .ok_or(anyhow!("Could determine a Host header"))
-        .map(|h| h.to_string())
 }
 
 // make canonical uri for backend
