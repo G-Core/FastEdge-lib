@@ -172,6 +172,10 @@ pub struct WasmConfig {
     inner: wasmtime::Config,
 }
 
+pub struct WasmConfigBuilder {
+    max_execution_stacks: Option<u32>,
+}
+
 impl Deref for WasmConfig {
     type Target = wasmtime::Config;
 
@@ -233,6 +237,54 @@ impl Default for WasmConfig {
         // Maximum number of slots in the pooling allocator to keep "warm", or those
         // to keep around to possibly satisfy an affine allocation request or an
         // instantiation of a module previously instantiated within the pool.
+        pooling_allocation_config.max_unused_warm_slots(10);
+
+        inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
+            pooling_allocation_config,
+        ));
+
+        WasmConfig { inner }
+    }
+}
+
+impl WasmConfig {
+    pub fn builder() -> WasmConfigBuilder {
+        WasmConfigBuilder {
+            max_execution_stacks: None,
+        }
+    }
+}
+
+impl WasmConfigBuilder {
+    pub fn max_execution_stacks(&mut self, max: u32) {
+        self.max_execution_stacks = Some(max);
+    }
+
+    pub fn build(self) -> WasmConfig {
+        let mut inner = wasmtime::Config::new();
+        inner.debug_info(false); // Keep this disabled - wasmtime will hang if enabled
+        inner.wasm_backtrace_details(WasmBacktraceDetails::Enable);
+        inner.async_support(true);
+        inner.consume_fuel(false); // this is custom Gcore setting
+        inner.profiler(ProfilingStrategy::None);
+        inner.epoch_interruption(true); // this is custom Gcore setting
+        inner.wasm_component_model(true);
+
+        const MB: usize = 1 << 20;
+        let mut pooling_allocation_config = PoolingAllocationConfig::default();
+
+        if let Some(total) = self.max_execution_stacks {
+            pooling_allocation_config.total_stacks(total);
+            pooling_allocation_config.total_memories(total);
+            pooling_allocation_config.total_tables(total);
+            pooling_allocation_config.total_component_instances(total);
+            pooling_allocation_config.total_gc_heaps(total);
+            pooling_allocation_config.total_core_instances(total);
+        }
+
+        pooling_allocation_config.max_core_instance_size(MB);
+        pooling_allocation_config.max_tables_per_module(1);
+        pooling_allocation_config.table_elements(98765);
         pooling_allocation_config.max_unused_warm_slots(10);
 
         inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
