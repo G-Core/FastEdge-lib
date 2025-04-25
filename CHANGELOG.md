@@ -2,11 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.7] - 2025-04-25
+
+### 🚀 Features
+
+- Adding WasmConfig builder with max execution_stacks parameter
+
 ## [0.11.6] - 2025-04-04
 
 ### 🐛 Bug Fixes
 
 - Backend request authority
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 
 ## [0.11.5] - 2025-04-03
 
