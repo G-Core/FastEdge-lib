@@ -45,6 +45,9 @@ publish.workspace = true
 authors.workspace = true
 
 
+[dev-dependencies]
+tempfile = "3.20.0"
+
 [dependencies]
 anyhow = { workspace = true }
 hyper = { workspace = true }

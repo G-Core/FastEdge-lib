@@ -1,4 +1,5 @@
 mod context;
+mod dotenv;
 mod executor;
 mod key_value;
 mod secret;
@@ -6,6 +7,7 @@ mod secret;
 use bytesize::MB;
 use clap::{Args, Parser, Subcommand};
 use context::Context;
+use dotenv::{DotEnvInjector, EnvArgType};
 use http_backend::{Backend, BackendStrategy};
 use http_service::{HttpConfig, HttpService};
 use hyper_tls::HttpsConnector;
@@ -64,6 +66,12 @@ struct HttpRunArgs {
     /// Secret variable list
     #[arg(short, long, value_parser = parse_key_value::<SmolStr, SmolStr >)]
     secret: Option<Vec<(SmolStr, SmolStr)>>,
+    /// Dotenv file path
+    #[arg(long, num_args = 0..=1)]
+    dotenv: Option<Option<PathBuf>>,
+    /// Headers added to response
+    #[arg(long, value_parser = parse_key_value::< SmolStr, SmolStr >)]
+    rsp_headers: Option<Vec<(SmolStr, SmolStr)>>,
 }
 
 #[tokio::main]
@@ -91,25 +99,50 @@ async fn main() -> anyhow::Result<()> {
             );
 
             let backend = builder.build(backend_connector);
+
+            let has_dotenv_flag = run.dotenv.is_some();
+
+            let dotenv_injector = if let Some(dotenv_path) = run.dotenv.flatten() {
+                DotEnvInjector::new(Some(dotenv_path))
+            } else {
+                DotEnvInjector::new(None)
+            };
+
+            let rsp_headers = dotenv_injector.merge_with_dotenv_variables(
+                has_dotenv_flag,
+                EnvArgType::RspHeader,
+                run.rsp_headers.unwrap_or_default().into_iter().collect(),
+            );
+
+            let env = dotenv_injector.merge_with_dotenv_variables(
+                has_dotenv_flag,
+                EnvArgType::Env,
+                run.env.unwrap_or_default().into_iter().collect(),
+            );
+
+            let secret_args = dotenv_injector.merge_with_dotenv_variables(
+                has_dotenv_flag,
+                EnvArgType::Secrets,
+                run.secret.unwrap_or_default().into_iter().collect(),
+            );
+
             let mut secrets = vec![];
-            if let Some(secret) = run.secret {
-                for (name, s) in secret.into_iter() {
-                    secrets.push(runtime::app::SecretOption {
-                        name,
-                        secret_values: vec![SecretValue {
-                            effective_from: 0,
-                            value: s.to_string(),
-                        }],
-                    });
-                }
+            for (name, s) in secret_args {
+                secrets.push(runtime::app::SecretOption {
+                    name,
+                    secret_values: vec![SecretValue {
+                        effective_from: 0,
+                        value: s.to_string(),
+                    }],
+                });
             }
 
             let cli_app = App {
                 binary_id: 0,
                 max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
                 mem_limit: run.mem_limit.unwrap_or((128 * MB) as usize),
-                env: run.env.unwrap_or_default().into_iter().collect(),
-                rsp_headers: Default::default(),
+                env,
+                rsp_headers,
                 log: Default::default(),
                 app_id: 0,
                 client_id: 0,
@@ -120,8 +153,11 @@ async fn main() -> anyhow::Result<()> {
                 kv_stores: vec![],
             };
 
-            let mut headers: HashMap<SmolStr, SmolStr> =
-                run.headers.unwrap_or_default().into_iter().collect();
+            let mut headers = dotenv_injector.merge_with_dotenv_variables(
+                has_dotenv_flag,
+                EnvArgType::ReqHeader,
+                run.headers.unwrap_or_default().into_iter().collect(),
+            );
 
             append_headers(run.geo, &mut headers);
 
