@@ -8,6 +8,10 @@ All notable changes to this project will be documented in this file.
 
 - Adding WasmConfig builder with max execution_stacks parameter
 
+### ⚙️ Miscellaneous Tasks
+
+- Release
+
 ## [0.11.6] - 2025-04-04
 
 ### 🐛 Bug Fixes
