@@ -69,6 +69,9 @@ struct HttpRunArgs {
     /// Dotenv file path
     #[arg(long, num_args = 0..=1)]
     dotenv: Option<Option<PathBuf>>,
+    /// Headers added to response
+    #[arg(long, value_parser = parse_key_value::< SmolStr, SmolStr >)]
+    rsp_headers: Option<Vec<(SmolStr, SmolStr)>>,
 }
 
 #[tokio::main]
@@ -105,6 +108,12 @@ async fn main() -> anyhow::Result<()> {
                 DotEnvInjector::new(None)
             };
 
+            let rsp_headers = dotenv_injector.merge_with_dotenv_variables(
+                has_dotenv_flag,
+                EnvArgType::RspHeader,
+                run.rsp_headers.unwrap_or_default().into_iter().collect(),
+            );
+
             let env = dotenv_injector.merge_with_dotenv_variables(
                 has_dotenv_flag,
                 EnvArgType::Env,
@@ -132,9 +141,8 @@ async fn main() -> anyhow::Result<()> {
                 binary_id: 0,
                 max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
                 mem_limit: run.mem_limit.unwrap_or((128 * MB) as usize),
-                // env: run.env.unwrap_or_default().into_iter().collect(),
                 env,
-                rsp_headers: Default::default(),
+                rsp_headers,
                 log: Default::default(),
                 app_id: 0,
                 client_id: 0,
@@ -145,12 +153,9 @@ async fn main() -> anyhow::Result<()> {
                 kv_stores: vec![],
             };
 
-            // let mut headers: HashMap<SmolStr, SmolStr> =
-            //     run.headers.unwrap_or_default().into_iter().collect();
-
             let mut headers = dotenv_injector.merge_with_dotenv_variables(
                 has_dotenv_flag,
-                EnvArgType::RspHeader,
+                EnvArgType::ReqHeader,
                 run.headers.unwrap_or_default().into_iter().collect(),
             );
 

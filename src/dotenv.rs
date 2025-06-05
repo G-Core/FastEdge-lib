@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, PartialEq)]
 pub enum EnvArgType {
     RspHeader,
+    ReqHeader,
     Env,
     Secrets,
 }
@@ -15,6 +16,7 @@ pub enum EnvArgType {
 #[derive(Debug, PartialEq)]
 enum EnvArgFileType {
     RspHeaders,
+    ReqHeaders,
     Variables,
     Secrets,
     DotEnv,
@@ -24,6 +26,7 @@ impl From<EnvArgType> for EnvArgFileType {
     fn from(env_arg_type: EnvArgType) -> Self {
         match env_arg_type {
             EnvArgType::RspHeader => EnvArgFileType::RspHeaders,
+            EnvArgType::ReqHeader => EnvArgFileType::ReqHeaders,
             EnvArgType::Env => EnvArgFileType::Variables,
             EnvArgType::Secrets => EnvArgFileType::Secrets,
         }
@@ -69,7 +72,7 @@ impl DotEnvInjector {
             }
         }
 
-        // Read and merge specific environment type variables
+        // Read and merge specific .env.{variables|req_headers|rsp_headers|secrets} file variables
         let env_arg_file_type: EnvArgFileType = env_arg_type.into();
         if let Ok(dotenv_vars) = self.read_dotenv_file(env_arg_file_type) {
             for (key, value) in dotenv_vars {
@@ -85,20 +88,22 @@ impl DotEnvInjector {
     fn filter_named_keys(&self, key: &SmolStr, env_arg_type: &EnvArgType) -> Option<SmolStr> {
         let env_arg_prefix_str = match env_arg_type {
             EnvArgType::RspHeader => "FASTEDGE_VAR_RSP_HEADER_",
+            EnvArgType::ReqHeader => "FASTEDGE_VAR_REQ_HEADER_",
             EnvArgType::Env => "FASTEDGE_VAR_ENV_",
             EnvArgType::Secrets => "FASTEDGE_VAR_SECRET_",
         };
 
-        let stripped_key: Option<SmolStr> = if key.starts_with("FASTEDGE_VAR_") {
+        if key.starts_with("FASTEDGE_VAR_") {
             if key.starts_with(env_arg_prefix_str) {
                 Some(SmolStr::new(key.trim_start_matches(env_arg_prefix_str)))
             } else {
                 None
             }
-        } else {
+        } else if *env_arg_type == EnvArgType::Env {
             Some(SmolStr::new(key))
-        };
-        stripped_key
+        } else {
+            None
+        }
     }
 
     fn read_dotenv_file(
@@ -107,6 +112,7 @@ impl DotEnvInjector {
     ) -> Result<HashMap<SmolStr, SmolStr>, std::io::Error> {
         let env_arg_file_type_str = match env_arg_file_type {
             EnvArgFileType::RspHeaders => ".env.rsp_headers",
+            EnvArgFileType::ReqHeaders => ".env.req_headers",
             EnvArgFileType::Variables => ".env.variables",
             EnvArgFileType::Secrets => ".env.secrets",
             EnvArgFileType::DotEnv => ".env",
@@ -114,6 +120,7 @@ impl DotEnvInjector {
 
         let filename = self.file_path.join(env_arg_file_type_str);
         let mut variables = HashMap::new();
+
         if let Ok(lines) = fs::read_to_string(filename) {
             for _line in lines.lines() {
                 let line = match _line.split_once('#') {
@@ -124,11 +131,19 @@ impl DotEnvInjector {
                     continue;
                 }
                 if let Some((key, value)) = line.split_once('=') {
-                    variables.insert(SmolStr::new(key.trim()), SmolStr::new(value.trim()));
+                    // Insert the key-value pair into the HashMap
+                    variables.insert(
+                        self.strip_quoted_strings(key),
+                        self.strip_quoted_strings(value),
+                    );
                 }
             }
         }
         Ok(variables)
+    }
+
+    fn strip_quoted_strings(&self, value: &str) -> SmolStr {
+        SmolStr::new(value.trim().trim_matches(|c| c == '"' || c == '\''))
     }
 }
 
@@ -148,6 +163,11 @@ mod dotenv_injector_tests {
             "\
             KEY1=value1
             KEY2=value2
+            KEY3==value3
+            KEY4=\"value4\"
+            'KEY5'='value5'
+            KEY6=\"some value with spaces\"
+            KEY7=\"some \"edge\" case with = and `quotes`\"
             ",
         )
         .unwrap();
@@ -158,6 +178,14 @@ mod dotenv_injector_tests {
         let mut expected = HashMap::new();
         expected.insert(SmolStr::new("KEY1"), SmolStr::new("value1"));
         expected.insert(SmolStr::new("KEY2"), SmolStr::new("value2"));
+        expected.insert(SmolStr::new("KEY3"), SmolStr::new("=value3"));
+        expected.insert(SmolStr::new("KEY4"), SmolStr::new("value4"));
+        expected.insert(SmolStr::new("KEY5"), SmolStr::new("value5"));
+        expected.insert(SmolStr::new("KEY6"), SmolStr::new("some value with spaces"));
+        expected.insert(
+            SmolStr::new("KEY7"),
+            SmolStr::new("some \"edge\" case with = and `quotes`"),
+        );
 
         assert_eq!(result, expected);
     }
@@ -246,9 +274,9 @@ mod dotenv_injector_tests {
         fs::write(
             &env_file_path,
             "\
-               KEY1=value1
-               KEY2=value2 # this is a comment - ignore it
-               ",
+            KEY1=value1
+            KEY2=value2 # this is a comment - ignore it
+            ",
         )
         .unwrap();
 
@@ -260,8 +288,8 @@ mod dotenv_injector_tests {
 
         let expected = args_variables.clone();
 
-        // Call merge_with_dotenv_variables dsiabled via "should_read_dotenv=false"
-        // Should do nothing and only pass back the args_variables
+        // Invoking merge_with_dotenv_variables dsiabled via "should_read_dotenv=false"
+        // Does nothing and only pass back the args_variables
         let result = injector.merge_with_dotenv_variables(false, EnvArgType::Env, args_variables);
 
         assert_eq!(result, expected);
@@ -269,7 +297,6 @@ mod dotenv_injector_tests {
 
     #[test]
     fn test_merge_with_dotenv_variables_with_no_values_or_file() {
-        // Create a temporary directory
         let temp_dir = tempdir().unwrap();
         let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
 
@@ -289,6 +316,7 @@ mod dotenv_injector_tests {
             "\
                KEY1=value1 # This is a comment - ignore it
                KEY2=value2
+               KEY3=\"my own string value\"
                # KEY4=value4  This is also a comment
                ",
         )
@@ -312,30 +340,29 @@ mod dotenv_injector_tests {
 
     #[test]
     fn test_merge_with_dotenv_variables_and_dotenv_variables() {
-        // Create a temporary directory
         let temp_dir = tempdir().unwrap();
         let env_file_path = temp_dir.path().join(".env");
         fs::write(
-               &env_file_path,
-               "\
-               KEY1=value1
-               KEY2=value2
-               FASTEDGE_VAR_ENV_KEY3=value3
-               FASTEDGE_VAR_SECRET_KEY6=secret26  # Ignore this line as it starts with FASTEDGE_VAR_SECRET_ prefix
-               ",
-           )
-           .unwrap();
+                  &env_file_path,
+                  "\
+                  KEY1=value1
+                  KEY2=value2
+                  FASTEDGE_VAR_ENV_KEY3=value3
+                  FASTEDGE_VAR_SECRET_KEY6=secret26  # Ignore this line as it starts with FASTEDGE_VAR_SECRET_ prefix
+                  ",
+              )
+              .unwrap();
 
-        let secrets_file_path = temp_dir.path().join(".env.variables");
+        let variables_file_path = temp_dir.path().join(".env.variables");
         fs::write(
-               &secrets_file_path,
-               "\
-               KEY4=value4
-               KEY5=value5
-               FASTEDGE_VAR_ENV_KEY6=value6  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
-               ",
-           )
-           .unwrap();
+                  &variables_file_path,
+                  "\
+                  KEY4=value4
+                  KEY5=value5
+                  FASTEDGE_VAR_ENV_KEY6=value6  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
+                  ",
+              )
+              .unwrap();
 
         let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
 
@@ -357,88 +384,143 @@ mod dotenv_injector_tests {
 
     #[test]
     fn test_merge_with_dotenv_variables_and_dotenv_rsp_headers() {
-        // Create a temporary directory
         let temp_dir = tempdir().unwrap();
         let env_file_path = temp_dir.path().join(".env");
         fs::write(
-               &env_file_path,
-               "\
-             KEY1=rsp_header1
-             KEY2=rsp_header2
-             FASTEDGE_VAR_SECRET_KEY6=secret26  # Ignore this line as it starts with FASTEDGE_VAR_SECRET_ prefix
-             ",
-           )
-           .unwrap();
+            &env_file_path,
+            "\
+                KEY1=value1  # Ignore this line as it is not a rsp_header
+                KEY2=value2  # Ignore  this line as it is not a rsp_header
+                FASTEDGE_VAR_RSP_HEADER_KEY3=rsp_header3
+                FASTEDGE_VAR_RSP_HEADER_KEY4=rsp_header4
+                FASTEDGE_VAR_SECRET_KEY5=secret5  # Ignore this line as it is not a rsp_header
+                ",
+        )
+        .unwrap();
 
-        let secrets_file_path = temp_dir.path().join(".env.rsp_headers");
+        let rsp_headers_file_path = temp_dir.path().join(".env.rsp_headers");
         fs::write(
-               &secrets_file_path,
-               "\
-             KEY3=rsp_header3
-             KEY4=rsp_header4
-             FASTEDGE_VAR_RSP_HEADER_KEY6=value6  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
-             ",
-           )
-           .unwrap();
+                  &rsp_headers_file_path,
+                  "\
+                KEY6=rsp_header6
+                KEY7=rsp_header7
+                FASTEDGE_VAR_RSP_HEADER_KEY8=value8  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
+                ",
+              )
+              .unwrap();
 
         let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
 
-        let mut args_variables = HashMap::new();
-        args_variables.insert(SmolStr::new("KEY2"), SmolStr::new("override_rsp_header2"));
-        args_variables.insert(SmolStr::new("KEY3"), SmolStr::new("override_rsp_header3"));
+        let mut headers_variables = HashMap::new(); //rename these across all tests
+        headers_variables.insert(SmolStr::new("KEY4"), SmolStr::new("override_rsp_header4"));
+        headers_variables.insert(SmolStr::new("KEY6"), SmolStr::new("override_rsp_header6"));
 
         let result =
-            injector.merge_with_dotenv_variables(true, EnvArgType::RspHeader, args_variables);
+            injector.merge_with_dotenv_variables(true, EnvArgType::RspHeader, headers_variables);
 
         let mut expected = HashMap::new();
-        expected.insert(SmolStr::new("KEY1"), SmolStr::new("rsp_header1"));
-        expected.insert(SmolStr::new("KEY2"), SmolStr::new("override_rsp_header2"));
-        expected.insert(SmolStr::new("KEY3"), SmolStr::new("override_rsp_header3"));
-        expected.insert(SmolStr::new("KEY4"), SmolStr::new("rsp_header4"));
+        expected.insert(SmolStr::new("KEY3"), SmolStr::new("rsp_header3"));
+        expected.insert(SmolStr::new("KEY4"), SmolStr::new("override_rsp_header4"));
+        expected.insert(SmolStr::new("KEY6"), SmolStr::new("override_rsp_header6"));
+        expected.insert(SmolStr::new("KEY7"), SmolStr::new("rsp_header7"));
 
         assert_eq!(result, expected);
     }
 
     #[test]
     fn test_merge_with_dotenv_variables_and_dotenv_secrets() {
-        // Create a temporary directory
+        let temp_dir = tempdir().unwrap();
+        let env_file_path = temp_dir.path().join(".env");
+        fs::write(
+            &env_file_path,
+            "\
+                KEY1=value1  # Ignore this line as it is not a secret
+                KEY2=value2  # Ignore  this line as it is not a secret
+                FASTEDGE_VAR_SECRET_KEY3=secret3
+                FASTEDGE_VAR_SECRET_KEY4=secret4
+                FASTEDGE_VAR_ENV_KEY5=value5 # Ignore this line as it is not a secret
+                ",
+        )
+        .unwrap();
+
+        let secrets_file_path = temp_dir.path().join(".env.secrets");
+        fs::write(
+               &secrets_file_path,
+               "\
+                KEY6=secret6
+                KEY7=secret7
+                FASTEDGE_VAR_SECRET_KEY8=value8  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
+                FASTEDGE_VAR_RSP_HEADER_KEY9=value9  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
+                ",
+           )
+           .unwrap();
+
+        let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
+
+        let mut secret_variables = HashMap::new();
+        secret_variables.insert(SmolStr::new("KEY4"), SmolStr::new("override_secret4"));
+        secret_variables.insert(SmolStr::new("KEY6"), SmolStr::new("override_secret6"));
+        secret_variables.insert(SmolStr::new("ARGSECRET_ONLY"), SmolStr::new("new_secret8"));
+
+        let result =
+            injector.merge_with_dotenv_variables(true, EnvArgType::Secrets, secret_variables);
+
+        let mut expected = HashMap::new();
+        expected.insert(SmolStr::new("KEY3"), SmolStr::new("secret3"));
+        expected.insert(SmolStr::new("KEY4"), SmolStr::new("override_secret4"));
+        expected.insert(SmolStr::new("KEY6"), SmolStr::new("override_secret6"));
+        expected.insert(SmolStr::new("KEY7"), SmolStr::new("secret7"));
+        expected.insert(SmolStr::new("ARGSECRET_ONLY"), SmolStr::new("new_secret8"));
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_merge_with_dotenv_variables_and_dotenv_req_headers() {
         let temp_dir = tempdir().unwrap();
         let env_file_path = temp_dir.path().join(".env");
         fs::write(
                &env_file_path,
                "\
-             KEY1=secret1
-             KEY2=secret2
-             FASTEDGE_VAR_ENV_KEY6=value6  # Ignore this line as it starts with FASTEDGE_VAR_RSP_HEADER_ prefix
-             FASTEDGE_VAR_RSP_HEADER_KEY7=header7  # Ignore this line as it starts with FASTEDGE_VAR_RSP_HEADER_ prefix
-             ",
+                KEY1=value1  # Ignore this line as it is not a req_header
+                KEY2=value2  # Ignore  this line as it is not a req_header
+                FASTEDGE_VAR_REQ_HEADER_KEY3=header3
+                FASTEDGE_VAR_SECRET_KEY4=secret4 # Ignore  this line as it is not a req_header
+                FASTEDGE_VAR_RSP_HEADER_KEY5=rsp_header5 # Ignore  this line as it is not a req_header
+                FASTEDGE_VAR_ENV_KEY6=value6 # Ignore  this line as it is not a req_header
+                FASTEDGE_VAR_REQ_HEADER_KEY7=header7
+                ",
            )
            .unwrap();
 
-        let secrets_file_path = temp_dir.path().join(".env.secrets");
+        let secrets_file_path = temp_dir.path().join(".env.req_headers");
         fs::write(
-            &secrets_file_path,
-            "\
-             KEY3=secret3
-             KEY4=secret4
-             ",
-        )
-        .unwrap();
+               &secrets_file_path,
+               "\
+                KEY8=header8
+                KEY9=header9
+                FASTEDGE_VAR_REQ_HEADER_KEY10=req_header10  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
+                FASTEDGE_VAR_RSP_HEADER_KEY11=rsp_header11  # Ignore this line as it starts with FASTEDGE_VAR_ prefix ( only allowed in .env )
+                ",
+           )
+           .unwrap();
 
         let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
 
-        let mut args_variables = HashMap::new();
-        args_variables.insert(SmolStr::new("KEY2"), SmolStr::new("override_secret2"));
-        args_variables.insert(SmolStr::new("KEY3"), SmolStr::new("override_secret3"));
+        let mut req_header_variables = HashMap::new();
+        req_header_variables.insert(SmolStr::new("KEY7"), SmolStr::new("override_header7"));
+        req_header_variables.insert(SmolStr::new("KEY8"), SmolStr::new("override_header8"));
+        req_header_variables.insert(SmolStr::new("ARGSECRET_ONLY"), SmolStr::new("header12"));
 
         let result =
-            injector.merge_with_dotenv_variables(true, EnvArgType::Secrets, args_variables);
+            injector.merge_with_dotenv_variables(true, EnvArgType::ReqHeader, req_header_variables);
 
         let mut expected = HashMap::new();
-        expected.insert(SmolStr::new("KEY1"), SmolStr::new("secret1"));
-        expected.insert(SmolStr::new("KEY2"), SmolStr::new("override_secret2"));
-        expected.insert(SmolStr::new("KEY3"), SmolStr::new("override_secret3"));
-        expected.insert(SmolStr::new("KEY4"), SmolStr::new("secret4"));
+        expected.insert(SmolStr::new("KEY3"), SmolStr::new("header3"));
+        expected.insert(SmolStr::new("KEY7"), SmolStr::new("override_header7"));
+        expected.insert(SmolStr::new("KEY8"), SmolStr::new("override_header8"));
+        expected.insert(SmolStr::new("KEY9"), SmolStr::new("header9"));
+        expected.insert(SmolStr::new("ARGSECRET_ONLY"), SmolStr::new("header12"));
 
         assert_eq!(result, expected);
     }
