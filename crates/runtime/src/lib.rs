@@ -413,7 +413,7 @@ pub trait Router: Send + Sync {
     ) -> impl std::future::Future<Output = Option<(SmolStr, App)>> + Send;
 }
 
-pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
+pub fn componentize_if_necessary<'a>(buffer: &'a [u8]) -> anyhow::Result<Cow<'a, [u8]>> {
     for payload in Parser::new(0).parse_all(buffer) {
         match payload {
             Ok(Payload::Version { encoding, .. }) => {

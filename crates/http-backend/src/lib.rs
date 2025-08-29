@@ -53,7 +53,7 @@ pub struct Backend<C> {
     propagate_headers: HeaderMap,
     propagate_header_names: HeaderNameList,
     max_sub_requests: usize,
-    strategy: BackendStrategy,
+    pub strategy: BackendStrategy,
 }
 
 pub struct Builder {
