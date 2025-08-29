@@ -21,7 +21,7 @@ impl<C> BackendRequest for HttpState<C> {
         match self.http_backend.strategy {
             http_backend::BackendStrategy::Direct => {
                 tracing::trace!("direct send request original url: {:?}", head.uri);
-                Ok( head)
+                Ok(head)
             }
             http_backend::BackendStrategy::FastEdge => {
                 let original_url = head.uri;
@@ -88,7 +88,7 @@ impl<C> BackendRequest for HttpState<C> {
                 head.uri = uri;
                 head.headers = headers;
 
-                Ok( head )
+                Ok(head)
             }
         }
     }
