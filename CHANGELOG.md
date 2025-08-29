@@ -1,7 +1,13 @@
-# Changelog
+## [0.11.9] - 2025-08-29
 
-All notable changes to this project will be documented in this file.
+### 🐛 Bug Fixes
 
+- Use direct backend for fastedge cli
+## [0.11.8] - 2025-06-05
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.11.7] - 2025-04-25
 
 ### 🚀 Features
@@ -11,7 +17,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.6] - 2025-04-04
 
 ### 🐛 Bug Fixes
@@ -21,7 +26,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.5] - 2025-04-03
 
 ### 🐛 Bug Fixes
@@ -31,7 +35,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.4] - 2025-04-02
 
 ### 🚜 Refactor
@@ -41,7 +44,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.3] - 2025-04-02
 
 ### 🐛 Bug Fixes
@@ -51,7 +53,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.2] - 2025-04-02
 
 ### 🐛 Bug Fixes
@@ -61,7 +62,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.1] - 2025-04-01
 
 ### 🐛 Bug Fixes
@@ -71,7 +71,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.11.0] - 2025-04-01
 
 ### 🐛 Bug Fixes
@@ -84,7 +83,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.10.2] - 2025-02-21
 
 ### 🐛 Bug Fixes
@@ -94,7 +92,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.10.1] - 2025-02-20
 
 ### 🐛 Bug Fixes
@@ -109,7 +106,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.10.0] - 2025-02-19
 
 ### 🚜 Refactor
@@ -120,7 +116,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.9.4] - 2025-01-21
 
 ### 🐛 Bug Fixes
@@ -131,7 +126,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.9.3] - 2025-01-20
 
 ### 🐛 Bug Fixes
@@ -144,7 +138,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.9.2] - 2024-12-18
 
 ### 🚀 Features
@@ -154,7 +147,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.9.1] - 2024-12-06
 
 ### 🐛 Bug Fixes
@@ -166,7 +158,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.9.0] - 2024-11-22
 
 ### 🐛 Bug Fixes
@@ -178,13 +169,11 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.8.1] - 2024-11-11
 
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.8.0] - 2024-10-21
 
 ### 🚀 Features
@@ -199,7 +188,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.7.0] - 2024-10-16
 
 ### 🚜 Refactor
@@ -209,7 +197,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.6.0] - 2024-09-20
 
 ### 🐛 Bug Fixes
@@ -220,7 +207,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.5.7] - 2024-09-12
 
 ### 🐛 Bug Fixes
@@ -233,7 +219,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.5.7-rc.2] - 2024-09-09
 
 ### 🐛 Bug Fixes
@@ -243,7 +228,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.5.7-rc.1] - 2024-09-09
 
 ### 🚀 Features
@@ -265,25 +249,21 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.5.2-3] - 2024-08-05
 
 ### 🐛 Bug Fixes
 
 - Add os target
-
 ## [0.5.2-2] - 2024-08-05
 
 ### 🐛 Bug Fixes
 
 - Add os target
-
 ## [0.5.2-1] - 2024-08-05
 
 ### 🐛 Bug Fixes
 
 - Simplify tag creation and trigger release on push tag
-
 ## [0.5.2] - 2024-08-05
 
 ### 🐛 Bug Fixes
@@ -301,7 +281,6 @@ All notable changes to this project will be documented in this file.
 - Drop windows from package list
 - Release tag name
 - Simplify tag creation and trigger release on push tag
-
 ## [0.5.0] - 2024-07-30
 
 ### 🚀 Features
@@ -316,7 +295,6 @@ All notable changes to this project will be documented in this file.
 
 - Remove unusual reference
 - Add uri missing schema part
-
 ## [0.4.1] - 2024-06-26
 
 ### 🚀 Features
@@ -344,7 +322,6 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Release
-
 ## [0.3.7] - 2024-05-15
 
 ### 🚀 Features
@@ -356,5 +333,3 @@ All notable changes to this project will be documented in this file.
 - Clippy warning and new release flow
 - Clippy warning and new release flow
 - Clippy warning and new release flow
-
-<!-- generated by git-cliff -->
