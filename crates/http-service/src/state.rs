@@ -17,72 +17,80 @@ pub struct HttpState<C> {
 
 impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self), ret, err)]
-    fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<(String, Parts)> {
-        let original_url = head.uri;
-        tracing::trace!("send request original url: {:?}", original_url);
-        let original_host = original_url.authority().map(|a| {
-            match (original_url.scheme_str(), a.port().map(|p| p.as_u16())) {
-                (None, Some(80))
-                | (Some("http"), Some(80))
-                | (Some("https"), Some(443))
-                | (_, None) => a.host().to_string(),
-                (_, Some(port)) => format!("{}:{}", a.host(), port),
+    fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
+        match self.http_backend.strategy {
+            http_backend::BackendStrategy::Direct => {
+                tracing::trace!("direct send request original url: {:?}", head.uri);
+                Ok(head)
             }
-        });
-        let original_host = original_host
-            .or_else(|| {
-                head.headers.iter().find_map(|(k, v)| {
-                    if k.as_str().eq_ignore_ascii_case("host") {
-                        v.to_str().ok().map(|c| c.to_string())
-                    } else {
-                        None
+            http_backend::BackendStrategy::FastEdge => {
+                let original_url = head.uri;
+                tracing::trace!("backend send request original url: {:?}", original_url);
+                let original_host = original_url.authority().map(|a| {
+                    match (original_url.scheme_str(), a.port().map(|p| p.as_u16())) {
+                        (None, Some(80))
+                        | (Some("http"), Some(80))
+                        | (Some("https"), Some(443))
+                        | (_, None) => a.host().to_string(),
+                        (_, Some(port)) => format!("{}:{}", a.host(), port),
                     }
-                })
-            })
-            .unwrap_or_default();
+                });
+                let original_host = original_host
+                    .or_else(|| {
+                        head.headers.iter().find_map(|(k, v)| {
+                            if k.as_str().eq_ignore_ascii_case("host") {
+                                v.to_str().ok().map(|c| c.to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or_default();
 
-        static FILTER_HEADERS: [HeaderName; 6] = [
-            header::HOST,
-            header::CONTENT_LENGTH,
-            header::TRANSFER_ENCODING,
-            header::UPGRADE,
-            HeaderName::from_static("fastedge-hostname"),
-            HeaderName::from_static("fastedge-scheme"),
-        ];
+                static FILTER_HEADERS: [HeaderName; 6] = [
+                    header::HOST,
+                    header::CONTENT_LENGTH,
+                    header::TRANSFER_ENCODING,
+                    header::UPGRADE,
+                    HeaderName::from_static("fastedge-hostname"),
+                    HeaderName::from_static("fastedge-scheme"),
+                ];
 
-        // filter headers
-        let mut headers = head
-            .headers
-            .into_iter()
-            .filter_map(|(k, v)| k.map(|k| (k, v)))
-            .filter(|(k, _)| {
-                !FILTER_HEADERS.contains(k) && !self.propagate_header_names.contains(k)
-            })
-            .collect::<HeaderMap>();
+                // filter headers
+                let mut headers = head
+                    .headers
+                    .into_iter()
+                    .filter_map(|(k, v)| k.map(|k| (k, v)))
+                    .filter(|(k, _)| {
+                        !FILTER_HEADERS.contains(k) && !self.propagate_header_names.contains(k)
+                    })
+                    .collect::<HeaderMap>();
 
-        headers.insert(
-            HeaderName::from_static("fastedge-hostname"),
-            original_host.parse()?,
-        );
-        headers.insert(
-            HeaderName::from_static("fastedge-scheme"),
-            original_url.scheme_str().unwrap_or("http").parse()?,
-        );
+                headers.insert(
+                    HeaderName::from_static("fastedge-hostname"),
+                    original_host.parse()?,
+                );
+                headers.insert(
+                    HeaderName::from_static("fastedge-scheme"),
+                    original_url.scheme_str().unwrap_or("http").parse()?,
+                );
 
-        headers.extend(self.propagate_headers.clone());
+                headers.extend(self.propagate_headers.clone());
 
-        let authority = self
-            .http_backend
-            .uri()
-            .authority()
-            .map(|a| a.as_str().to_string())
-            .unwrap_or("localhost:10080".to_string());
-        let uri = canonical_url(&original_url, &authority, self.uri.path())?;
+                let authority = self
+                    .http_backend
+                    .uri()
+                    .authority()
+                    .map(|a| a.as_str().to_string())
+                    .unwrap_or("localhost:10080".to_string());
+                let uri = canonical_url(&original_url, &authority, self.uri.path())?;
 
-        head.uri = uri;
-        head.headers = headers;
+                head.uri = uri;
+                head.headers = headers;
 
-        Ok((authority, head))
+                Ok(head)
+            }
+        }
     }
 }
 

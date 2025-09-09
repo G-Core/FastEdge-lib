@@ -93,7 +93,7 @@ pub struct Data<T> {
 }
 
 pub trait BackendRequest {
-    fn backend_request(&mut self, head: Parts) -> anyhow::Result<(String, Parts)>;
+    fn backend_request(&mut self, head: Parts) -> anyhow::Result<Parts>;
 }
 
 impl<T> AsRef<T> for Data<T> {
@@ -128,7 +128,7 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
         Self: Sized,
     {
         let (head, body) = request.into_parts();
-        let (_, head) = self.inner.backend_request(head).map_err(|e| {
+        let head = self.inner.backend_request(head).map_err(|e| {
             tracing::warn!(cause=?e, "backend request");
             ErrorCode::InternalError(Some(e.to_string()))
         })?;
@@ -413,7 +413,7 @@ pub trait Router: Send + Sync {
     ) -> impl std::future::Future<Output = Option<(SmolStr, App)>> + Send;
 }
 
-pub fn componentize_if_necessary(buffer: &[u8]) -> anyhow::Result<Cow<[u8]>> {
+pub fn componentize_if_necessary<'a>(buffer: &'a [u8]) -> anyhow::Result<Cow<'a, [u8]>> {
     for payload in Parser::new(0).parse_all(buffer) {
         match payload {
             Ok(Payload::Version { encoding, .. }) => {
