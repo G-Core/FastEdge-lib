@@ -30,7 +30,7 @@ impl<C, S: Service<Context = C>> ServiceBuilder<C, S>
 where
     C: ContextT,
     S: Service<Context = C>,
-    <S as Service>::State: Send + Sync,
+    <S as Service>::State: Send + Sync + 'static,
 {
     /// Create a new ServiceBuilder.
     pub fn new(context: C) -> Self {

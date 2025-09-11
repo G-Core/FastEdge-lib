@@ -3,6 +3,5 @@
 wasmtime::component::bindgen!({
     path: "../../sdk/wit",
     world: "reactor",
-    async: true,
-    tracing: false,
+    imports: { default: async },
 });
