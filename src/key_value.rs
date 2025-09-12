@@ -1,28 +1,30 @@
 use key_value_store::{Error, Store, StoreManager, Value};
-use std::sync::Arc;
 
-struct CliStore;
+pub struct CliStore;
 
-pub(crate) struct CliStoreManager;
+#[derive(Default)]
+pub struct CliStoreManager;
 
 #[async_trait::async_trait]
 impl StoreManager for CliStoreManager {
-    async fn get_store(&self, _name: &str) -> Result<Arc<dyn Store>, Error> {
-        Ok(Arc::new(CliStore))
+    type StoreType = CliStore;
+
+    async fn get_store(&mut self, _name: &str) -> Result<CliStore, Error> {
+        Ok(CliStore)
     }
 }
 
 #[async_trait::async_trait]
 impl Store for CliStore {
-    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
+    async fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, Error> {
         Ok(Some(key.as_bytes().to_vec()))
     }
 
-    async fn get_by_range(&self, _key: &str, _min: u32, _max: u32) -> Result<Vec<Value>, Error> {
+    async fn get_by_range(&mut self, _key: &str, _min: u32, _max: u32) -> Result<Vec<Value>, Error> {
         todo!()
     }
 
-    async fn bf_exists(&self, _bf: &str, _key: &str) -> Result<bool, Error> {
+    async fn bf_exists(&mut self, _bf: &str, _key: &str) -> Result<bool, Error> {
         todo!()
     }
 }

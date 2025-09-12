@@ -8,10 +8,11 @@ use hyper::body::Body;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use std::time::Duration;
+use crate::key_value::CliStoreManager;
 
 pub enum RunExecutor {
-    Http(HttpExecutorImpl<HttpsConnector<HttpConnector>>),
-    Wasi(WasiHttpExecutorImpl<HttpsConnector<HttpConnector>>),
+    Http(HttpExecutorImpl<HttpsConnector<HttpConnector>, CliStoreManager>),
+    Wasi(WasiHttpExecutorImpl<HttpsConnector<HttpConnector>, CliStoreManager>),
 }
 
 #[async_trait]

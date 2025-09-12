@@ -2,34 +2,34 @@ use reactor::gcore::fastedge::key_value;
 use slab::Slab;
 use smol_str::SmolStr;
 use std::collections::HashMap;
-use std::sync::Arc;
 use wasmtime::component::Resource;
 
 pub use key_value::{Error, Value};
 
 #[async_trait::async_trait]
-pub trait Store: Sync + Send {
-    async fn get(&self, key: &str) -> Result<Option<Value>, Error>;
+pub trait Store: Sync + Send{
+    async fn get(&mut self, key: &str) -> Result<Option<Value>, Error>;
 
-    async fn get_by_range(&self, key: &str, min: u32, max: u32) -> Result<Vec<Value>, Error>;
+    async fn get_by_range(&mut self, key: &str, min: u32, max: u32) -> Result<Vec<Value>, Error>;
 
-    async fn bf_exists(&self, bf: &str, key: &str) -> Result<bool, Error>;
+    async fn bf_exists(&mut self, bf: &str, key: &str) -> Result<bool, Error>;
 }
 
 #[async_trait::async_trait]
 pub trait StoreManager: Sync + Send {
+    type StoreType: Store;
     /// Get a store by db url.
-    async fn get_store(&self, param: &str) -> Result<Arc<dyn Store>, Error>;
+    async fn get_store(&mut self, param: &str) -> Result<Self::StoreType, Error>;
 }
 
 #[derive(Clone)]
-pub struct KeyValueStore {
+pub struct KeyValueStore<M: StoreManager> {
     allowed_stores: HashMap<SmolStr, SmolStr>,
-    manager: Arc<dyn StoreManager>,
-    stores: Slab<Arc<dyn Store>>,
+    manager: M,
+    stores: Slab<M::StoreType>,
 }
 
-impl key_value::HostStore for KeyValueStore {
+impl<M: StoreManager> key_value::HostStore for KeyValueStore<M> {
     async fn open(&mut self, name: String) -> Result<Resource<key_value::Store>, Error> {
         let store_id = KeyValueStore::open(self, &name).await?;
         Ok(Resource::new_own(store_id))
@@ -71,10 +71,10 @@ impl key_value::HostStore for KeyValueStore {
     }
 }
 
-impl key_value::Host for KeyValueStore {}
+impl<M: StoreManager> key_value::Host for KeyValueStore<M> {}
 
-impl KeyValueStore {
-    pub fn new(allowed_stores: Vec<(SmolStr, SmolStr)>, manager: Arc<dyn StoreManager>) -> Self {
+impl<M: StoreManager> KeyValueStore<M> {
+    pub fn new(allowed_stores: Vec<(SmolStr, SmolStr)>, manager: M) -> Self {
         Self {
             allowed_stores: allowed_stores.into_iter().collect(),
             manager,
@@ -93,8 +93,8 @@ impl KeyValueStore {
     }
 
     /// Get a value from a store by key.
-    pub async fn get(&self, store: u32, key: &str) -> Result<Option<Value>, Error> {
-        let Some(store) = self.stores.get(store as usize) else {
+    pub async fn get(&mut self, store: u32, key: &str) -> Result<Option<Value>, Error> {
+        let Some(store) = self.stores.get_mut(store as usize) else {
             return Err(Error::NoSuchStore);
         };
         store.get(key).await
@@ -102,32 +102,32 @@ impl KeyValueStore {
 
     /// Get a values from a store by key.
     pub async fn get_by_range(
-        &self,
+        &mut self,
         store: u32,
         key: &str,
         min: u32,
         max: u32,
     ) -> Result<Vec<Value>, Error> {
-        let Some(store) = self.stores.get(store as usize) else {
+        let Some(store) = self.stores.get_mut(store as usize) else {
             return Err(Error::NoSuchStore);
         };
         store.get_by_range(key, min, max).await
     }
 
     /// Get a value from a store by key.
-    pub async fn bf_exists(&self, store: u32, bf: &str, key: &str) -> Result<bool, Error> {
-        let Some(store) = self.stores.get(store as usize) else {
+    pub async fn bf_exists(&mut self, store: u32, bf: &str, key: &str) -> Result<bool, Error> {
+        let Some(store) = self.stores.get_mut(store as usize) else {
             return Err(Error::NoSuchStore);
         };
         store.bf_exists(bf, key).await
     }
 }
 
-impl Default for KeyValueStore {
+impl<M: StoreManager + Default> Default for KeyValueStore<M> {
     fn default() -> Self {
         Self {
             allowed_stores: Default::default(),
-            manager: Arc::new(NoSuchStoreManager),
+            manager: M::default(),
             stores: Slab::new(),
         }
     }
@@ -135,9 +135,28 @@ impl Default for KeyValueStore {
 
 pub struct NoSuchStoreManager;
 
+pub struct NoStore;
+
+#[async_trait::async_trait]
+impl Store for NoStore {
+    async fn get(&mut self, _key: &str) -> Result<Option<Value>, Error> {
+        Err(Error::NoSuchStore)
+    }
+
+    async fn get_by_range(&mut self, _key: &str, _min: u32, _max: u32) -> Result<Vec<Value>, Error> {
+        Err(Error::NoSuchStore)
+    }
+
+    async fn bf_exists(&mut self, _bf: &str, _key: &str) -> Result<bool, Error> {
+        Err(Error::NoSuchStore)
+    }
+}
+
 #[async_trait::async_trait]
 impl StoreManager for NoSuchStoreManager {
-    async fn get_store(&self, _name: &str) -> Result<Arc<dyn Store>, Error> {
+    type StoreType = NoStore;
+
+    async fn get_store(&mut self, _name: &str) -> Result<Self::StoreType, Error> {
         Err(Error::NoSuchStore)
     }
 }

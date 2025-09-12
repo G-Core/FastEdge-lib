@@ -1,5 +1,5 @@
 use crate::app::KvStoreOption;
-use key_value_store::KeyValueStore;
+use key_value_store::{KeyValueStore, StoreManager};
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi::ResourceTable;
 use wasmtime_wasi::WasiCtxView;
@@ -393,7 +393,7 @@ pub trait PreCompiledLoader<K> {
 }
 
 pub trait ContextT {
-    type BackendConnector: 'static;
+    type BackendConnector:  'static;
 
     fn make_logger(&self, app_name: SmolStr, wrk: &App) -> Logger;
 

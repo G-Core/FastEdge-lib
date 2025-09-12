@@ -60,7 +60,7 @@ pub struct HttpConfig {
 }
 
 pub struct HttpService<T: ContextT> {
-    engine: WasmEngine<HttpState<T::BackendConnector>>,
+    engine: WasmEngine<HttpState<T::BackendConnector, T::StoreManager>>,
     context: T,
 }
 
@@ -74,7 +74,7 @@ where
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState<T::BackendConnector, T::StoreManager>>
         + Clone
         + Sync
         + Send
@@ -82,7 +82,7 @@ where
     T::BackendConnector: Connect + Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
 {
-    type State = HttpState<T::BackendConnector>;
+    type State = HttpState<T::BackendConnector, T::StoreManager>;
     type Config = HttpConfig;
     type Context = T;
 
@@ -203,7 +203,7 @@ where
         })?;
 
         reactor::gcore::fastedge::key_value::add_to_linker::<_, HasSelf<_>>(linker, |data| {
-            &mut data.key_value_store
+            &mut data.as_mut().key_value_store
         })?;
 
         Ok(())
@@ -216,7 +216,7 @@ where
         + StatsWriter
         + Router
         + ContextHeaders
-        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + ExecutorFactory<HttpState<T::BackendConnector, T::StoreManager>>
         + Sync
         + Send
         + 'static

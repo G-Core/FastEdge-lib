@@ -8,6 +8,7 @@ use http::{Method, Request, Response, StatusCode};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
+use key_value_store::StoreManager;
 use reactor::gcore::fastedge;
 use runtime::{store::StoreBuilder, InstancePre};
 use std::time::{Duration, Instant};
@@ -15,17 +16,18 @@ use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct HttpExecutorImpl<C: 'static> {
-    instance_pre: InstancePre<HttpState<C>>,
+pub struct HttpExecutorImpl<C: 'static, M: StoreManager + 'static> {
+    instance_pre: InstancePre<HttpState<C, M>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
     dictionary: Dictionary,
 }
 
 #[async_trait]
-impl<C> HttpExecutor for HttpExecutorImpl<C>
+impl<C, M> HttpExecutor for HttpExecutorImpl<C, M>
 where
-    C: Clone + Send + Sync + 'static,
+    C: Clone + Send + Sync ,
+    M: StoreManager + Default ,
 {
     async fn execute<B, R>(
         &self,
@@ -89,6 +91,7 @@ where
             propagate_headers: parts.headers,
             propagate_header_names,
             dictionary: self.dictionary.clone(),
+            key_value_store: Default::default(),
         };
 
         let mut store = store_builder.build(state)?;
@@ -143,12 +146,13 @@ where
     }
 }
 
-impl<C> HttpExecutorImpl<C>
+impl<C, M> HttpExecutorImpl<C, M>
 where
     C: Clone + Send + Sync + 'static,
+    M: StoreManager
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState<C>>,
+        instance_pre: InstancePre<HttpState<C, M>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
         dictionary: Dictionary,

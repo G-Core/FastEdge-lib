@@ -27,6 +27,7 @@ runtime = { path = "../runtime" }
 http-backend = { path = "../http-backend" }
 dictionary = { path = "../dictionary" }
 secret = { path = "../secret" }
+key-value-store = { path = "../key-value-store" }
 nanoid = "0.4"
 bytesize = { workspace = true }
 async-trait = "0.1"
