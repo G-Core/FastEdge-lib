@@ -8,7 +8,7 @@ use http_service::state::HttpState;
 use http_service::{ContextHeaders, ExecutorFactory};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
-use key_value_store::{KeyValueStore};
+use key_value_store::KeyValueStore;
 use runtime::app::{KvStoreOption, SecretOption};
 use runtime::logger::{Console, Logger};
 use runtime::util::stats::{StatRow, StatsWriter};
@@ -47,8 +47,6 @@ impl PreCompiledLoader<u64> for Context {
 
 impl ContextT for Context {
     type BackendConnector = HttpsConnector<HttpConnector>;
-    type StoreManager = CliStoreManager;
-
     fn make_logger(&self, _app_name: SmolStr, _wrk: &App) -> Logger {
         Logger::new(Console::default())
     }
@@ -75,23 +73,23 @@ impl ContextT for Context {
         Ok(SecretStore::new(Arc::new(secret_impl)))
     }
 
-    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore<CliStoreManager> {
+    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore {
         let stores = stores
             .iter()
             .map(|s| (s.name.clone(), s.param.clone()))
             .collect();
-        KeyValueStore::new(stores, CliStoreManager)
+        KeyValueStore::new(stores, Arc::new(CliStoreManager))
     }
 }
 
-impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>, CliStoreManager>> for Context {
+impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
     type Executor = RunExecutor;
 
     fn get_executor(
         &self,
         name: SmolStr,
         app: &App,
-        engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>, CliStoreManager>>,
+        engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
     ) -> anyhow::Result<Self::Executor> {
         let mut dictionary = Dictionary::new();
         for (k, v) in app.env.iter() {
@@ -102,7 +100,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>, CliStoreManager>> 
 
         let logger = self.make_logger(name, app);
         let secret_store = self.make_secret_store(app.secrets.as_ref())?;
-        //let key_value_store = self.make_key_value_store(app.kv_stores.as_ref());
+        let key_value_store = self.make_key_value_store(app.kv_stores.as_ref());
 
         let version = WasiVersion::Preview2;
         let store_builder = engine
@@ -111,7 +109,8 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>, CliStoreManager>> 
             .max_memory_size(app.mem_limit)
             .max_epoch_ticks(app.max_duration)
             .logger(logger)
-            .secret_store(secret_store);
+            .secret_store(secret_store)
+            .key_value_store(key_value_store);
 
         let component = self.loader().load_component(app.binary_id)?;
         let instance_pre = engine.component_instantiate_pre(&component)?;

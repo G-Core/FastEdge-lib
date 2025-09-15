@@ -6,18 +6,16 @@ use http::{header, HeaderMap, HeaderName, Uri};
 use http_backend::Backend;
 use runtime::BackendRequest;
 use tracing::instrument;
-use key_value_store::{KeyValueStore, StoreManager};
 
-pub struct HttpState<C, M: StoreManager> {
+pub struct HttpState<C> {
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<HeaderName>,
     pub(super) dictionary: Dictionary,
-    pub(super) key_value_store: KeyValueStore<M>,
 }
 
-impl<C, M: StoreManager> BackendRequest for HttpState<C, M> {
+impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self), ret, err)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {

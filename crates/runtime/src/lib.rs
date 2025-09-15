@@ -1,5 +1,5 @@
 use crate::app::KvStoreOption;
-use key_value_store::{KeyValueStore, StoreManager};
+use key_value_store::KeyValueStore;
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi::ResourceTable;
 use wasmtime_wasi::WasiCtxView;

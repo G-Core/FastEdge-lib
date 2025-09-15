@@ -8,7 +8,6 @@ use http::{Method, Request, Response, StatusCode};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
-use key_value_store::StoreManager;
 use reactor::gcore::fastedge;
 use runtime::{store::StoreBuilder, InstancePre};
 use std::time::{Duration, Instant};
@@ -16,18 +15,17 @@ use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct HttpExecutorImpl<C: 'static, M: StoreManager + 'static> {
-    instance_pre: InstancePre<HttpState<C, M>>,
+pub struct HttpExecutorImpl<C: 'static> {
+    instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
     dictionary: Dictionary,
 }
 
 #[async_trait]
-impl<C, M> HttpExecutor for HttpExecutorImpl<C, M>
+impl<C> HttpExecutor for HttpExecutorImpl<C>
 where
-    C: Clone + Send + Sync ,
-    M: StoreManager + Default ,
+    C: Clone + Send + Sync + 'static,
 {
     async fn execute<B, R>(
         &self,
@@ -91,14 +89,12 @@ where
             propagate_headers: parts.headers,
             propagate_header_names,
             dictionary: self.dictionary.clone(),
-            key_value_store: Default::default(),
         };
 
         let mut store = store_builder.build(state)?;
 
         let instance = self.instance_pre.instantiate_async(&mut store).await?;
-        let http_handler =
-            instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
+        let http_handler = instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
         let process = instance
             .get_export_index(&mut store, http_handler.as_ref(), "process")
             .ok_or_else(|| anyhow!("gcore:fastedge/http-handler instance not found"))?;
@@ -114,9 +110,7 @@ where
             Err(error) => {
                 // log to application logger  error
                 if let Some(ref logger) = store.data().logger {
-                    logger
-                        .write_msg(format!("Execution error: {}", error))
-                        .await;
+                    logger.write_msg(format!("Execution error: {}", error)).await;
                 }
                 return Err(error);
             }
@@ -146,13 +140,12 @@ where
     }
 }
 
-impl<C, M> HttpExecutorImpl<C, M>
+impl<C> HttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
-    M: StoreManager
 {
     pub fn new(
-        instance_pre: InstancePre<HttpState<C, M>>,
+        instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
         dictionary: Dictionary,

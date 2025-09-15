@@ -3,6 +3,7 @@ use crate::logger::Logger;
 use crate::registry::CachedGraphRegistry;
 use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 use anyhow::Result;
+use key_value_store::KeyValueStore;
 use secret::SecretStore;
 use std::{
     collections::HashMap,
@@ -82,6 +83,7 @@ pub struct StoreBuilder {
     properties: HashMap<String, String>,
     registry: CachedGraphRegistry,
     secret_store: SecretStore,
+    key_value_store: KeyValueStore,
 }
 
 impl StoreBuilder {
@@ -97,6 +99,7 @@ impl StoreBuilder {
             properties: Default::default(),
             registry: CachedGraphRegistry::new(),
             secret_store: Default::default(),
+            key_value_store: KeyValueStore::default(),
         }
     }
 
@@ -153,6 +156,14 @@ impl StoreBuilder {
     pub fn secret_store(self, secret_store: SecretStore) -> Self {
         Self {
             secret_store,
+            ..self
+        }
+    }
+
+    /// Set key value store
+    pub fn key_value_store(self, key_value_store: KeyValueStore) -> Self {
+        Self {
+            key_value_store,
             ..self
         }
     }
@@ -235,6 +246,7 @@ impl StoreBuilder {
                 logger,
                 http: WasiHttpCtx::new(),
                 secret_store: self.secret_store,
+                key_value_store: self.key_value_store,
             },
         );
         inner.limiter(|state| &mut state.store_limits);
