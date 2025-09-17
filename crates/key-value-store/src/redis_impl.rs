@@ -1,6 +1,6 @@
 use crate::Store;
-use redis::{AsyncCommands, AsyncIter};
 use reactor::gcore::fastedge::key_value::{Error, Value};
+use redis::{AsyncCommands, AsyncIter};
 
 #[derive(Clone)]
 pub struct RedisStore {
@@ -9,18 +9,18 @@ pub struct RedisStore {
 
 impl RedisStore {
     pub async fn open(params: &str) -> Result<Self, Error> {
-        let conn = ::redis::Client::open(params).map_err(|error| {
-            tracing::warn!(error=?error, "redis open");
-            Error::InternalError
-        })?
+        let conn = ::redis::Client::open(params)
+            .map_err(|error| {
+                tracing::warn!(error=?error, "redis open");
+                Error::InternalError
+            })?
             .get_multiplexed_async_connection()
-            .await.map_err(|error| {
-            tracing::warn!(error=?error, "redis open");
-            Error::InternalError
-        })?;
-        Ok(Self{
-            inner: conn
-        })
+            .await
+            .map_err(|error| {
+                tracing::warn!(error=?error, "redis open");
+                Error::InternalError
+            })?;
+        Ok(Self { inner: conn })
     }
 }
 

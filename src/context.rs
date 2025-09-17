@@ -78,7 +78,9 @@ impl ContextT for Context {
             .iter()
             .map(|s| (s.name.clone(), s.param.clone()))
             .collect();
-        let manager = CliStoreManager{stores: stores.to_owned()};
+        let manager = CliStoreManager {
+            stores: stores.to_owned(),
+        };
         KeyValueStore::new(allowed_stores, Arc::new(manager))
     }
 }

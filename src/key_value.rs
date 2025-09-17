@@ -1,8 +1,7 @@
-use key_value_store::{Error, Store, StoreManager};
-use std::sync::Arc;
 use key_value_store::RedisStore;
+use key_value_store::{Error, Store, StoreManager};
 use runtime::app::KvStoreOption;
-
+use std::sync::Arc;
 
 pub(crate) struct CliStoreManager {
     pub(crate) stores: Vec<KvStoreOption>,
@@ -18,5 +17,3 @@ impl StoreManager for CliStoreManager {
         Ok(Arc::new(store))
     }
 }
-
-
