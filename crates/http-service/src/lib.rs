@@ -1,7 +1,7 @@
-use wasmtime::component::HasSelf;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use wasmtime::component::HasSelf;
 use wasmtime_wasi_nn::wit::WasiNnView;
 
 pub use crate::executor::ExecutorFactory;
@@ -190,16 +190,17 @@ where
             WasiNnView::new(&mut data.table, &mut data.wasi_nn)
         })?;
 
-        reactor::gcore::fastedge::http_client::add_to_linker::<_, HasSelf<_>>(
-            linker,
-            |data| &mut data.as_mut().http_backend,
-        )?;
+        reactor::gcore::fastedge::http_client::add_to_linker::<_, HasSelf<_>>(linker, |data| {
+            &mut data.as_mut().http_backend
+        })?;
 
         reactor::gcore::fastedge::dictionary::add_to_linker::<_, HasSelf<_>>(linker, |data| {
             &mut data.as_mut().dictionary
         })?;
 
-        reactor::gcore::fastedge::secret::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.secret_store)?;
+        reactor::gcore::fastedge::secret::add_to_linker::<_, HasSelf<_>>(linker, |data| {
+            &mut data.secret_store
+        })?;
 
         reactor::gcore::fastedge::key_value::add_to_linker::<_, HasSelf<_>>(linker, |data| {
             &mut data.key_value_store

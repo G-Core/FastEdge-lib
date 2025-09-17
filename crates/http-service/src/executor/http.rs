@@ -94,7 +94,8 @@ where
         let mut store = store_builder.build(state)?;
 
         let instance = self.instance_pre.instantiate_async(&mut store).await?;
-        let http_handler = instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
+        let http_handler =
+            instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
         let process = instance
             .get_export_index(&mut store, http_handler.as_ref(), "process")
             .ok_or_else(|| anyhow!("gcore:fastedge/http-handler instance not found"))?;
@@ -110,7 +111,9 @@ where
             Err(error) => {
                 // log to application logger  error
                 if let Some(ref logger) = store.data().logger {
-                    logger.write_msg(format!("Execution error: {}", error)).await;
+                    logger
+                        .write_msg(format!("Execution error: {}", error))
+                        .await;
                 }
                 return Err(error);
             }

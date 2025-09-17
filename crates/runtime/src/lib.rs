@@ -393,7 +393,7 @@ pub trait PreCompiledLoader<K> {
 }
 
 pub trait ContextT {
-    type BackendConnector:  'static;
+    type BackendConnector: 'static;
 
     fn make_logger(&self, app_name: SmolStr, wrk: &App) -> Logger;
 

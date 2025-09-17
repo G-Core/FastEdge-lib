@@ -1,18 +1,18 @@
-use wasmtime_wasi_io::streams::StreamResult;
+use async_trait::async_trait;
+use bytes::Bytes;
 use std::any::Any;
 use std::collections::HashMap;
 use std::io::IoSlice;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use async_trait::async_trait;
-use bytes::Bytes;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use wasi_common::file::{FdFlags, FileType};
 use wasi_common::{Error, WasiFile};
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi_io::poll::Pollable;
 use wasmtime_wasi_io::streams::OutputStream;
+use wasmtime_wasi_io::streams::StreamResult;
 
 #[derive(Clone)]
 pub struct Logger {
@@ -46,7 +46,10 @@ impl Logger {
     }
 
     pub async fn write_msg(&self, msg: String) {
-        if let Err(error) = Box::into_pin(self.async_stream()).write_all(msg.as_bytes()).await {
+        if let Err(error) = Box::into_pin(self.async_stream())
+            .write_all(msg.as_bytes())
+            .await
+        {
             tracing::warn!(cause=?error, "write_msg");
         }
     }
@@ -72,7 +75,11 @@ impl Pollable for NullAppender {
 }
 
 impl AsyncWrite for NullAppender {
-    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
         if cfg!(debug_assertions) {
             Pin::new(&mut tokio::io::stdout()).poll_write(cx, buf)
         } else {
@@ -85,7 +92,10 @@ impl AsyncWrite for NullAppender {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -144,7 +154,10 @@ pub struct Console {
 
 impl Default for Console {
     fn default() -> Self {
-        Self { stdout: tokio::io::stdout(), limit: 10000 }
+        Self {
+            stdout: tokio::io::stdout(),
+            limit: 10000,
+        }
     }
 }
 
@@ -160,15 +173,25 @@ impl Pollable for Console {
 }
 
 impl AsyncWrite for Console {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
         Pin::new(&mut self.stdout).poll_write(cx, buf)
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         Pin::new(&mut self.stdout).poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         Pin::new(&mut self.stdout).poll_shutdown(cx)
     }
 }
