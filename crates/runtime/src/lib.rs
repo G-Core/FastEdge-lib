@@ -1,9 +1,10 @@
 use crate::app::KvStoreOption;
 use key_value_store::KeyValueStore;
 use std::{fmt::Debug, ops::Deref};
-use wasmtime::component::ResourceTable;
-use wasmtime_wasi::IoView;
+use wasmtime_wasi::ResourceTable;
+use wasmtime_wasi::WasiCtxView;
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
+use wasmtime_wasi_io::IoView;
 
 use crate::store::StoreBuilder;
 use http_backend::Backend;
@@ -78,7 +79,7 @@ pub enum Wasi {
 }
 
 /// Host state data associated with individual [Store]s and [Instance]s.
-pub struct Data<T> {
+pub struct Data<T: 'static> {
     inner: T,
     wasi: Wasi,
     pub wasi_nn: WasiNnCtx,
@@ -141,6 +142,10 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
             },
         ))
     }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
 }
 
 impl<T> Data<T> {
@@ -191,12 +196,15 @@ impl AsRef<wasmtime::Config> for WasmConfig {
 }
 
 impl<T: Send> wasmtime_wasi::WasiView for Data<T> {
-    fn ctx(&mut self) -> &mut wasmtime_wasi::WasiCtx {
+    fn ctx(&mut self) -> WasiCtxView<'_> {
         match &mut self.wasi {
             Wasi::Preview1(_) => {
                 unreachable!("using WASI Preview 1 functions with Preview 2 store")
             }
-            Wasi::Preview2(ctx) => ctx,
+            Wasi::Preview2(ctx) => WasiCtxView {
+                ctx,
+                table: &mut self.table,
+            },
         }
     }
 }
@@ -302,7 +310,7 @@ pub type ComponentLinker<T> = wasmtime::component::Linker<Data<T>>;
 pub type ModuleLinker<T> = wasmtime::Linker<Data<T>>;
 
 /// An `WasmEngine` is a global context for the initialization and execution of WASM application.
-pub struct WasmEngine<T> {
+pub struct WasmEngine<T: 'static> {
     inner: Engine,
     component_linker: ComponentLinker<T>,
     module_linker: ModuleLinker<T>,
@@ -311,7 +319,7 @@ pub struct WasmEngine<T> {
 /// A builder interface for configuring a new [`WasmEngine`].
 ///
 /// A new [`WasmEngineBuilder`] can be obtained with [`WasmEngine::builder`].
-pub struct WasmEngineBuilder<T> {
+pub struct WasmEngineBuilder<T: 'static> {
     engine: Engine,
     component_linker: ComponentLinker<T>,
     module_linker: ModuleLinker<T>,
@@ -385,7 +393,7 @@ pub trait PreCompiledLoader<K> {
 }
 
 pub trait ContextT {
-    type BackendConnector;
+    type BackendConnector: 'static;
 
     fn make_logger(&self, app_name: SmolStr, wrk: &App) -> Logger;
 

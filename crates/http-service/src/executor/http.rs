@@ -11,12 +11,11 @@ use hyper::body::Body;
 use reactor::gcore::fastedge;
 use runtime::{store::StoreBuilder, InstancePre};
 use std::time::{Duration, Instant};
-use wasmtime_wasi::StdoutStream;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct HttpExecutorImpl<C> {
+pub struct HttpExecutorImpl<C: 'static> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
@@ -95,9 +94,10 @@ where
         let mut store = store_builder.build(state)?;
 
         let instance = self.instance_pre.instantiate_async(&mut store).await?;
-        let http_handler = instance.get_export(&mut store, None, "gcore:fastedge/http-handler");
+        let http_handler =
+            instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
         let process = instance
-            .get_export(&mut store, http_handler.as_ref(), "process")
+            .get_export_index(&mut store, http_handler.as_ref(), "process")
             .ok_or_else(|| anyhow!("gcore:fastedge/http-handler instance not found"))?;
         let func = instance
             .get_typed_func::<(fastedge::http::Request,), (fastedge::http::Response,)>(
@@ -111,9 +111,9 @@ where
             Err(error) => {
                 // log to application logger  error
                 if let Some(ref logger) = store.data().logger {
-                    if let Err(e) = logger.stream().write(error.to_string().into()) {
-                        tracing::debug!(cause=?e, "write error: {}", error)
-                    }
+                    logger
+                        .write_msg(format!("Execution error: {}", error))
+                        .await;
                 }
                 return Err(error);
             }

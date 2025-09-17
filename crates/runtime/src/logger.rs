@@ -1,13 +1,18 @@
+use async_trait::async_trait;
+use bytes::Bytes;
 use std::any::Any;
 use std::collections::HashMap;
 use std::io::IoSlice;
+use std::pin::Pin;
 use std::sync::Arc;
-
-use async_trait::async_trait;
-use bytes::Bytes;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use wasi_common::file::{FdFlags, FileType};
 use wasi_common::{Error, WasiFile};
-use wasmtime_wasi::{OutputStream, Pollable, StdoutStream, StreamResult};
+use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
+use wasmtime_wasi_io::poll::Pollable;
+use wasmtime_wasi_io::streams::OutputStream;
+use wasmtime_wasi_io::streams::StreamResult;
 
 #[derive(Clone)]
 pub struct Logger {
@@ -16,17 +21,19 @@ pub struct Logger {
 }
 
 pub trait AppenderBuilder {
-    fn build(&self, properties: HashMap<String, String>) -> Box<dyn OutputStream>;
+    fn build(&self, properties: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync>;
+}
+
+impl IsTerminal for Logger {
+    fn is_terminal(&self) -> bool {
+        false
+    }
 }
 
 #[async_trait]
 impl StdoutStream for Logger {
-    fn stream(&self) -> Box<dyn OutputStream> {
+    fn async_stream(&self) -> Box<dyn AsyncWrite + Send + Sync> {
         self.appender.build(self.properties.clone())
-    }
-
-    fn isatty(&self) -> bool {
-        false
     }
 }
 
@@ -35,6 +42,15 @@ impl Logger {
         Self {
             properties: Default::default(),
             appender: Arc::new(sink),
+        }
+    }
+
+    pub async fn write_msg(&self, msg: String) {
+        if let Err(error) = Box::into_pin(self.async_stream())
+            .write_all(msg.as_bytes())
+            .await
+        {
+            tracing::warn!(cause=?error, "write_msg");
         }
     }
 }
@@ -48,7 +64,7 @@ impl Extend<(String, String)> for Logger {
 pub struct NullAppender;
 
 impl AppenderBuilder for NullAppender {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn OutputStream> {
+    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync> {
         Box::new(NullAppender)
     }
 }
@@ -56,6 +72,32 @@ impl AppenderBuilder for NullAppender {
 #[async_trait]
 impl Pollable for NullAppender {
     async fn ready(&mut self) {}
+}
+
+impl AsyncWrite for NullAppender {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        if cfg!(debug_assertions) {
+            Pin::new(&mut tokio::io::stdout()).poll_write(cx, buf)
+        } else {
+            // null write
+            Poll::Ready(Ok(buf.len()))
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl OutputStream for NullAppender {
@@ -106,17 +148,21 @@ impl WasiFile for NullAppender {
 }
 
 pub struct Console {
+    stdout: tokio::io::Stdout,
     limit: usize,
 }
 
 impl Default for Console {
     fn default() -> Self {
-        Self { limit: 10000 }
+        Self {
+            stdout: tokio::io::stdout(),
+            limit: 10000,
+        }
     }
 }
 
 impl AppenderBuilder for Console {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn OutputStream> {
+    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync> {
         Box::new(Console::default())
     }
 }
@@ -124,6 +170,30 @@ impl AppenderBuilder for Console {
 #[async_trait]
 impl Pollable for Console {
     async fn ready(&mut self) {}
+}
+
+impl AsyncWrite for Console {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        Pin::new(&mut self.stdout).poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.stdout).poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.stdout).poll_shutdown(cx)
+    }
 }
 
 impl OutputStream for Console {

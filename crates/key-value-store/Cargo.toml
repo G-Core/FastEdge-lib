@@ -10,7 +10,7 @@ description = "key-value store host function"
 reactor = { path = "../reactor" }
 wasmtime = {workspace = true}
 slab = "0.4"
-async-trait = "0.1.88"
+async-trait = "0.1"
 smol_str = {workspace = true}
 
 [lints]

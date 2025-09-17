@@ -19,7 +19,7 @@ use wasmtime_wasi_nn::wit::WasiNnCtx;
 /// A `Store` holds the runtime state of a app instance.
 ///
 /// `Store` lives only for the lifetime of a single app invocation.
-pub struct Store<T> {
+pub struct Store<T: 'static> {
     inner: wasmtime::Store<Data<T>>,
 }
 
@@ -35,7 +35,7 @@ impl<T> AsMut<wasmtime::Store<Data<T>>> for Store<T> {
     }
 }
 
-impl<T> wasmtime::AsContext for Store<T> {
+impl<T: 'static> wasmtime::AsContext for Store<T> {
     type Data = Data<T>;
 
     fn as_context(&self) -> wasmtime::StoreContext<'_, Self::Data> {

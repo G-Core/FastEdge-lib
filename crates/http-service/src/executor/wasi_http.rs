@@ -17,7 +17,7 @@ use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
-pub struct WasiHttpExecutorImpl<C> {
+pub struct WasiHttpExecutorImpl<C: 'static> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
