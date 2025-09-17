@@ -33,7 +33,7 @@ impl Store for RedisStore {
         })
     }
 
-    async fn zrange(&self, key: &str, min: u32, max: u32) -> Result<Vec<Value>, Error> {
+    async fn zrange(&self, key: &str, min: f64, max: f64) -> Result<Vec<Value>, Error> {
         self.inner
             .clone()
             .zrangebyscore(key, min, max)
@@ -57,9 +57,9 @@ impl Store for RedisStore {
         Ok(ret)
     }
 
-    async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, u32)>, Error> {
+    async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, f64)>, Error> {
         let mut conn = self.inner.clone();
-        let mut it: AsyncIter<(Value, u32)> =
+        let mut it: AsyncIter<(Value, f64)> =
             conn.zscan_match(key, pattern).await.map_err(|error| {
                 tracing::warn!(cause=?error, "redis zscan_match");
                 Error::InternalError

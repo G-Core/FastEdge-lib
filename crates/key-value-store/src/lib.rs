@@ -18,11 +18,11 @@ pub use redis_impl::RedisStore;
 pub trait Store: Sync + Send {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error>;
 
-    async fn zrange(&self, key: &str, min: u32, max: u32) -> Result<Vec<Value>, Error>;
+    async fn zrange(&self, key: &str, min: f64, max: f64) -> Result<Vec<Value>, Error>;
 
     async fn scan(&self, pattern: &str) -> Result<Vec<String>, Error>;
 
-    async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, u32)>, Error>;
+    async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, f64)>, Error>;
 
     async fn cf_exists(&self, key: &str, item: &str) -> Result<bool, Error>;
 }
@@ -68,8 +68,8 @@ impl key_value::HostStore for KeyValueStore {
         &mut self,
         store: Resource<key_value::Store>,
         key: String,
-        min: u32,
-        max: u32,
+        min: f64,
+        max: f64,
     ) -> Result<Vec<Value>, Error> {
         let store_id = store.rep();
         KeyValueStore::zrange(self, store_id, &key, min, max).await
@@ -80,7 +80,7 @@ impl key_value::HostStore for KeyValueStore {
         store: Resource<key_value::Store>,
         key: String,
         pattern: String,
-    ) -> Result<Vec<(Value, u32)>, Error> {
+    ) -> Result<Vec<(Value, f64)>, Error> {
         let store_id = store.rep();
         KeyValueStore::zscan(self, store_id, &key, &pattern).await
     }
@@ -139,8 +139,8 @@ impl KeyValueStore {
         &self,
         store: u32,
         key: &str,
-        min: u32,
-        max: u32,
+        min: f64,
+        max: f64,
     ) -> Result<Vec<Value>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
@@ -162,7 +162,7 @@ impl KeyValueStore {
         store: u32,
         key: &str,
         pattern: &str,
-    ) -> Result<Vec<(Value, u32)>, Error> {
+    ) -> Result<Vec<(Value, f64)>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
         };
