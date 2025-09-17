@@ -12,6 +12,7 @@ wasmtime = {workspace = true}
 slab = "0.4"
 async-trait = "0.1"
 smol_str = {workspace = true}
+tracing = "0.1"
 
 [lints]
 workspace = true

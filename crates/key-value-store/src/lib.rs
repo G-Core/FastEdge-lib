@@ -3,6 +3,7 @@ use slab::Slab;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::instrument;
 use wasmtime::component::Resource;
 
 pub use key_value::{Error, Value};
@@ -11,9 +12,13 @@ pub use key_value::{Error, Value};
 pub trait Store: Sync + Send {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error>;
 
-    async fn get_by_range(&self, key: &str, min: u32, max: u32) -> Result<Vec<Value>, Error>;
+    async fn zrange(&self, key: &str, min: u32, max: u32) -> Result<Vec<Value>, Error>;
 
-    async fn bf_exists(&self, bf: &str, key: &str) -> Result<bool, Error>;
+    async fn scan(&self, pattern: &str) -> Result<Vec<String>, Error>;
+
+    async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, u32)>, Error>;
+
+    async fn cf_exists(&self, key: &str, item: &str) -> Result<bool, Error>;
 }
 
 #[async_trait::async_trait]
@@ -44,7 +49,7 @@ impl key_value::HostStore for KeyValueStore {
         KeyValueStore::get(self, store_id, &key).await
     }
 
-    async fn get_by_range(
+    async fn zrange(
         &mut self,
         store: Resource<key_value::Store>,
         key: String,
@@ -52,17 +57,36 @@ impl key_value::HostStore for KeyValueStore {
         max: u32,
     ) -> Result<Vec<Value>, Error> {
         let store_id = store.rep();
-        KeyValueStore::get_by_range(self, store_id, &key, min, max).await
+        KeyValueStore::zrange(self, store_id, &key, min, max).await
     }
 
-    async fn bf_exists(
+    async fn scan(
         &mut self,
         store: Resource<key_value::Store>,
-        bf: String,
+        pattern: String,
+    ) -> Result<Vec<String>, Error> {
+        let store_id = store.rep();
+        KeyValueStore::scan(self, store_id, &pattern).await
+    }
+
+    async fn zscan(
+        &mut self,
+        store: Resource<key_value::Store>,
         key: String,
+        pattern: String,
+    ) -> Result<Vec<(Value, u32)>, Error> {
+        let store_id = store.rep();
+        KeyValueStore::zscan(self, store_id, &key, &pattern).await
+    }
+
+    async fn cf_exists(
+        &mut self,
+        store: Resource<key_value::Store>,
+        key: String,
+        item: String,
     ) -> Result<bool, Error> {
         let store_id = store.rep();
-        KeyValueStore::bf_exists(self, store_id, &bf, &key).await
+        KeyValueStore::cf_exists(self, store_id, &key, &item).await
     }
 
     async fn drop(&mut self, store: Resource<key_value::Store>) -> Result<(), wasmtime::Error> {
@@ -74,6 +98,7 @@ impl key_value::HostStore for KeyValueStore {
 impl key_value::Host for KeyValueStore {}
 
 impl KeyValueStore {
+    #[instrument(skip(manager), level = "trace")]
     pub fn new(allowed_stores: Vec<(SmolStr, SmolStr)>, manager: Arc<dyn StoreManager>) -> Self {
         Self {
             allowed_stores: allowed_stores.into_iter().collect(),
@@ -83,6 +108,7 @@ impl KeyValueStore {
     }
 
     /// Open a store by name. Return the store ID.
+    #[instrument(skip(self), level = "trace", ret, err)]
     pub async fn open(&mut self, name: &str) -> Result<u32, Error> {
         if let Some(param) = self.allowed_stores.get(name) {
             let store = self.manager.get_store(&param).await?;
@@ -93,6 +119,7 @@ impl KeyValueStore {
     }
 
     /// Get a value from a store by key.
+    #[instrument(skip(self), level = "trace", ret, err)]
     pub async fn get(&self, store: u32, key: &str) -> Result<Option<Value>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
@@ -101,7 +128,8 @@ impl KeyValueStore {
     }
 
     /// Get a values from a store by key.
-    pub async fn get_by_range(
+    #[instrument(skip(self), level = "trace", ret, err)]
+    pub async fn zrange(
         &self,
         store: u32,
         key: &str,
@@ -111,15 +139,37 @@ impl KeyValueStore {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
         };
-        store.get_by_range(key, min, max).await
+        store.zrange(key, min, max).await
     }
 
-    /// Get a value from a store by key.
-    pub async fn bf_exists(&self, store: u32, bf: &str, key: &str) -> Result<bool, Error> {
+    #[instrument(skip(self), level = "trace", ret, err)]
+    async fn scan(&mut self, store: u32, pattern: &str) -> Result<Vec<String>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
         };
-        store.bf_exists(bf, key).await
+        store.scan(pattern).await
+    }
+
+    #[instrument(skip(self), level = "trace", ret, err)]
+    async fn zscan(
+        &mut self,
+        store: u32,
+        key: &str,
+        pattern: &str,
+    ) -> Result<Vec<(Value, u32)>, Error> {
+        let Some(store) = self.stores.get(store as usize) else {
+            return Err(Error::NoSuchStore);
+        };
+        store.zscan(key, pattern).await
+    }
+
+    /// Get a value from a store by key.
+    #[instrument(skip(self), level = "trace", ret, err)]
+    pub async fn cf_exists(&self, store: u32, key: &str, item: &str) -> Result<bool, Error> {
+        let Some(store) = self.stores.get(store as usize) else {
+            return Err(Error::NoSuchStore);
+        };
+        store.cf_exists(key, item).await
     }
 }
 

@@ -1954,6 +1954,7 @@ dependencies = [
  "reactor",
  "slab",
  "smol_str",
+ "tracing",
  "wasmtime",
 ]
 

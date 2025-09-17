@@ -14,15 +14,23 @@ impl StoreManager for CliStoreManager {
 
 #[async_trait::async_trait]
 impl Store for CliStore {
-    async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
+    async fn get(&self, key: &str) -> Result<Option<Value>, Error> {
         Ok(Some(key.as_bytes().to_vec()))
     }
 
-    async fn get_by_range(&self, _key: &str, _min: u32, _max: u32) -> Result<Vec<Value>, Error> {
+    async fn zrange(&self, _key: &str, _min: u32, _max: u32) -> Result<Vec<Value>, Error> {
         todo!()
     }
 
-    async fn bf_exists(&self, _bf: &str, _key: &str) -> Result<bool, Error> {
+    async fn scan(&self, _pattern: &str) -> Result<Vec<String>, Error> {
+        todo!()
+    }
+
+    async fn zscan(&self, _key: &str, _pattern: &str) -> Result<Vec<(Value, u32)>, Error> {
+        todo!()
+    }
+
+    async fn cf_exists(&self, _key: &str, _item: &str) -> Result<bool, Error> {
         todo!()
     }
 }
