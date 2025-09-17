@@ -1,3 +1,6 @@
+#[cfg(feature = "redis")]
+mod redis_impl;
+
 use reactor::gcore::fastedge::key_value;
 use slab::Slab;
 use smol_str::SmolStr;
@@ -7,6 +10,9 @@ use tracing::instrument;
 use wasmtime::component::Resource;
 
 pub use key_value::{Error, Value};
+
+#[cfg(feature = "redis")]
+pub use redis_impl::RedisStore;
 
 #[async_trait::async_trait]
 pub trait Store: Sync + Send {
@@ -49,6 +55,15 @@ impl key_value::HostStore for KeyValueStore {
         KeyValueStore::get(self, store_id, &key).await
     }
 
+    async fn scan(
+        &mut self,
+        store: Resource<key_value::Store>,
+        pattern: String,
+    ) -> Result<Vec<String>, Error> {
+        let store_id = store.rep();
+        KeyValueStore::scan(self, store_id, &pattern).await
+    }
+
     async fn zrange(
         &mut self,
         store: Resource<key_value::Store>,
@@ -58,15 +73,6 @@ impl key_value::HostStore for KeyValueStore {
     ) -> Result<Vec<Value>, Error> {
         let store_id = store.rep();
         KeyValueStore::zrange(self, store_id, &key, min, max).await
-    }
-
-    async fn scan(
-        &mut self,
-        store: Resource<key_value::Store>,
-        pattern: String,
-    ) -> Result<Vec<String>, Error> {
-        let store_id = store.rep();
-        KeyValueStore::scan(self, store_id, &pattern).await
     }
 
     async fn zscan(

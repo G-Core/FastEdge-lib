@@ -12,7 +12,7 @@ use http_backend::{Backend, BackendStrategy};
 use http_service::{HttpConfig, HttpService};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
-use runtime::app::Status;
+use runtime::app::{KvStoreOption, Status};
 use runtime::service::{Service, ServiceBuilder};
 use runtime::{App, SecretValue, WasmConfig};
 use smol_str::{SmolStr, ToSmolStr};
@@ -72,6 +72,9 @@ struct HttpRunArgs {
     /// Headers added to response
     #[arg(long, value_parser = parse_key_value::< SmolStr, SmolStr >)]
     rsp_headers: Option<Vec<(SmolStr, SmolStr)>>,
+    /// key-value store redis url list (ex: --kv-stores myredis=redis://localhost)
+    #[arg(long, value_parser = parse_key_value::< SmolStr, SmolStr >)]
+    kv_stores: Option<Vec<(SmolStr, SmolStr)>>,
 }
 
 #[tokio::main]
@@ -137,6 +140,23 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
+            let kv_stores = dotenv_injector.merge_with_dotenv_variables(
+                has_dotenv_flag,
+                EnvArgType::KvStore,
+                run.kv_stores.unwrap_or_default().into_iter().collect(),
+            );
+
+            let kv_stores = kv_stores
+                .into_iter()
+                .map(|(name, param)| KvStoreOption {
+                    param,
+                    name,
+                    prefix: Default::default(),
+                    cache_size: 0,
+                    cache_ttl: 0,
+                })
+                .collect();
+
             let cli_app = App {
                 binary_id: 0,
                 max_duration: run.max_duration.map(|m| m / 10).unwrap_or(60000),
@@ -150,7 +170,7 @@ async fn main() -> anyhow::Result<()> {
                 status: Status::Enabled,
                 debug_until: None,
                 secrets,
-                kv_stores: vec![],
+                kv_stores,
             };
 
             let mut headers = dotenv_injector.merge_with_dotenv_variables(

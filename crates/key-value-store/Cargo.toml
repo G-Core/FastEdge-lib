@@ -6,6 +6,10 @@ publish.workspace = true
 authors.workspace = true
 description = "key-value store host function"
 
+[features]
+default = []
+redis = ["dep:redis"]
+
 [dependencies]
 reactor = { path = "../reactor" }
 wasmtime = {workspace = true}
@@ -13,6 +17,7 @@ slab = "0.4"
 async-trait = "0.1"
 smol_str = {workspace = true}
 tracing = "0.1"
+redis = { version = "0.27.6", features = ["aio", "tokio-comp", "connection-manager"], optional = true}
 
 [lints]
 workspace = true

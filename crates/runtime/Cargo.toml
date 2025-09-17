@@ -29,7 +29,7 @@ wit-component = "0.228.0"
 tracing = { workspace = true }
 bytesize = { workspace = true }
 http-backend = { path = "../http-backend" }
-key-value-store = { path = "../key-value-store" }
+key-value-store = { path = "../key-value-store" , features = ["redis"]}
 secret = { path = "../secret" }
 async-trait = "0.1"
 bytes = "1.10"
