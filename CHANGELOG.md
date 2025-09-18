@@ -1,8 +1,39 @@
+## [0.11.10-rc.2] - 2025-09-18
+
+### 🐛 Bug Fixes
+
+- Make pub new kv store methods and forward sdk to proxywasm changes
+## [0.11.10-rc.1] - 2025-09-18
+
+### 🚀 Features
+
+- Updating wasmtime to 36.0.0
+- Updating key-value store interface
+- Adding redis store impl
+
+### 🐛 Bug Fixes
+
+- Formating
+- Changing score type to f64
+- Formatting
+
+### 🚜 Refactor
+
+- Generic store type
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.11.9] - 2025-08-29
 
 ### 🐛 Bug Fixes
 
 - Use direct backend for fastedge cli
+- Compilation errors
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.11.8] - 2025-06-05
 
 ### ⚙️ Miscellaneous Tasks
