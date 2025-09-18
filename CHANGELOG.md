@@ -1,3 +1,8 @@
+## [0.11.10-rc.2] - 2025-09-18
+
+### 🐛 Bug Fixes
+
+- Make pub new kv store methods and forward sdk to proxywasm changes
 ## [0.11.10-rc.1] - 2025-09-18
 
 ### 🚀 Features
@@ -15,6 +20,10 @@
 ### 🚜 Refactor
 
 - Generic store type
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.11.9] - 2025-08-29
 
 ### 🐛 Bug Fixes
