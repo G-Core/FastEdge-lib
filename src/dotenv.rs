@@ -11,6 +11,7 @@ pub enum EnvArgType {
     ReqHeader,
     Env,
     Secrets,
+    KvStore,
 }
 
 #[derive(Debug, PartialEq)]
@@ -20,6 +21,7 @@ enum EnvArgFileType {
     Variables,
     Secrets,
     DotEnv,
+    KvStore,
 }
 
 impl From<EnvArgType> for EnvArgFileType {
@@ -29,6 +31,7 @@ impl From<EnvArgType> for EnvArgFileType {
             EnvArgType::ReqHeader => EnvArgFileType::ReqHeaders,
             EnvArgType::Env => EnvArgFileType::Variables,
             EnvArgType::Secrets => EnvArgFileType::Secrets,
+            EnvArgType::KvStore => EnvArgFileType::KvStore,
         }
     }
 }
@@ -39,10 +42,8 @@ pub struct DotEnvInjector {
 
 impl DotEnvInjector {
     pub fn new(file_path: Option<PathBuf>) -> Self {
-        let file_path = match file_path {
-            Some(path) => path,
-            None => current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()),
-        };
+        let file_path = file_path
+            .unwrap_or_else(|| current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf()));
         Self { file_path }
     }
 
@@ -91,6 +92,7 @@ impl DotEnvInjector {
             EnvArgType::ReqHeader => "FASTEDGE_VAR_REQ_HEADER_",
             EnvArgType::Env => "FASTEDGE_VAR_ENV_",
             EnvArgType::Secrets => "FASTEDGE_VAR_SECRET_",
+            EnvArgType::KvStore => "FASTEDGE_VAR_KV_STORE",
         };
 
         if key.starts_with("FASTEDGE_VAR_") {
@@ -116,6 +118,7 @@ impl DotEnvInjector {
             EnvArgFileType::Variables => ".env.variables",
             EnvArgFileType::Secrets => ".env.secrets",
             EnvArgFileType::DotEnv => ".env",
+            EnvArgFileType::KvStore => ".env.kv_stores",
         };
 
         let filename = self.file_path.join(env_arg_file_type_str);
