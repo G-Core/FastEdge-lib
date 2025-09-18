@@ -149,7 +149,7 @@ impl KeyValueStore {
     }
 
     #[instrument(skip(self), level = "trace", ret, err)]
-    async fn scan(&mut self, store: u32, pattern: &str) -> Result<Vec<String>, Error> {
+    pub async fn scan(&mut self, store: u32, pattern: &str) -> Result<Vec<String>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
         };
@@ -157,7 +157,7 @@ impl KeyValueStore {
     }
 
     #[instrument(skip(self), level = "trace", ret, err)]
-    async fn zscan(
+    pub async fn zscan(
         &mut self,
         store: u32,
         key: &str,
