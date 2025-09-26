@@ -1,8 +1,17 @@
+## [0.12.0] - 2025-09-24
+
+### 🐛 Bug Fixes
+
+- Added fossa CI workflow
 ## [0.11.10-rc.2] - 2025-09-18
 
 ### 🐛 Bug Fixes
 
 - Make pub new kv store methods and forward sdk to proxywasm changes
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.11.10-rc.1] - 2025-09-18
 
 ### 🚀 Features
