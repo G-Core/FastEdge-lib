@@ -133,13 +133,11 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
             tracing::warn!(cause=?e, "backend request");
             ErrorCode::InternalError(Some(e.to_string()))
         })?;
+        let use_tls = matches!(head.uri.scheme_str(), Some("https"));
         let request = Request::from_parts(head, body);
         Ok(default_send_request(
             request,
-            OutgoingRequestConfig {
-                use_tls: false,
-                ..config
-            },
+            OutgoingRequestConfig { use_tls, ..config },
         ))
     }
 
