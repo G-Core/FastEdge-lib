@@ -1,8 +1,17 @@
+## [0.12.1] - 2025-10-03
+
+### 🐛 Bug Fixes
+
+- Replace cuckoo filter with bloom
 ## [0.12.0] - 2025-09-24
 
 ### 🐛 Bug Fixes
 
 - Added fossa CI workflow
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.11.10-rc.2] - 2025-09-18
 
 ### 🐛 Bug Fixes
