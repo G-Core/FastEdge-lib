@@ -71,14 +71,14 @@ impl Store for RedisStore {
         Ok(ret)
     }
 
-    async fn cf_exists(&self, key: &str, item: &str) -> Result<bool, Error> {
-        redis::cmd("CF.EXISTS")
+    async fn bf_exists(&self, key: &str, item: &str) -> Result<bool, Error> {
+        redis::cmd("BF.EXISTS")
             .arg(key)
             .arg(item)
             .query_async(&mut self.inner.clone())
             .await
             .map_err(|error| {
-                tracing::warn!(cause=?error, "redis cf_exists");
+                tracing::warn!(cause=?error, "redis bf_exists");
                 Error::InternalError
             })
     }

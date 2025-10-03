@@ -24,7 +24,7 @@ pub trait Store: Sync + Send {
 
     async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, f64)>, Error>;
 
-    async fn cf_exists(&self, key: &str, item: &str) -> Result<bool, Error>;
+    async fn bf_exists(&self, key: &str, item: &str) -> Result<bool, Error>;
 }
 
 #[async_trait::async_trait]
@@ -85,14 +85,14 @@ impl key_value::HostStore for KeyValueStore {
         KeyValueStore::zscan(self, store_id, &key, &pattern).await
     }
 
-    async fn cf_exists(
+    async fn bf_exists(
         &mut self,
         store: Resource<key_value::Store>,
         key: String,
         item: String,
     ) -> Result<bool, Error> {
         let store_id = store.rep();
-        KeyValueStore::cf_exists(self, store_id, &key, &item).await
+        KeyValueStore::bf_exists(self, store_id, &key, &item).await
     }
 
     async fn drop(&mut self, store: Resource<key_value::Store>) -> Result<(), wasmtime::Error> {
@@ -171,11 +171,11 @@ impl KeyValueStore {
 
     /// Get a value from a store by key.
     #[instrument(skip(self), level = "trace", ret, err)]
-    pub async fn cf_exists(&self, store: u32, key: &str, item: &str) -> Result<bool, Error> {
+    pub async fn bf_exists(&self, store: u32, key: &str, item: &str) -> Result<bool, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
         };
-        store.cf_exists(key, item).await
+        store.bf_exists(key, item).await
     }
 }
 
