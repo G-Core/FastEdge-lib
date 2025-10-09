@@ -6,7 +6,6 @@ use ::http::{header, HeaderMap, Request, Response, StatusCode, Uri};
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bytesize::ByteSize;
-use dictionary::Dictionary;
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
@@ -21,7 +20,6 @@ pub struct WasiHttpExecutorImpl<C: 'static> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
-    dictionary: Dictionary,
 }
 
 #[async_trait]
@@ -99,7 +97,6 @@ where
             uri: backend_uri,
             propagate_headers,
             propagate_header_names,
-            dictionary: self.dictionary.clone(),
         };
 
         let mut store = store_builder.build(state).context("store build")?;
@@ -194,13 +191,11 @@ where
         instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
-        dictionary: Dictionary,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
-            dictionary,
         }
     }
 }

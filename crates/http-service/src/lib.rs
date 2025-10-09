@@ -195,7 +195,7 @@ where
         })?;
 
         reactor::gcore::fastedge::dictionary::add_to_linker::<_, HasSelf<_>>(linker, |data| {
-            &mut data.as_mut().dictionary
+            &mut data.dictionary
         })?;
 
         reactor::gcore::fastedge::secret::add_to_linker::<_, HasSelf<_>>(linker, |data| {

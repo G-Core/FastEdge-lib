@@ -1,5 +1,4 @@
 use anyhow::Error;
-use dictionary::Dictionary;
 use http::request::Parts;
 use http::uri::Scheme;
 use http::{header, HeaderMap, HeaderName, Uri};
@@ -12,7 +11,6 @@ pub struct HttpState<C> {
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<HeaderName>,
-    pub(super) dictionary: Dictionary,
 }
 
 impl<C> BackendRequest for HttpState<C> {

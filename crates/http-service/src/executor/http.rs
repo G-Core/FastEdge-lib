@@ -3,7 +3,6 @@ use crate::state::HttpState;
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use bytesize::ByteSize;
-use dictionary::Dictionary;
 use http::{Method, Request, Response, StatusCode};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
@@ -19,7 +18,6 @@ pub struct HttpExecutorImpl<C: 'static> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
-    dictionary: Dictionary,
 }
 
 #[async_trait]
@@ -88,7 +86,6 @@ where
             uri: backend_uri,
             propagate_headers: parts.headers,
             propagate_header_names,
-            dictionary: self.dictionary.clone(),
         };
 
         let mut store = store_builder.build(state)?;
@@ -151,13 +148,11 @@ where
         instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
-        dictionary: Dictionary,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
-            dictionary,
         }
     }
 }
@@ -303,6 +298,7 @@ mod tests {
                 .set_env(&env)
                 .max_memory_size(cfg.mem_limit)
                 .max_epoch_ticks(cfg.max_duration)
+                .dictionary(dictionary)
                 .logger(logger);
 
             let component = self.loader().load_component(cfg.binary_id)?;
@@ -312,7 +308,6 @@ mod tests {
                 instance_pre,
                 store_builder,
                 self.backend(),
-                dictionary,
             ))
         }
     }
