@@ -3,6 +3,7 @@ use crate::logger::Logger;
 use crate::registry::CachedGraphRegistry;
 use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 use anyhow::Result;
+use dictionary::Dictionary;
 use key_value_store::KeyValueStore;
 use secret::SecretStore;
 use std::{
@@ -84,6 +85,7 @@ pub struct StoreBuilder {
     registry: CachedGraphRegistry,
     secret_store: SecretStore,
     key_value_store: KeyValueStore,
+    dictionary: Dictionary,
 }
 
 impl StoreBuilder {
@@ -100,6 +102,7 @@ impl StoreBuilder {
             registry: CachedGraphRegistry::new(),
             secret_store: Default::default(),
             key_value_store: KeyValueStore::default(),
+            dictionary: Default::default(),
         }
     }
 
@@ -166,6 +169,11 @@ impl StoreBuilder {
             key_value_store,
             ..self
         }
+    }
+
+    /// Set key value dictionary
+    pub fn dictionary(self, dictionary: Dictionary) -> Self {
+        Self { dictionary, ..self }
     }
 
     pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
@@ -247,6 +255,7 @@ impl StoreBuilder {
                 http: WasiHttpCtx::new(),
                 secret_store: self.secret_store,
                 key_value_store: self.key_value_store,
+                dictionary: self.dictionary,
             },
         );
         inner.limiter(|state| &mut state.store_limits);

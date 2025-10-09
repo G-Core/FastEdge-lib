@@ -113,7 +113,8 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
             .max_epoch_ticks(app.max_duration)
             .logger(logger)
             .secret_store(secret_store)
-            .key_value_store(key_value_store);
+            .key_value_store(key_value_store)
+            .dictionary(dictionary);
 
         let component = self.loader().load_component(app.binary_id)?;
         let instance_pre = engine.component_instantiate_pre(&component)?;
@@ -122,14 +123,12 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
                 instance_pre,
                 store_builder,
                 self.backend(),
-                dictionary,
             )))
         } else {
             Ok(RunExecutor::Http(HttpExecutorImpl::new(
                 instance_pre,
                 store_builder,
                 self.backend(),
-                dictionary,
             )))
         }
     }

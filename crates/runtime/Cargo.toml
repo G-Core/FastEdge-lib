@@ -30,6 +30,7 @@ tracing = { workspace = true }
 bytesize = { workspace = true }
 http-backend = { path = "../http-backend" }
 key-value-store = { path = "../key-value-store" , features = ["redis"]}
+dictionary = { path = "../dictionary" }
 secret = { path = "../secret" }
 async-trait = "0.1"
 bytes = "1.10"

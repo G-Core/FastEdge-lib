@@ -1,4 +1,5 @@
 use crate::app::KvStoreOption;
+use dictionary::Dictionary;
 use key_value_store::KeyValueStore;
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi::ResourceTable;
@@ -91,6 +92,7 @@ pub struct Data<T: 'static> {
     http: WasiHttpCtx,
     pub secret_store: SecretStore,
     pub key_value_store: KeyValueStore,
+    pub dictionary: Dictionary,
 }
 
 pub trait BackendRequest {
