@@ -1,13 +1,23 @@
+## [0.13.0] - 2025-10-09
+
+### 💼 Other
+
+- Proxy-wasm dictionary interface and sdk v0.3.0
 ## [0.12.1] - 2025-10-03
 
 ### 🐛 Bug Fixes
 
 - Replace cuckoo filter with bloom
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.12.0] - 2025-09-24
 
 ### 🐛 Bug Fixes
 
 - Added fossa CI workflow
+- Use_tls for https scheme
 
 ### ⚙️ Miscellaneous Tasks
 
