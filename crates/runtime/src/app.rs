@@ -34,6 +34,7 @@ pub struct App {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct KvStoreOption {
     /// The url
+    #[serde(default)]
     pub param: SmolStr,
     #[serde(default)]
     pub name: SmolStr,
@@ -185,5 +186,36 @@ mod tests {
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));
+    }
+
+    #[test]
+    fn test_kv_store_option_deserialize_defaults() {
+        let json = r#"{
+        "name": "store",
+        "prefix": "pre"
+    }"#;
+        let kv: KvStoreOption = serde_json::from_str(json).unwrap();
+        assert_eq!(kv.param, "");
+        assert_eq!(kv.name, "store");
+        assert_eq!(kv.prefix, "pre");
+        assert_eq!(kv.cache_size, 1000);
+        assert_eq!(kv.cache_ttl, 60);
+    }
+
+    #[test]
+    fn test_kv_store_option_deserialize_custom() {
+        let json = r#"{
+        "param": "url2",
+        "name": "store2",
+        "prefix": "pre2",
+        "cache_size": 5000,
+        "cache_ttl": 120
+    }"#;
+        let kv: KvStoreOption = serde_json::from_str(json).unwrap();
+        assert_eq!(kv.param, "url2");
+        assert_eq!(kv.name, "store2");
+        assert_eq!(kv.prefix, "pre2");
+        assert_eq!(kv.cache_size, 5000);
+        assert_eq!(kv.cache_ttl, 120);
     }
 }
