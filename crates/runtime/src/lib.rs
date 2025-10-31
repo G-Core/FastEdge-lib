@@ -1,6 +1,7 @@
 use crate::app::KvStoreOption;
 use dictionary::Dictionary;
 use key_value_store::KeyValueStore;
+use std::sync::Arc;
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi::ResourceTable;
 use wasmtime_wasi::WasiCtxView;
@@ -28,6 +29,7 @@ pub mod util;
 
 use crate::app::SecretOption;
 use crate::logger::Logger;
+use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
@@ -406,6 +408,8 @@ pub trait ContextT {
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore>;
 
     fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore;
+
+    fn new_stats_row(&self, request_id: SmolStr, app: SmolStr, cfg: &App) -> Arc<dyn StatsVisitor>;
 }
 
 pub trait ExecutorCache {

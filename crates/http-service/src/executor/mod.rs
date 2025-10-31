@@ -1,13 +1,13 @@
 mod http;
 mod wasi_http;
 
+use runtime::util::stats::StatsVisitor;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::sync::Arc;
 
-use ::http::{HeaderMap, HeaderValue, StatusCode};
+use ::http::{HeaderMap, HeaderValue};
 use anyhow::Result;
 use async_trait::async_trait;
-use bytesize::ByteSize;
 use http_body_util::BodyExt;
 use hyper::body::Body;
 use runtime::{App, WasmEngine};
@@ -23,13 +23,12 @@ pub(crate) static X_CDN_REQUESTOR: &str = "x-cdn-requestor";
 
 #[async_trait]
 pub trait HttpExecutor {
-    async fn execute<B, R>(
+    async fn execute<B>(
         &self,
         req: hyper::Request<B>,
-        on_response: R,
+        stats: Arc<dyn StatsVisitor>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
-        R: FnOnce(StatusCode, ByteSize, Duration) + Send + 'static,
         B: BodyExt + Send,
         <B as Body>::Data: Send;
 }

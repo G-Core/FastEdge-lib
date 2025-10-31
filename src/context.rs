@@ -11,7 +11,7 @@ use hyper_util::client::legacy::connect::HttpConnector;
 use key_value_store::KeyValueStore;
 use runtime::app::{KvStoreOption, SecretOption};
 use runtime::logger::{Console, Logger};
-use runtime::util::stats::{StatRow, StatsWriter};
+use runtime::util::stats::StatsVisitor;
 use runtime::{
     componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
     WasiVersion, WasmEngine,
@@ -19,7 +19,9 @@ use runtime::{
 use secret::SecretStore;
 use smol_str::SmolStr;
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
 
@@ -82,6 +84,15 @@ impl ContextT for Context {
             stores: stores.to_owned(),
         };
         KeyValueStore::new(allowed_stores, Arc::new(manager))
+    }
+
+    fn new_stats_row(
+        &self,
+        _request_id: SmolStr,
+        _app: SmolStr,
+        _cfg: &App,
+    ) -> Arc<dyn StatsVisitor> {
+        Arc::new(StatsStub::default())
     }
 }
 
@@ -160,6 +171,34 @@ impl Router for Context {
     }
 }
 
-impl StatsWriter for Context {
-    fn write_stats(&self, _stat: StatRow) {}
+#[derive(Default)]
+pub struct StatsStub {
+    elapsed: AtomicU64,
+    memory_used: AtomicU64,
+}
+
+impl StatsVisitor for StatsStub {
+    fn status_code(&self, _status_code: u16) {}
+
+    fn memory_used(&self, memory_used: u64) {
+        self.memory_used
+            .store(memory_used, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn fail_reason(&self, _fail_reason: u32) {}
+
+    fn observe(&self, elapsed: Duration) {
+        self.elapsed.store(
+            elapsed.as_micros() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
+
+    fn get_time_elapsed(&self) -> u64 {
+        self.elapsed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn get_memory_used(&self) -> u64 {
+        self.memory_used.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }

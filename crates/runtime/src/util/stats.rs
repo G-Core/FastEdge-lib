@@ -1,28 +1,68 @@
-#[cfg(feature = "stats")]
-use clickhouse::Row;
-#[cfg(feature = "stats")]
 use serde::Serialize;
-#[cfg(feature = "stats")]
-use smol_str::SmolStr;
+use std::sync::Arc;
 
-#[cfg(feature = "stats")]
-#[derive(Row, Debug, Serialize, Default)]
-pub struct StatRow {
-    pub app_id: u64,
-    pub client_id: u64,
-    pub timestamp: u32,
-    pub app_name: SmolStr,
-    pub status_code: u32,
-    pub fail_reason: u32,
-    pub billing_plan: SmolStr,
-    pub time_elapsed: u64,
-    pub memory_used: u64,
-    pub request_id: SmolStr,
+use std::time::{Duration, Instant};
+
+pub trait StatsWriter<T: Serialize> {
+    fn write_stats(&self, stat: T);
 }
 
-#[cfg(not(feature = "stats"))]
-pub struct StatRow;
+pub struct StatsTimer {
+    /// A stats ref for automatic recording of observations.
+    stats: Arc<dyn StatsVisitor>,
+    /// Whether the timer has already been observed once.
+    observed: bool,
+    /// Starting instant for the timer.
+    start: Instant,
+}
 
-pub trait StatsWriter {
-    fn write_stats(&self, stat: StatRow);
+pub trait StatsVisitor: Send + Sync {
+    /// Register stats related to an app
+    //fn register_app<T: ToSmolStr>(&self, name: T, app: &App);
+    /// Register http execution status code
+    fn status_code(&self, status_code: u16);
+    /// Register memory used by wasm execution
+    fn memory_used(&self, memory_used: u64);
+    /// Register failure reason code
+    fn fail_reason(&self, fail_reason: u32);
+    /// Observe elapsed time
+    fn observe(&self, elapsed: Duration);
+    /// Get elapsed time in microseconds
+    fn get_time_elapsed(&self) -> u64;
+    /// Get memory used in bytes
+    fn get_memory_used(&self) -> u64;
+}
+
+impl StatsTimer {
+    pub fn new(stats: Arc<dyn StatsVisitor>) -> Self {
+        Self {
+            stats,
+            observed: false,
+            start: Instant::now(),
+        }
+    }
+
+    /// Discard timer without recording duration
+    pub fn discard(mut self) {
+        self.observed = true;
+    }
+
+    /// Observe and record timer duration
+    pub fn observe_duration(mut self) {
+        self.observe();
+    }
+
+    fn observe(&mut self) {
+        let v = self.start.elapsed();
+        self.observed = true;
+        self.stats.observe(v);
+    }
+}
+
+impl Drop for StatsTimer {
+    fn drop(&mut self) {
+        if !self.observed {
+            self.observe()
+        }
+    }
 }
