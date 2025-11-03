@@ -24,7 +24,7 @@ pub(crate) static X_CDN_REQUESTOR: &str = "x-cdn-requestor";
 #[async_trait]
 pub trait HttpExecutor {
     async fn execute<B>(
-        &self,
+        self,
         req: hyper::Request<B>,
         stats: Arc<dyn StatsVisitor>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>

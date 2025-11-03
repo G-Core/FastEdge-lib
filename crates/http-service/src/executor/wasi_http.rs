@@ -14,6 +14,7 @@ use runtime::{store::StoreBuilder, InstancePre};
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
+use crate::executor;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -29,7 +30,7 @@ where
     C: Clone + Send + Sync + 'static,
 {
     async fn execute<B>(
-        &self,
+        self,
         req: Request<B>,
         stats: Arc<dyn StatsVisitor>,
     ) -> anyhow::Result<Response<HyperOutgoingBody>>
@@ -69,9 +70,9 @@ where
         let body = Full::new(body).map_err(|never| match never {});
         let body = body.boxed();
 
-        let properties = crate::executor::get_properties(&parts.headers);
-        let store_builder = self.store_builder.to_owned().with_properties(properties);
-        let mut http_backend = self.backend.to_owned();
+        let properties = executor::get_properties(&parts.headers);
+        let store_builder = self.store_builder.with_properties(properties);
+        let mut http_backend = self.backend;
 
         http_backend
             .propagate_headers(parts.headers.clone())

@@ -17,7 +17,7 @@ pub enum RunExecutor {
 #[async_trait]
 impl HttpExecutor for RunExecutor {
     async fn execute<B>(
-        &self,
+        self,
         req: Request<B>,
         stats: Arc<dyn StatsVisitor>,
     ) -> anyhow::Result<Response<HyperOutgoingBody>>
@@ -26,8 +26,8 @@ impl HttpExecutor for RunExecutor {
         <B as Body>::Data: Send,
     {
         match self {
-            RunExecutor::Http(ref executor) => executor.execute(req, stats).await,
-            RunExecutor::Wasi(ref executor) => executor.execute(req, stats).await,
+            RunExecutor::Http(executor) => executor.execute(req, stats).await,
+            RunExecutor::Wasi(executor) => executor.execute(req, stats).await,
         }
     }
 }
