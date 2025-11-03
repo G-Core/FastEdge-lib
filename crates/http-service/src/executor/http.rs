@@ -256,8 +256,8 @@ mod tests {
 
         fn new_stats_row(
             &self,
-            _request_id: SmolStr,
-            _app: SmolStr,
+            _request_id: &SmolStr,
+            _app: &SmolStr,
             _cfg: &App,
         ) -> Arc<dyn StatsVisitor> {
             Arc::new(TestStats)
@@ -397,7 +397,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("1", req).await);
+        let res = assert_ok!(http_service.handle_request("1".to_smolstr(), req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -448,7 +448,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("2", req).await);
+        let res = assert_ok!(http_service.handle_request("2".to_smolstr(), req).await);
         assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
@@ -498,7 +498,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("3", req).await);
+        let res = assert_ok!(http_service.handle_request("3".to_smolstr(), req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
@@ -531,7 +531,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("4", req).await);
+        let res = assert_ok!(http_service.handle_request("4".to_smolstr(), req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -557,7 +557,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("5", req).await);
+        let res = assert_ok!(http_service.handle_request("5".to_smolstr(), req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -583,7 +583,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("6", req).await);
+        let res = assert_ok!(http_service.handle_request("6".to_smolstr(), req).await);
         assert_eq!(StatusCode::TOO_MANY_REQUESTS, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -609,7 +609,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("7", req).await);
+        let res = assert_ok!(http_service.handle_request("7".to_smolstr(), req).await);
         assert_eq!(StatusCode::NOT_ACCEPTABLE, res.status());
         assert_eq!(0, res.headers().len());
     }
