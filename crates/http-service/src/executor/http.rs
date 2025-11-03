@@ -1,3 +1,4 @@
+use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
 use anyhow::{anyhow, bail, Context};
@@ -12,7 +13,6 @@ use runtime::{store::StoreBuilder, InstancePre};
 use std::sync::Arc;
 use std::time::Duration;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
-use crate::executor;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]

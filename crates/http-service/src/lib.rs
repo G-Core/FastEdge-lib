@@ -144,8 +144,8 @@ where
                                 let request_id = remote_traceparent(&req);
                                 async move {
                                     self_
-                                        .handle_request(&request_id, req)
-                                        .instrument(tracing::debug_span!("http", request_id))
+                                        .handle_request(request_id.clone(), req)
+                                        .instrument(tracing::debug_span!("http", ?request_id))
                                         .await
                                 }
                             });
@@ -228,7 +228,7 @@ where
     /// handle HTTP request.
     async fn handle_request<B>(
         &self,
-        request_id: &str,
+        request_id: SmolStr,
         mut request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
@@ -310,9 +310,7 @@ where
             }
         };
 
-        let stats = self
-            .context
-            .new_stats_row(request_id.to_smolstr(), app_name.clone(), &cfg);
+        let stats = self.context.new_stats_row(&request_id, &app_name, &cfg);
 
         let response = match executor.execute(request, stats.clone()).await {
             Ok(mut response) => {
@@ -332,7 +330,7 @@ where
                 let (status_code, fail_reason, msg) = map_err(error);
                 stats.status_code(status_code);
                 stats.fail_reason(fail_reason as u32);
-                tracing::debug!(?fail_reason, request_id, "stats");
+                tracing::debug!(?fail_reason, ?request_id, "stats");
 
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
@@ -426,12 +424,12 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
     (status_code, fail_reason, msg)
 }
 
-fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> String {
+fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> SmolStr {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or(nanoid::nanoid!())
+        .map(|s| s.to_smolstr())
+        .unwrap_or(nanoid::nanoid!().to_smolstr())
 }
 
 /// Creates an HTTP 500 response.

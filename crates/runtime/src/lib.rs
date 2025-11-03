@@ -409,7 +409,12 @@ pub trait ContextT {
 
     fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore;
 
-    fn new_stats_row(&self, request_id: SmolStr, app: SmolStr, cfg: &App) -> Arc<dyn StatsVisitor>;
+    fn new_stats_row(
+        &self,
+        request_id: &SmolStr,
+        app: &SmolStr,
+        cfg: &App,
+    ) -> Arc<dyn StatsVisitor>;
 }
 
 pub trait ExecutorCache {

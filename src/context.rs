@@ -88,8 +88,8 @@ impl ContextT for Context {
 
     fn new_stats_row(
         &self,
-        _request_id: SmolStr,
-        _app: SmolStr,
+        _request_id: &SmolStr,
+        _app: &SmolStr,
         _cfg: &App,
     ) -> Arc<dyn StatsVisitor> {
         Arc::new(StatsStub::default())

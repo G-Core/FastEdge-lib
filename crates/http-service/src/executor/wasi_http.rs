@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
 use ::http::{header, HeaderMap, Request, Response, Uri};
@@ -14,7 +15,6 @@ use runtime::{store::StoreBuilder, InstancePre};
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
-use crate::executor;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
