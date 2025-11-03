@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 wasmtime::component::bindgen!({
-    path: "../../sdk/wit",
+    path: "wit",
     world: "reactor",
     imports: { default: async },
 });
