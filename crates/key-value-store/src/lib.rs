@@ -18,7 +18,12 @@ pub use redis_impl::RedisStore;
 pub trait Store: Sync + Send {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error>;
 
-    async fn zrange(&self, key: &str, min: f64, max: f64) -> Result<Vec<Value>, Error>;
+    async fn zrange_by_score(
+        &self,
+        key: &str,
+        min: f64,
+        max: f64,
+    ) -> Result<Vec<(Value, f64)>, Error>;
 
     async fn scan(&self, pattern: &str) -> Result<Vec<String>, Error>;
 
@@ -64,15 +69,15 @@ impl key_value::HostStore for KeyValueStore {
         KeyValueStore::scan(self, store_id, &pattern).await
     }
 
-    async fn zrange(
+    async fn zrange_by_score(
         &mut self,
         store: Resource<key_value::Store>,
         key: String,
         min: f64,
         max: f64,
-    ) -> Result<Vec<Value>, Error> {
+    ) -> Result<Vec<(Value, f64)>, Error> {
         let store_id = store.rep();
-        KeyValueStore::zrange(self, store_id, &key, min, max).await
+        KeyValueStore::zrange_by_score(self, store_id, &key, min, max).await
     }
 
     async fn zscan(
@@ -135,17 +140,17 @@ impl KeyValueStore {
 
     /// Get a values from a store by key.
     #[instrument(skip(self), level = "trace", ret, err)]
-    pub async fn zrange(
+    pub async fn zrange_by_score(
         &self,
         store: u32,
         key: &str,
         min: f64,
         max: f64,
-    ) -> Result<Vec<Value>, Error> {
+    ) -> Result<Vec<(Value, f64)>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
         };
-        store.zrange(key, min, max).await
+        store.zrange_by_score(key, min, max).await
     }
 
     #[instrument(skip(self), level = "trace", ret, err)]

@@ -33,10 +33,15 @@ impl Store for RedisStore {
         })
     }
 
-    async fn zrange(&self, key: &str, min: f64, max: f64) -> Result<Vec<Value>, Error> {
+    async fn zrange_by_score(
+        &self,
+        key: &str,
+        min: f64,
+        max: f64,
+    ) -> Result<Vec<(Value, f64)>, Error> {
         self.inner
             .clone()
-            .zrangebyscore(key, min, max)
+            .zrangebyscore_withscores(key, min, max)
             .await
             .map_err(|error| {
                 tracing::warn!(cause=?error, "redis zrangebyscore");
