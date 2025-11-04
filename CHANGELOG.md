@@ -1,8 +1,22 @@
+## [0.13.1] - 2025-11-04
+
+### 🐛 Bug Fixes
+
+- Default no value for kv store param
+- Update wit path in component bindgen and add submodule configuration
+
+### 🚜 Refactor
+
+- Rename zrange to zrange_by_score for clarity and update return type
 ## [0.13.0] - 2025-10-09
 
 ### 💼 Other
 
 - Proxy-wasm dictionary interface and sdk v0.3.0
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.12.1] - 2025-10-03
 
 ### 🐛 Bug Fixes
