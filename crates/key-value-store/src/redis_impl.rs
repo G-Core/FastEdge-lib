@@ -57,7 +57,7 @@ impl Store for RedisStore {
         })?;
         let mut ret = vec![];
         while let Some(element) = it.next_item().await {
-            ret.push(element);
+            ret.push(element.map_err(|error| Error::Other(error.to_string()))?);
         }
         Ok(ret)
     }
@@ -71,7 +71,7 @@ impl Store for RedisStore {
             })?;
         let mut ret = vec![];
         while let Some(element) = it.next_item().await {
-            ret.push(element);
+            ret.push(element.map_err(|error| Error::Other(error.to_string()))?);
         }
         Ok(ret)
     }

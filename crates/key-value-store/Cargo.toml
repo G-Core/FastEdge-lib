@@ -17,7 +17,7 @@ slab = "0.4"
 async-trait = "0.1"
 smol_str = {workspace = true}
 tracing = "0.1"
-redis = { version = "0.27.6", features = ["aio", "tokio-comp", "connection-manager"], optional = true}
+redis = { version = "0.32", features = ["aio", "tokio-comp", "connection-manager", "tokio-native-tls-comp", "safe_iterators"], optional = true}
 
 [lints]
 workspace = true
