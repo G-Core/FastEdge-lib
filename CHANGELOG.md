@@ -1,3 +1,8 @@
+## [0.13.2] - 2025-11-04
+
+### 🐛 Bug Fixes
+
+- Update Redis dependency to version 0.32 and improve error handling in async item retrieval
 ## [0.13.1] - 2025-11-04
 
 ### 🐛 Bug Fixes
@@ -8,6 +13,10 @@
 ### 🚜 Refactor
 
 - Rename zrange to zrange_by_score for clarity and update return type
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.13.0] - 2025-10-09
 
 ### 💼 Other
