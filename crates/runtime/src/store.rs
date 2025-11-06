@@ -1,11 +1,12 @@
 use crate::limiter::ProxyLimiter;
 use crate::logger::Logger;
 use crate::registry::CachedGraphRegistry;
+use crate::util::stats::StatsVisitor;
 use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 use anyhow::Result;
 use dictionary::Dictionary;
-use key_value_store::KeyValueStore;
 use secret::SecretStore;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -70,6 +71,10 @@ impl<T> DerefMut for Store<T> {
     }
 }
 
+pub trait HasStats {
+    fn get_stats(&self) -> Arc<dyn StatsVisitor>;
+}
+
 /// A builder interface for configuring a new [`Store`].
 ///
 /// A new [`StoreBuilder`] can be obtained with [`crate::Engine::store_builder`].
@@ -84,7 +89,7 @@ pub struct StoreBuilder {
     properties: HashMap<String, String>,
     registry: CachedGraphRegistry,
     secret_store: SecretStore,
-    key_value_store: KeyValueStore,
+    key_value_store: key_value_store::Builder,
     dictionary: Dictionary,
 }
 
@@ -101,7 +106,7 @@ impl StoreBuilder {
             properties: Default::default(),
             registry: CachedGraphRegistry::new(),
             secret_store: Default::default(),
-            key_value_store: KeyValueStore::default(),
+            key_value_store: key_value_store::Builder::default(),
             dictionary: Default::default(),
         }
     }
@@ -164,7 +169,7 @@ impl StoreBuilder {
     }
 
     /// Set key value store
-    pub fn key_value_store(self, key_value_store: KeyValueStore) -> Self {
+    pub fn key_value_store(self, key_value_store: key_value_store::Builder) -> Self {
         Self {
             key_value_store,
             ..self
@@ -208,7 +213,10 @@ impl StoreBuilder {
     }
 
     /// Builds a [`Store`] from this builder with `Default` WasiCtxBuilder
-    pub fn build<T>(self, inner: T) -> Result<Store<T>> {
+    pub fn build<T>(self, inner: T) -> Result<Store<T>>
+    where
+        T: HasStats,
+    {
         let wasi_builder = WasiCtxBuilder::new();
         self.build_with_wasi(wasi_builder, inner)
     }
@@ -219,7 +227,10 @@ impl StoreBuilder {
         self,
         mut wasi_ctx_builder: WasiCtxBuilder,
         inner: T,
-    ) -> Result<Store<T>> {
+    ) -> Result<Store<T>>
+    where
+        T: HasStats,
+    {
         let table = ResourceTable::new();
 
         wasi_ctx_builder.envs(&self.env);
@@ -242,6 +253,8 @@ impl StoreBuilder {
             WasiVersion::Preview2 => Wasi::Preview2(wasi_ctx_builder.build()),
         };
 
+        let key_value_store = self.key_value_store.build(inner.get_stats());
+
         let mut inner = wasmtime::Store::new(
             &self.engine,
             Data {
@@ -254,7 +267,7 @@ impl StoreBuilder {
                 logger,
                 http: WasiHttpCtx::new(),
                 secret_store: self.secret_store,
-                key_value_store: self.key_value_store,
+                key_value_store,
                 dictionary: self.dictionary,
             },
         );

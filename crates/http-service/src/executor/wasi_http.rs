@@ -99,6 +99,7 @@ where
             uri: backend_uri,
             propagate_headers,
             propagate_header_names,
+            stats: stats.clone(),
         };
 
         let mut store = store_builder.build(state).context("store build")?;

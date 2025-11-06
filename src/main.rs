@@ -172,6 +172,7 @@ async fn main() -> anyhow::Result<()> {
                 debug_until: None,
                 secrets,
                 kv_stores,
+                plan_id: 0,
             };
 
             let mut headers = dotenv_injector.merge_with_dotenv_variables(

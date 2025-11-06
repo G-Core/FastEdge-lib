@@ -8,10 +8,10 @@ use http_service::state::HttpState;
 use http_service::{ContextHeaders, ExecutorFactory};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
-use key_value_store::KeyValueStore;
+use key_value_store::ReadStats;
 use runtime::app::{KvStoreOption, SecretOption};
 use runtime::logger::{Console, Logger};
-use runtime::util::stats::StatsVisitor;
+use runtime::util::stats::{CdnPhase, StatsVisitor};
 use runtime::{
     componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
     WasiVersion, WasmEngine,
@@ -75,15 +75,25 @@ impl ContextT for Context {
         Ok(SecretStore::new(Arc::new(secret_impl)))
     }
 
-    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore {
+    fn make_key_value_store(
+        &self,
+        default_param: SmolStr,
+        stores: &Vec<KvStoreOption>,
+    ) -> key_value_store::Builder {
         let allowed_stores = stores
             .iter()
-            .map(|s| (s.name.clone(), s.param.clone()))
+            .map(|s| {
+                if s.param.is_empty() {
+                    (s.name.clone(), default_param.clone())
+                } else {
+                    (s.name.clone(), s.param.clone())
+                }
+            })
             .collect();
         let manager = CliStoreManager {
-            stores: stores.to_owned(),
+            stores: stores.clone(),
         };
-        KeyValueStore::new(allowed_stores, Arc::new(manager))
+        key_value_store::Builder::new(allowed_stores, Arc::new(manager))
     }
 
     fn new_stats_row(
@@ -114,7 +124,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
 
         let logger = self.make_logger(name, app);
         let secret_store = self.make_secret_store(app.secrets.as_ref())?;
-        let key_value_store = self.make_key_value_store(app.kv_stores.as_ref());
+        let key_value_store = self.make_key_value_store(SmolStr::default(), app.kv_stores.as_ref());
 
         let version = WasiVersion::Preview2;
         let store_builder = engine
@@ -177,6 +187,12 @@ pub struct StatsStub {
     memory_used: AtomicU64,
 }
 
+impl ReadStats for StatsStub {
+    fn count_kv_read(&self, _value: i32) {}
+
+    fn count_kv_byod_read(&self, _value: i32) {}
+}
+
 impl StatsVisitor for StatsStub {
     fn status_code(&self, _status_code: u16) {}
 
@@ -201,4 +217,8 @@ impl StatsVisitor for StatsStub {
     fn get_memory_used(&self) -> u64 {
         self.memory_used.load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    fn cdn_phase(&self, _phase: CdnPhase) {}
+
+    fn set_user_diag(&self, _diag: &str) {}
 }

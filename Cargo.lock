@@ -1917,6 +1917,7 @@ dependencies = [
  "redis",
  "slab",
  "smol_str",
+ "tokio",
  "tracing",
  "wasmtime",
 ]

@@ -1,6 +1,5 @@
 use crate::app::KvStoreOption;
 use dictionary::Dictionary;
-use key_value_store::KeyValueStore;
 use std::sync::Arc;
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi::ResourceTable;
@@ -93,7 +92,7 @@ pub struct Data<T: 'static> {
     pub logger: Option<Logger>,
     http: WasiHttpCtx,
     pub secret_store: SecretStore,
-    pub key_value_store: KeyValueStore,
+    pub key_value_store: key_value_store::StoreImpl,
     pub dictionary: Dictionary,
 }
 
@@ -163,14 +162,6 @@ impl<T> Data<T> {
             Wasi::Preview1(_) => unreachable!("using WASI Preview 1 functions with Preview 2 ctx"),
             Wasi::Preview2(ctx) => ctx,
         }
-    }
-
-    pub fn secret_store_ref(&self) -> &SecretStore {
-        &self.secret_store
-    }
-
-    pub fn key_value_store_ref(&self) -> &KeyValueStore {
-        &self.key_value_store
     }
 }
 
@@ -407,7 +398,11 @@ pub trait ContextT {
 
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore>;
 
-    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore;
+    fn make_key_value_store(
+        &self,
+        default_param: SmolStr,
+        stores: &Vec<KvStoreOption>,
+    ) -> key_value_store::Builder;
 
     fn new_stats_row(
         &self,

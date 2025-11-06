@@ -29,6 +29,7 @@ pub struct App {
     pub secrets: Vec<SecretOption>,
     #[serde(default)]
     pub kv_stores: Vec<KvStoreOption>,
+    pub plan_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -183,6 +184,7 @@ mod tests {
                 }],
             }],
             kv_stores: vec![],
+            plan_id: 0,
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));

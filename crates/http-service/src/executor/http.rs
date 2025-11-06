@@ -88,6 +88,7 @@ where
             uri: backend_uri,
             propagate_headers: parts.headers,
             propagate_header_names,
+            stats: stats.clone(),
         };
 
         let mut store = store_builder.build(state)?;
@@ -182,10 +183,11 @@ mod tests {
     use dictionary::Dictionary;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use http_body_util::Empty;
-    use key_value_store::KeyValueStore;
+    use key_value_store::ReadStats;
     use runtime::app::{KvStoreOption, SecretOption, Status};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
+    use runtime::util::stats::CdnPhase;
     use runtime::{
         componentize_if_necessary, App, ContextT, PreCompiledLoader, Router, WasiVersion,
         WasmConfig, WasmEngine,
@@ -198,6 +200,12 @@ mod tests {
 
     #[derive(Clone)]
     struct TestStats;
+
+    impl ReadStats for TestStats {
+        fn count_kv_read(&self, _value: i32) {}
+
+        fn count_kv_byod_read(&self, _value: i32) {}
+    }
 
     impl StatsVisitor for TestStats {
         fn status_code(&self, _status_code: u16) {}
@@ -215,6 +223,10 @@ mod tests {
         fn get_memory_used(&self) -> u64 {
             0
         }
+
+        fn cdn_phase(&self, _phase: CdnPhase) {}
+
+        fn set_user_diag(&self, _diag: &str) {}
     }
 
     #[derive(Clone)]
@@ -250,7 +262,11 @@ mod tests {
             todo!()
         }
 
-        fn make_key_value_store(&self, _stores: &Vec<KvStoreOption>) -> KeyValueStore {
+        fn make_key_value_store(
+            &self,
+            _default_param: SmolStr,
+            _stores: &Vec<KvStoreOption>,
+        ) -> key_value_store::Builder {
             todo!()
         }
 
@@ -354,6 +370,7 @@ mod tests {
             debug_until: None,
             secrets: vec![],
             kv_stores: vec![],
+            plan_id: 0,
         })
     }
 
@@ -437,6 +454,7 @@ mod tests {
             debug_until: None,
             secrets: vec![],
             kv_stores: vec![],
+            plan_id: 0,
         });
 
         let context = TestContext {
@@ -487,6 +505,7 @@ mod tests {
             debug_until: None,
             secrets: vec![],
             kv_stores: vec![],
+            plan_id: 0,
         });
 
         let context = TestContext {
