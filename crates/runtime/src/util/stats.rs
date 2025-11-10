@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub use key_value_store::ReadStats;
+use utils::UserDiagStats;
 
 #[repr(i32)]
 pub enum CdnPhase {
@@ -28,7 +29,7 @@ pub struct StatsTimer {
     start: Instant,
 }
 
-pub trait StatsVisitor: ReadStats + Send + Sync {
+pub trait StatsVisitor: ReadStats + UserDiagStats + Send + Sync {
     /// Register http execution status code
     fn status_code(&self, status_code: u16);
     /// Register memory used by wasm execution
@@ -43,8 +44,6 @@ pub trait StatsVisitor: ReadStats + Send + Sync {
     fn get_memory_used(&self) -> u64;
     /// Register cdn phase
     fn cdn_phase(&self, phase: CdnPhase);
-    /// Set user defined diagnostic information
-    fn set_user_diag(&self, diag: &str);
 }
 
 impl StatsTimer {
@@ -147,6 +146,12 @@ mod tests {
         }
     }
 
+    impl UserDiagStats for MockStatsVisitor {
+        fn set_user_diag(&self, diag: &str) {
+            *self.user_diag.lock().unwrap() = diag.to_string();
+        }
+    }
+
     impl StatsVisitor for MockStatsVisitor {
         fn status_code(&self, status_code: u16) {
             self.status_code.store(status_code, Ordering::Relaxed);
@@ -177,9 +182,7 @@ mod tests {
             self.cdn_phase.store(phase as i32, Ordering::Relaxed);
         }
 
-        fn set_user_diag(&self, diag: &str) {
-            *self.user_diag.lock().unwrap() = diag.to_string();
-        }
+
     }
 
     #[test]

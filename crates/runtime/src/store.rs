@@ -4,7 +4,7 @@ use crate::registry::CachedGraphRegistry;
 use crate::util::stats::StatsVisitor;
 use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 use anyhow::Result;
-use dictionary::Dictionary;
+use utils::{Dictionary, Utils};
 use secret::SecretStore;
 use std::sync::Arc;
 use std::{
@@ -254,6 +254,7 @@ impl StoreBuilder {
         };
 
         let key_value_store = self.key_value_store.build(inner.get_stats());
+        let utils = Utils::new(inner.get_stats());
 
         let mut inner = wasmtime::Store::new(
             &self.engine,
@@ -269,6 +270,7 @@ impl StoreBuilder {
                 secret_store: self.secret_store,
                 key_value_store,
                 dictionary: self.dictionary,
+                utils
             },
         );
         inner.limiter(|state| &mut state.store_limits);

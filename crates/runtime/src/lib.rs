@@ -1,5 +1,5 @@
 use crate::app::KvStoreOption;
-use dictionary::Dictionary;
+use utils::{Dictionary, Utils};
 use std::sync::Arc;
 use std::{fmt::Debug, ops::Deref};
 use wasmtime_wasi::ResourceTable;
@@ -94,6 +94,7 @@ pub struct Data<T: 'static> {
     pub secret_store: SecretStore,
     pub key_value_store: key_value_store::StoreImpl,
     pub dictionary: Dictionary,
+    pub utils: Utils
 }
 
 pub trait BackendRequest {

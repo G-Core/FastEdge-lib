@@ -180,7 +180,7 @@ mod tests {
     };
     use bytes::Bytes;
     use claims::*;
-    use dictionary::Dictionary;
+    use utils::{Dictionary, UserDiagStats};
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use http_body_util::Empty;
     use key_value_store::ReadStats;
@@ -207,6 +207,11 @@ mod tests {
         fn count_kv_byod_read(&self, _value: i32) {}
     }
 
+    impl UserDiagStats for TestStats {
+        fn set_user_diag(&self, _diag: &str) {
+        }
+    }
+
     impl StatsVisitor for TestStats {
         fn status_code(&self, _status_code: u16) {}
 
@@ -226,7 +231,7 @@ mod tests {
 
         fn cdn_phase(&self, _phase: CdnPhase) {}
 
-        fn set_user_diag(&self, _diag: &str) {}
+
     }
 
     #[derive(Clone)]

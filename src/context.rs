@@ -1,7 +1,7 @@
 use crate::executor::RunExecutor;
 use crate::key_value::CliStoreManager;
 use crate::secret::SecretImpl;
-use dictionary::Dictionary;
+use utils::{Dictionary, UserDiagStats};
 use http_backend::Backend;
 use http_service::executor::{HttpExecutorImpl, WasiHttpExecutorImpl};
 use http_service::state::HttpState;
@@ -193,6 +193,12 @@ impl ReadStats for StatsStub {
     fn count_kv_byod_read(&self, _value: i32) {}
 }
 
+impl UserDiagStats for StatsStub {
+    fn set_user_diag(&self, _diag: &str) {
+
+    }
+}
+
 impl StatsVisitor for StatsStub {
     fn status_code(&self, _status_code: u16) {}
 
@@ -220,5 +226,5 @@ impl StatsVisitor for StatsStub {
 
     fn cdn_phase(&self, _phase: CdnPhase) {}
 
-    fn set_user_diag(&self, _diag: &str) {}
+
 }

@@ -207,6 +207,10 @@ where
             &mut data.key_value_store
         })?;
 
+        reactor::gcore::fastedge::utils::add_to_linker::<_, HasSelf<_>>(linker, |data| {
+            &mut data.utils
+        })?;
+
         Ok(())
     }
 }

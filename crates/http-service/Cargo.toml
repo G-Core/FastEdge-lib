@@ -24,7 +24,7 @@ smol_str = { workspace = true }
 reactor = { path = "../reactor" }
 runtime = { path = "../runtime" }
 http-backend = { path = "../http-backend" }
-dictionary = { path = "../dictionary" }
+utils = { path = "../utils" }
 secret = { path = "../secret" }
 nanoid = "0.4"
 async-trait = "0.1"
