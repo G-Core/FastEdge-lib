@@ -1,7 +1,9 @@
 use crate::app::KvStoreOption;
-use utils::{Dictionary, Utils};
+use crate::store::HasStats;
+use http_backend::stats::ExtStatsTimer;
 use std::sync::Arc;
 use std::{fmt::Debug, ops::Deref};
+use utils::{Dictionary, Utils};
 use wasmtime_wasi::ResourceTable;
 use wasmtime_wasi::WasiCtxView;
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
@@ -38,10 +40,9 @@ use smol_str::SmolStr;
 use std::borrow::Cow;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
 use wasmtime_wasi_http::body::HyperOutgoingBody;
-use wasmtime_wasi_http::types::OutgoingRequestConfig;
 use wasmtime_wasi_http::{
     bindings::http::types::ErrorCode,
-    types::{default_send_request, HostFutureIncomingResponse},
+    types::{default_send_request_handler, HostFutureIncomingResponse, OutgoingRequestConfig},
 };
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 
@@ -94,7 +95,7 @@ pub struct Data<T: 'static> {
     pub secret_store: SecretStore,
     pub key_value_store: key_value_store::StoreImpl,
     pub dictionary: Dictionary,
-    pub utils: Utils
+    pub utils: Utils,
 }
 
 pub trait BackendRequest {
@@ -119,7 +120,7 @@ impl<T: Send> IoView for Data<T> {
     }
 }
 
-impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
+impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
@@ -139,10 +140,17 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
         })?;
         let use_tls = matches!(head.uri.scheme_str(), Some("https"));
         let request = Request::from_parts(head, body);
-        Ok(default_send_request(
-            request,
-            OutgoingRequestConfig { use_tls, ..config },
-        ))
+        // start external request stats timer
+        let stats = self.inner.get_stats();
+
+        let handle = wasmtime_wasi::runtime::spawn(async move {
+            let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until request is done
+            Ok(
+                default_send_request_handler(request, OutgoingRequestConfig { use_tls, ..config })
+                    .await,
+            )
+        });
+        Ok(HostFutureIncomingResponse::pending(handle))
     }
 
     fn table(&mut self) -> &mut ResourceTable {
@@ -399,10 +407,7 @@ pub trait ContextT {
 
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore>;
 
-    fn make_key_value_store(
-        &self,
-        stores: &Vec<KvStoreOption>,
-    ) -> key_value_store::Builder;
+    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> key_value_store::Builder;
 
     fn new_stats_row(
         &self,

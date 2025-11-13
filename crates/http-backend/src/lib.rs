@@ -162,9 +162,6 @@ impl<C> Backend<C> {
     fn make_request(&self, req: Request) -> Result<http::Request<Full<Bytes>>> {
         trace!("strategy: {:?}", self.strategy);
 
-        // start external request stats timer
-        let _stats_timer = self.ext_http_stats.as_ref().map(|s| ExtStatsTimer::new(s.clone()));
-
         let builder = match self.strategy {
             BackendStrategy::Direct => {
                 let mut headers = req.headers.into_iter().collect::<Vec<(String, String)>>();
@@ -297,6 +294,10 @@ where
             warn!(cause=?error, "making request to backend");
             HttpError::RequestError
         })?;
+
+        // start external request stats timer
+        let _stats_timer = self.ext_http_stats.as_ref().map(|s| ExtStatsTimer::new(s.clone()));
+
         let res = self.client.request(request).await.map_err(|error| {
             warn!(cause=?error, "sending request to backend");
             HttpError::RequestError
