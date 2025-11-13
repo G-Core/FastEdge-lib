@@ -1,7 +1,7 @@
 mod dictionary;
 
-use std::sync::Arc;
 pub use dictionary::Dictionary;
+use std::sync::Arc;
 
 pub trait UserDiagStats: Sync + Send {
     /// Set user defined diagnostic information
@@ -9,7 +9,7 @@ pub trait UserDiagStats: Sync + Send {
 }
 
 pub struct Utils {
-    stats: Arc<dyn UserDiagStats>
+    stats: Arc<dyn UserDiagStats>,
 }
 
 impl Utils {
@@ -19,7 +19,7 @@ impl Utils {
 }
 
 impl reactor::gcore::fastedge::utils::Host for Utils {
-    async fn set_user_diag(&mut self, value: String)  {
+    async fn set_user_diag(&mut self, value: String) {
         self.stats.set_user_diag(value.as_str());
     }
 }

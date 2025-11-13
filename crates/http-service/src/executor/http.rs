@@ -182,7 +182,7 @@ mod tests {
     };
     use bytes::Bytes;
     use claims::*;
-    use utils::{Dictionary, UserDiagStats};
+    use http_backend::stats::ExtRequestStats;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use http_body_util::Empty;
     use key_value_store::ReadStats;
@@ -197,9 +197,9 @@ mod tests {
     use secret::SecretStore;
     use smol_str::{SmolStr, ToSmolStr};
     use std::collections::HashMap;
+    use utils::{Dictionary, UserDiagStats};
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
-    use http_backend::stats::ExtRequestStats;
 
     #[derive(Clone)]
     struct TestStats;
@@ -211,13 +211,11 @@ mod tests {
     }
 
     impl UserDiagStats for TestStats {
-        fn set_user_diag(&self, _diag: &str) {
-        }
+        fn set_user_diag(&self, _diag: &str) {}
     }
 
     impl ExtRequestStats for TestStats {
-        fn observe_ext(&self, _elapsed: Duration) {
-        }
+        fn observe_ext(&self, _elapsed: Duration) {}
     }
 
     impl StatsVisitor for TestStats {
@@ -238,8 +236,6 @@ mod tests {
         }
 
         fn cdn_phase(&self, _phase: CdnPhase) {}
-
-
     }
 
     #[derive(Clone)]
@@ -275,10 +271,7 @@ mod tests {
             todo!()
         }
 
-        fn make_key_value_store(
-            &self,
-            _stores: &Vec<KvStoreOption>,
-        ) -> key_value_store::Builder {
+        fn make_key_value_store(&self, _stores: &Vec<KvStoreOption>) -> key_value_store::Builder {
             todo!()
         }
 

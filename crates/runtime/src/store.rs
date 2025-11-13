@@ -4,7 +4,6 @@ use crate::registry::CachedGraphRegistry;
 use crate::util::stats::StatsVisitor;
 use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
 use anyhow::Result;
-use utils::{Dictionary, Utils};
 use secret::SecretStore;
 use std::sync::Arc;
 use std::{
@@ -13,6 +12,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 use tracing::{debug, instrument, trace};
+use utils::{Dictionary, Utils};
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
@@ -270,7 +270,7 @@ impl StoreBuilder {
                 secret_store: self.secret_store,
                 key_value_store,
                 dictionary: self.dictionary,
-                utils
+                utils,
             },
         );
         inner.limiter(|state| &mut state.store_limits);

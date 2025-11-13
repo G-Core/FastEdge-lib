@@ -359,11 +359,13 @@ mod tests {
 
     impl ReadStats for MockReadStats {
         fn count_kv_read(&self, value: i32) {
-            self.kv_reads.fetch_add(value, std::sync::atomic::Ordering::Relaxed);
+            self.kv_reads
+                .fetch_add(value, std::sync::atomic::Ordering::Relaxed);
         }
 
         fn count_kv_byod_read(&self, value: i32) {
-            self.byod_reads.fetch_add(value, std::sync::atomic::Ordering::Relaxed);
+            self.byod_reads
+                .fetch_add(value, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -392,10 +394,7 @@ mod tests {
             param: &str,
             _metric: Arc<dyn ReadStats>,
         ) -> Result<Arc<dyn Store>, Error> {
-            self.stores
-                .get(param)
-                .cloned()
-                .ok_or(Error::NoSuchStore)
+            self.stores.get(param).cloned().ok_or(Error::NoSuchStore)
         }
     }
 
@@ -407,9 +406,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_builder_new() {
-        let allowed_stores = vec![
-            (SmolStr::new("store1"), SmolStr::new("redis://localhost:6379")),
-        ];
+        let allowed_stores = vec![(
+            SmolStr::new("store1"),
+            SmolStr::new("redis://localhost:6379"),
+        )];
         let manager = Arc::new(NoSuchStoreManager);
         let builder = Builder::new(allowed_stores.clone(), manager);
 
@@ -421,13 +421,13 @@ mod tests {
     async fn test_store_impl_open_allowed_store() {
         let mock_store = Arc::new(MockStore::new());
         let manager = Arc::new(
-            MockStoreManager::new()
-                .with_store("redis://localhost:6379", mock_store.clone())
+            MockStoreManager::new().with_store("redis://localhost:6379", mock_store.clone()),
         );
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost:6379")),
-        ];
+        let allowed_stores = vec![(
+            SmolStr::new("mystore"),
+            SmolStr::new("redis://localhost:6379"),
+        )];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -439,9 +439,10 @@ mod tests {
     #[tokio::test]
     async fn test_store_impl_open_denied_store() {
         let manager = Arc::new(NoSuchStoreManager);
-        let allowed_stores = vec![
-            (SmolStr::new("allowed"), SmolStr::new("redis://localhost:6379")),
-        ];
+        let allowed_stores = vec![(
+            SmolStr::new("allowed"),
+            SmolStr::new("redis://localhost:6379"),
+        )];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -456,7 +457,7 @@ mod tests {
         let manager = Arc::new(
             MockStoreManager::new()
                 .with_store("redis://store1", mock_store1.clone())
-                .with_store("redis://store2", mock_store2.clone())
+                .with_store("redis://store2", mock_store2.clone()),
         );
 
         let allowed_stores = vec![
@@ -475,16 +476,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_value_success() {
-        let mock_store = Arc::new(
-            MockStore::new().with_data("key1", b"value1".to_vec())
-        );
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let mock_store = Arc::new(MockStore::new().with_data("key1", b"value1".to_vec()));
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -498,13 +493,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_value_not_found() {
         let mock_store = Arc::new(MockStore::new());
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -534,18 +525,16 @@ mod tests {
             (b"item4".to_vec(), 7.5),
         ];
         let mock_store = Arc::new(MockStore::new().with_zset("sorted_set", items));
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
         let store_id = store_impl.open("mystore").await.unwrap();
-        let result = store_impl.zrange_by_score(store_id, "sorted_set", 2.0, 6.0).await;
+        let result = store_impl
+            .zrange_by_score(store_id, "sorted_set", 2.0, 6.0)
+            .await;
 
         assert!(result.is_ok());
         let items = result.unwrap();
@@ -570,15 +559,11 @@ mod tests {
             MockStore::new()
                 .with_data("user:1", b"alice".to_vec())
                 .with_data("user:2", b"bob".to_vec())
-                .with_data("post:1", b"hello".to_vec())
+                .with_data("post:1", b"hello".to_vec()),
         );
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -610,13 +595,9 @@ mod tests {
             (b"banana".to_vec(), 3.0),
         ];
         let mock_store = Arc::new(MockStore::new().with_zset("fruits", items));
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -641,18 +622,12 @@ mod tests {
     #[tokio::test]
     async fn test_bf_exists_true() {
         let mock_store = Arc::new(
-            MockStore::new().with_bloom(
-                "bloom_key",
-                vec!["item1".to_string(), "item2".to_string()],
-            )
+            MockStore::new()
+                .with_bloom("bloom_key", vec!["item1".to_string(), "item2".to_string()]),
         );
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
@@ -665,21 +640,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_bf_exists_false() {
-        let mock_store = Arc::new(
-            MockStore::new().with_bloom("bloom_key", vec!["item1".to_string()])
-        );
-        let manager = Arc::new(
-            MockStoreManager::new().with_store("redis://localhost", mock_store)
-        );
+        let mock_store =
+            Arc::new(MockStore::new().with_bloom("bloom_key", vec!["item1".to_string()]));
+        let manager = Arc::new(MockStoreManager::new().with_store("redis://localhost", mock_store));
 
-        let allowed_stores = vec![
-            (SmolStr::new("mystore"), SmolStr::new("redis://localhost")),
-        ];
+        let allowed_stores = vec![(SmolStr::new("mystore"), SmolStr::new("redis://localhost"))];
         let stats = Arc::new(MockReadStats::new());
         let mut store_impl = Builder::new(allowed_stores, manager).build(stats.clone());
 
         let store_id = store_impl.open("mystore").await.unwrap();
-        let result = store_impl.bf_exists(store_id, "bloom_key", "nonexistent").await;
+        let result = store_impl
+            .bf_exists(store_id, "bloom_key", "nonexistent")
+            .await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), false);

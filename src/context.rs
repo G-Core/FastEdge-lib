@@ -115,7 +115,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
 
         let logger = self.make_logger(name, app);
         let secret_store = self.make_secret_store(app.secrets.as_ref())?;
-        let key_value_store = self.make_key_value_store( app.kv_stores.as_ref());
+        let key_value_store = self.make_key_value_store(app.kv_stores.as_ref());
 
         let version = WasiVersion::Preview2;
         let store_builder = engine

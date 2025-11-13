@@ -1,6 +1,6 @@
+use reactor::gcore::fastedge::dictionary;
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-use reactor::gcore::fastedge::dictionary;
 
 #[derive(Clone)]
 pub struct Dictionary {

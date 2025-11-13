@@ -1,9 +1,9 @@
 use serde::Serialize;
 use std::sync::Arc;
 
-use std::time::{Duration, Instant};
 use http_backend::stats::ExtRequestStats;
 pub use key_value_store::ReadStats;
+use std::time::{Duration, Instant};
 use utils::UserDiagStats;
 
 #[repr(i32)]
@@ -153,7 +153,7 @@ mod tests {
     }
 
     impl ExtRequestStats for MockStatsVisitor {
-        fn observe_ext(&self, _: std::time::Duration) {  }
+        fn observe_ext(&self, _: std::time::Duration) {}
     }
 
     impl StatsVisitor for MockStatsVisitor {
@@ -185,8 +185,6 @@ mod tests {
         fn cdn_phase(&self, phase: CdnPhase) {
             self.cdn_phase.store(phase as i32, Ordering::Relaxed);
         }
-
-
     }
 
     #[test]
@@ -413,4 +411,3 @@ mod tests {
         assert_eq!(stats.kv_reads.load(Ordering::Relaxed), 10);
     }
 }
-

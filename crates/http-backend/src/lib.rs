@@ -20,12 +20,12 @@ use tokio::net::TcpStream;
 use tower_service::Service;
 use tracing::{debug, trace, warn};
 
+use crate::stats::{ExtRequestStats, ExtStatsTimer};
 use reactor::gcore::fastedge::http::Headers;
 use reactor::gcore::fastedge::{
     http::{Error as HttpError, Method, Request, Response},
     http_client::Host,
 };
-use crate::stats::{ExtRequestStats, ExtStatsTimer};
 
 type HeaderNameList = Vec<HeaderName>;
 
@@ -58,7 +58,7 @@ pub struct Backend<C> {
     propagate_header_names: HeaderNameList,
     max_sub_requests: usize,
     pub strategy: BackendStrategy,
-    ext_http_stats: Option<Arc<dyn ExtRequestStats>>
+    ext_http_stats: Option<Arc<dyn ExtRequestStats>>,
 }
 
 pub struct Builder {
@@ -296,7 +296,10 @@ where
         })?;
 
         // start external request stats timer
-        let _stats_timer = self.ext_http_stats.as_ref().map(|s| ExtStatsTimer::new(s.clone()));
+        let _stats_timer = self
+            .ext_http_stats
+            .as_ref()
+            .map(|s| ExtStatsTimer::new(s.clone()));
 
         let res = self.client.request(request).await.map_err(|error| {
             warn!(cause=?error, "sending request to backend");
