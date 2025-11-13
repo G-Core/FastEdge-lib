@@ -401,7 +401,6 @@ pub trait ContextT {
 
     fn make_key_value_store(
         &self,
-        default_param: SmolStr,
         stores: &Vec<KvStoreOption>,
     ) -> key_value_store::Builder;
 

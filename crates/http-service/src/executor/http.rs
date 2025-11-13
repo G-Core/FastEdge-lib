@@ -81,6 +81,8 @@ where
             .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;
 
+        http_backend.set_ext_http_stats(stats.clone());
+
         let propagate_header_names = http_backend.propagate_header_names();
         let backend_uri = http_backend.uri();
         let state = HttpState {
@@ -197,6 +199,7 @@ mod tests {
     use std::collections::HashMap;
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
+    use http_backend::stats::ExtRequestStats;
 
     #[derive(Clone)]
     struct TestStats;
@@ -209,6 +212,11 @@ mod tests {
 
     impl UserDiagStats for TestStats {
         fn set_user_diag(&self, _diag: &str) {
+        }
+    }
+
+    impl ExtRequestStats for TestStats {
+        fn observe_ext(&self, _elapsed: Duration) {
         }
     }
 
@@ -269,7 +277,6 @@ mod tests {
 
         fn make_key_value_store(
             &self,
-            _default_param: SmolStr,
             _stores: &Vec<KvStoreOption>,
         ) -> key_value_store::Builder {
             todo!()

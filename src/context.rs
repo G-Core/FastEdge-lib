@@ -1,7 +1,7 @@
 use crate::executor::RunExecutor;
 use crate::key_value::CliStoreManager;
 use crate::secret::SecretImpl;
-use utils::{Dictionary, UserDiagStats};
+use http_backend::stats::ExtRequestStats;
 use http_backend::Backend;
 use http_service::executor::{HttpExecutorImpl, WasiHttpExecutorImpl};
 use http_service::state::HttpState;
@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
+use utils::{Dictionary, UserDiagStats};
 use wasmtime::component::Component;
 use wasmtime::{Engine, Module};
 
@@ -75,20 +76,10 @@ impl ContextT for Context {
         Ok(SecretStore::new(Arc::new(secret_impl)))
     }
 
-    fn make_key_value_store(
-        &self,
-        default_param: SmolStr,
-        stores: &Vec<KvStoreOption>,
-    ) -> key_value_store::Builder {
+    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> key_value_store::Builder {
         let allowed_stores = stores
             .iter()
-            .map(|s| {
-                if s.param.is_empty() {
-                    (s.name.clone(), default_param.clone())
-                } else {
-                    (s.name.clone(), s.param.clone())
-                }
-            })
+            .map(|s| (s.name.clone(), s.param.clone()))
             .collect();
         let manager = CliStoreManager {
             stores: stores.clone(),
@@ -124,7 +115,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
 
         let logger = self.make_logger(name, app);
         let secret_store = self.make_secret_store(app.secrets.as_ref())?;
-        let key_value_store = self.make_key_value_store(SmolStr::default(), app.kv_stores.as_ref());
+        let key_value_store = self.make_key_value_store( app.kv_stores.as_ref());
 
         let version = WasiVersion::Preview2;
         let store_builder = engine
@@ -194,9 +185,11 @@ impl ReadStats for StatsStub {
 }
 
 impl UserDiagStats for StatsStub {
-    fn set_user_diag(&self, _diag: &str) {
+    fn set_user_diag(&self, _diag: &str) {}
+}
 
-    }
+impl ExtRequestStats for StatsStub {
+    fn observe_ext(&self, _elapsed: Duration) {}
 }
 
 impl StatsVisitor for StatsStub {
@@ -225,6 +218,4 @@ impl StatsVisitor for StatsStub {
     }
 
     fn cdn_phase(&self, _phase: CdnPhase) {}
-
-
 }

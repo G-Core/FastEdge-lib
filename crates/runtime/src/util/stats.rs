@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::sync::Arc;
 
 use std::time::{Duration, Instant};
-
+use http_backend::stats::ExtRequestStats;
 pub use key_value_store::ReadStats;
 use utils::UserDiagStats;
 
@@ -29,7 +29,7 @@ pub struct StatsTimer {
     start: Instant,
 }
 
-pub trait StatsVisitor: ReadStats + UserDiagStats + Send + Sync {
+pub trait StatsVisitor: ReadStats + UserDiagStats + ExtRequestStats + Send + Sync {
     /// Register http execution status code
     fn status_code(&self, status_code: u16);
     /// Register memory used by wasm execution
@@ -150,6 +150,10 @@ mod tests {
         fn set_user_diag(&self, diag: &str) {
             *self.user_diag.lock().unwrap() = diag.to_string();
         }
+    }
+
+    impl ExtRequestStats for MockStatsVisitor {
+        fn observe_ext(&self, _: std::time::Duration) {  }
     }
 
     impl StatsVisitor for MockStatsVisitor {
