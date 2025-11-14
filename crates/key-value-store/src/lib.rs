@@ -150,7 +150,7 @@ impl StoreImpl {
         if let Some(param) =
             self.allowed_stores
                 .iter()
-                .find_map(|s| if s.0 == name { Some(&s.1) } else { None })
+                .find_map(|s| (s.0 == name).then_some(&s.1))
         {
             let store = self.manager.get_store(param, self.stats.clone()).await?;
             Ok(self.stores.insert(store) as u32)
