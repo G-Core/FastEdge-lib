@@ -147,10 +147,10 @@ impl StoreImpl {
     /// Open a store by name. Return the store ID.
     #[instrument(skip(self), level = "trace", ret, err)]
     pub async fn open(&mut self, name: &str) -> Result<u32, Error> {
-        if let Some(param) =
-            self.allowed_stores
-                .iter()
-                .find_map(|s| (s.0 == name).then_some(&s.1))
+        if let Some(param) = self
+            .allowed_stores
+            .iter()
+            .find_map(|s| (s.0 == name).then_some(&s.1))
         {
             let store = self.manager.get_store(param, self.stats.clone()).await?;
             Ok(self.stores.insert(store) as u32)
