@@ -1,14 +1,13 @@
 [package]
-name = "dictionary"
+name = "utils"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 authors.workspace = true
-description = "dictionary host function"
+description = "utils(dictionary) host function"
 
 [dependencies]
 reactor = { path = "../reactor" }
-async-trait = {workspace = true}
 
 [lints]
 workspace = true

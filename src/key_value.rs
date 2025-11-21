@@ -1,5 +1,5 @@
-use key_value_store::RedisStore;
 use key_value_store::{Error, Store, StoreManager};
+use key_value_store::{ReadStats, RedisStore};
 use runtime::app::KvStoreOption;
 use std::sync::Arc;
 
@@ -9,7 +9,11 @@ pub(crate) struct CliStoreManager {
 
 #[async_trait::async_trait]
 impl StoreManager for CliStoreManager {
-    async fn get_store(&self, name: &str) -> Result<Arc<dyn Store>, Error> {
+    async fn get_store(
+        &self,
+        name: &str,
+        _stats: Arc<dyn ReadStats>,
+    ) -> Result<Arc<dyn Store>, Error> {
         let Some(opts) = self.stores.iter().find(|store| store.name == name) else {
             return Err(Error::NoSuchStore);
         };

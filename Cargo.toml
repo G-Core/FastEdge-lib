@@ -62,7 +62,7 @@ pretty_env_logger = "0.5"
 runtime = { path = "crates/runtime", default-features = false }
 http-service = { path = "crates/http-service" }
 http-backend = { path = "crates/http-backend" }
-dictionary = { path = "crates/dictionary" }
+utils = { path = "crates/utils" }
 secret = { path = "crates/secret" }
 key-value-store = { path = "crates/key-value-store" }
 hyper-tls = "0.6"

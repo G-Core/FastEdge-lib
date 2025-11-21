@@ -8,7 +8,6 @@ authors.workspace = true
 [features]
 default = []
 metrics = ["runtime/metrics"]
-stats = ["runtime/stats"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -25,10 +24,9 @@ smol_str = { workspace = true }
 reactor = { path = "../reactor" }
 runtime = { path = "../runtime" }
 http-backend = { path = "../http-backend" }
-dictionary = { path = "../dictionary" }
+utils = { path = "../utils" }
 secret = { path = "../secret" }
 nanoid = "0.4"
-bytesize = { workspace = true }
 async-trait = "0.1"
 hyper-util = { version = "0.1", features = ["server", "server-graceful"] }
 http-body-util = "0.1"
