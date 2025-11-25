@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "dictionary"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "async-trait",
  "reactor",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "fastedge-run"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1525,7 +1525,7 @@ dependencies = [
 
 [[package]]
 name = "http-backend"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "claims",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "http-service"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1670,7 +1670,7 @@ dependencies = [
  "hyper",
  "libc",
  "pin-project-lite",
- "socket2",
+ "socket2 0.6.1",
  "tokio",
  "tower-service",
  "tracing",
@@ -1870,6 +1870,15 @@ dependencies = [
 
 [[package]]
 name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
@@ -1925,7 +1934,7 @@ dependencies = [
 
 [[package]]
 name = "key-value-store"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "async-trait",
  "reactor",
@@ -2751,7 +2760,7 @@ dependencies = [
 
 [[package]]
 name = "reactor"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "wasmtime",
 ]
@@ -2764,27 +2773,26 @@ checksum = "03251193000f4bd3b042892be858ee50e8b3719f2b08e5833ac4353724632430"
 
 [[package]]
 name = "redis"
-version = "0.32.7"
+version = "0.27.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "014cc767fefab6a3e798ca45112bccad9c6e0e218fbd49720042716c73cfef44"
+checksum = "09d8f99a4090c89cc489a94833c901ead69bfbf3877b4867d5482e321ee875bc"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "backon",
  "bytes",
- "cfg-if",
  "combine",
- "futures-channel",
+ "futures",
  "futures-util",
+ "itertools 0.13.0",
  "itoa",
- "native-tls",
  "num-bigint",
  "percent-encoding",
  "pin-project-lite",
  "ryu",
  "sha1_smol",
- "socket2",
+ "socket2 0.5.10",
  "tokio",
- "tokio-native-tls",
  "tokio-util",
  "url",
 ]
@@ -2874,7 +2882,7 @@ dependencies = [
 
 [[package]]
 name = "runtime"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3063,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "secret"
-version = "0.13.2"
+version = "0.13.0"
 dependencies = [
  "anyhow",
  "reactor",
@@ -3266,6 +3274,16 @@ checksum = "3498b0a27f93ef1402f20eefacfaa1691272ac4eca1cdc8c596cb0a245d6cbf5"
 dependencies = [
  "borsh",
  "serde_core",
+]
+
+[[package]]
+name = "socket2"
+version = "0.5.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
+dependencies = [
+ "libc",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3506,7 +3524,7 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2",
+ "socket2 0.6.1",
  "tokio-macros",
  "windows-sys 0.61.2",
 ]
