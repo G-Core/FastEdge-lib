@@ -1,9 +1,18 @@
+## [0.13.0-2] - 2025-11-25
+
+### 🐛 Bug Fixes
+
+- Add public host validation and extract host function; downgrade package versions to 0.13.0-2
 ## [0.13.1-43582] - 2025-11-25
 
 ### 🐛 Bug Fixes
 
 - Add public host validation to prevent private host usage
 - Downgrade package versions to 0.13.0 in Cargo.lock
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.13.0] - 2025-10-09
 
 ### 💼 Other
