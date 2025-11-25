@@ -1,8 +1,18 @@
+## [0.13.1-43582] - 2025-11-25
+
+### 🐛 Bug Fixes
+
+- Add public host validation to prevent private host usage
+- Downgrade package versions to 0.13.0 in Cargo.lock
 ## [0.13.0] - 2025-10-09
 
 ### 💼 Other
 
 - Proxy-wasm dictionary interface and sdk v0.3.0
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.12.1] - 2025-10-03
 
 ### 🐛 Bug Fixes
