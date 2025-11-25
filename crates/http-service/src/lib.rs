@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,7 +9,6 @@ pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
 use anyhow::{bail, Error, Result};
 use bytes::Bytes;
-use bytesize::ByteSize;
 use http::{
     header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
     HeaderMap, HeaderName, HeaderValue, StatusCode,
@@ -18,15 +18,11 @@ use hyper::{body::Body, server::conn::http1, service::service_fn};
 use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 #[cfg(feature = "metrics")]
 use runtime::util::metrics;
-#[cfg(feature = "stats")]
-use runtime::util::stats::StatRow;
+use runtime::util::stats::StatsVisitor;
 use runtime::{
-    app::Status, service::Service, util::stats::StatsWriter, App, AppResult, ContextT, Router,
-    WasmEngine, WasmEngineBuilder,
+    app::Status, service::Service, App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
 };
-use smol_str::SmolStr;
-#[cfg(feature = "stats")]
-use smol_str::ToSmolStr;
+use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
 use tokio::{net::TcpListener, time::error::Elapsed};
 pub use wasmtime_wasi_http::body::HyperOutgoingBody;
@@ -59,19 +55,19 @@ pub struct HttpConfig {
     pub backoff: u64,
 }
 
-pub struct HttpService<T: ContextT> {
+pub struct HttpService<T: ContextT, S: StatsVisitor> {
     engine: WasmEngine<HttpState<T::BackendConnector>>,
     context: T,
+    _stats: PhantomData<S>,
 }
 
 pub trait ContextHeaders {
     fn append_headers(&self) -> impl Iterator<Item = (SmolStr, SmolStr)>;
 }
 
-impl<T> Service for HttpService<T>
+impl<T, S> Service for HttpService<T, S>
 where
     T: ContextT
-        + StatsWriter
         + Router
         + ContextHeaders
         + ExecutorFactory<HttpState<T::BackendConnector>>
@@ -81,13 +77,18 @@ where
         + 'static,
     T::BackendConnector: Connect + Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
+    S: StatsVisitor + Send + Sync + 'static,
 {
     type State = HttpState<T::BackendConnector>;
     type Config = HttpConfig;
     type Context = T;
 
     fn new(engine: WasmEngine<Self::State>, context: Self::Context) -> Result<Self> {
-        Ok(Self { engine, context })
+        Ok(Self {
+            engine,
+            context,
+            _stats: Default::default(),
+        })
     }
 
     /// Run hyper http service
@@ -143,8 +144,8 @@ where
                                 let request_id = remote_traceparent(&req);
                                 async move {
                                     self_
-                                        .handle_request(&request_id, req)
-                                        .instrument(tracing::debug_span!("http", request_id))
+                                        .handle_request(request_id.clone(), req)
+                                        .instrument(tracing::debug_span!("http", ?request_id))
                                         .await
                                 }
                             });
@@ -206,14 +207,17 @@ where
             &mut data.key_value_store
         })?;
 
+        reactor::gcore::fastedge::utils::add_to_linker::<_, HasSelf<_>>(linker, |data| {
+            &mut data.utils
+        })?;
+
         Ok(())
     }
 }
 
-impl<T> HttpService<T>
+impl<T, S> HttpService<T, S>
 where
     T: ContextT
-        + StatsWriter
         + Router
         + ContextHeaders
         + ExecutorFactory<HttpState<T::BackendConnector>>
@@ -223,23 +227,18 @@ where
         + Clone,
     T::BackendConnector: Clone + Send + Sync + 'static,
     T::Executor: HttpExecutor + Send + Sync,
+    S: StatsVisitor + Send + 'static,
 {
     /// handle HTTP request.
     async fn handle_request<B>(
         &self,
-        request_id: &str,
+        request_id: SmolStr,
         mut request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
-        #[cfg(feature = "stats")]
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .expect("current time")
-            .as_secs();
-
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
@@ -298,6 +297,7 @@ where
 
             Some(cfg) => cfg,
         };
+
         // get cached execute context for this application
         let executor = match self
             .context
@@ -314,92 +314,33 @@ where
             }
         };
 
-        let start_ = std::time::Instant::now();
+        let stats = self.context.new_stats_row(&request_id, &app_name, &cfg);
 
-        let response_handler = {
-            let app_name = app_name.clone();
-            #[cfg(feature = "stats")]
-            let billing_plan = cfg.plan.clone();
-            #[cfg(feature = "stats")]
-            let request_id = request_id.to_smolstr();
-            #[cfg(feature = "stats")]
-            let context = self.context.clone();
-
-            move |status_code: StatusCode, mem_used: ByteSize, time_elapsed: Duration| {
-                tracing::info!(
-                    "'{}' completed with status code: '{}' in {:.0?} using {} of WebAssembly heap",
-                    app_name,
-                    status_code,
-                    time_elapsed,
-                    mem_used
-                );
-                #[cfg(feature = "stats")]
-                {
-                    let stat_row = StatRow {
-                        app_id: cfg.app_id,
-                        client_id: cfg.client_id,
-                        timestamp: timestamp as u32,
-                        app_name,
-                        status_code: status_code.as_u16() as u32,
-                        fail_reason: 0, // TODO: use AppResult
-                        billing_plan,
-                        time_elapsed: time_elapsed.as_micros() as u64,
-                        memory_used: mem_used.as_u64(),
-                        request_id,
-                    };
-                    context.write_stats(stat_row);
-                }
+        let response = match executor.execute(request, stats.clone()).await {
+            Ok(mut response) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
                     AppResult::SUCCESS,
                     &["http"],
-                    Some(time_elapsed.as_micros() as u64),
-                    Some(mem_used.as_u64()),
+                    Some(stats.get_time_elapsed()),
+                    Some(stats.get_memory_used()),
                 );
-            }
-        };
 
-        let response = match executor.execute(request, response_handler).await {
-            Ok(mut response) => {
                 response.headers_mut().extend(app_res_headers(cfg));
                 response
             }
             Err(error) => {
                 tracing::warn!(cause=?error, "execute");
-                let time_elapsed = std::time::Instant::now().duration_since(start_);
-
                 let (status_code, fail_reason, msg) = map_err(error);
-                tracing::info!(
-                    "'{}' failed with status code: '{}' in {:.0?}",
-                    app_name,
-                    status_code,
-                    time_elapsed
-                );
-
-                #[cfg(feature = "stats")]
-                {
-                    let stat_row = StatRow {
-                        app_id: cfg.app_id,
-                        client_id: cfg.client_id,
-                        timestamp: timestamp as u32,
-                        app_name: app_name,
-                        status_code: status_code as u32,
-                        fail_reason: fail_reason as u32,
-                        billing_plan: cfg.plan.clone(),
-                        time_elapsed: time_elapsed.as_micros() as u64,
-                        memory_used: 0,
-                        request_id: request_id.to_smolstr(),
-                    };
-                    self.context.write_stats(stat_row);
-                }
-                #[cfg(not(feature = "stats"))]
-                tracing::debug!(?fail_reason, request_id, "stats");
+                stats.status_code(status_code);
+                stats.fail_reason(fail_reason as u32);
+                tracing::debug!(?fail_reason, ?request_id, "stats");
 
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
                     fail_reason,
                     HTTP_LABEL,
-                    Some(time_elapsed.as_micros() as u64),
+                    Some(stats.get_time_elapsed()),
                     None,
                 );
 
@@ -487,12 +428,12 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
     (status_code, fail_reason, msg)
 }
 
-fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> String {
+fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> SmolStr {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or(nanoid::nanoid!())
+        .map(|s| s.to_smolstr())
+        .unwrap_or(nanoid::nanoid!().to_smolstr())
 }
 
 /// Creates an HTTP 500 response.

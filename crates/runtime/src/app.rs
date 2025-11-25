@@ -29,6 +29,7 @@ pub struct App {
     pub secrets: Vec<SecretOption>,
     #[serde(default)]
     pub kv_stores: Vec<KvStoreOption>,
+    pub plan_id: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -156,6 +157,7 @@ mod tests {
             "app_id": 12345,
             "client_id": 23456,
             "plan": "test_plan",
+            "plan_id": 0,
             "status": 1,
             "debug_until": "2037-01-01T12:00:27.87Z",
             "secrets":[{"name":"SECRET","secret_values":[{"effective_from":0,"value":"encrypted"}]}]
@@ -183,6 +185,7 @@ mod tests {
                 }],
             }],
             kv_stores: vec![],
+            plan_id: 0,
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));

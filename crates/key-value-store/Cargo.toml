@@ -19,5 +19,8 @@ smol_str = {workspace = true}
 tracing = "0.1"
 redis = { version = "0.32", features = ["aio", "tokio-comp", "connection-manager", "tokio-native-tls-comp", "safe_iterators"], optional = true}
 
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
 [lints]
 workspace = true

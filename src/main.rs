@@ -4,6 +4,7 @@ mod executor;
 mod key_value;
 mod secret;
 
+use crate::context::StatsStub;
 use bytesize::MB;
 use clap::{Args, Parser, Subcommand};
 use context::Context;
@@ -171,6 +172,7 @@ async fn main() -> anyhow::Result<()> {
                 debug_until: None,
                 secrets,
                 kv_stores,
+                plan_id: 0,
             };
 
             let mut headers = dotenv_injector.merge_with_dotenv_variables(
@@ -190,7 +192,7 @@ async fn main() -> anyhow::Result<()> {
                 wasi_http: run.wasi_http.unwrap_or_default(),
             };
 
-            let http: HttpService<Context> = ServiceBuilder::new(context).build()?;
+            let http: HttpService<Context, StatsStub> = ServiceBuilder::new(context).build()?;
             let http = http.run(HttpConfig {
                 all_interfaces: false,
                 port: run.port,

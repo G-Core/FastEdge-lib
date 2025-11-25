@@ -4,18 +4,20 @@ use http::uri::Scheme;
 use http::{header, HeaderMap, HeaderName, Uri};
 use http_backend::is_public_host;
 use http_backend::Backend;
+use runtime::store::HasStats;
+use runtime::util::stats::StatsVisitor;
 use runtime::BackendRequest;
-use tracing::instrument;
+use std::sync::Arc;
 
 pub struct HttpState<C> {
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
     pub(super) propagate_header_names: Vec<HeaderName>,
+    pub(super) stats: Arc<dyn StatsVisitor>,
 }
 
 impl<C> BackendRequest for HttpState<C> {
-    #[instrument(skip(self), ret, err)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {
             http_backend::BackendStrategy::Direct => {
@@ -134,4 +136,10 @@ fn canonical_url(
         .path_and_query(canonical_path)
         .build()
         .map_err(Error::msg)
+}
+
+impl<T> HasStats for HttpState<T> {
+    fn get_stats(&self) -> Arc<dyn StatsVisitor> {
+        self.stats.clone()
+    }
 }

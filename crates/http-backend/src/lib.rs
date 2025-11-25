@@ -1,7 +1,10 @@
+pub mod stats;
+
 use std::fmt::Debug;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -18,6 +21,7 @@ use tokio::net::TcpStream;
 use tower_service::Service;
 use tracing::{debug, trace, warn};
 
+use crate::stats::{ExtRequestStats, ExtStatsTimer};
 use reactor::gcore::fastedge::http::Headers;
 use reactor::gcore::fastedge::{
     http::{Error as HttpError, Method, Request, Response},
@@ -41,13 +45,13 @@ pub struct Connection {
 /// A custom Hyper client connector, which is needed to override Hyper's default behavior of
 /// connecting to host specified by the request's URI; we instead want to connect to the host
 /// specified by our backend configuration, regardless of what the URI says.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FastEdgeConnector {
     inner: HttpConnector,
     backend: Uri,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Backend<C> {
     client: Client<C, Full<Bytes>>,
     uri: Uri,
@@ -55,6 +59,7 @@ pub struct Backend<C> {
     propagate_header_names: HeaderNameList,
     max_sub_requests: usize,
     pub strategy: BackendStrategy,
+    ext_http_stats: Option<Arc<dyn ExtRequestStats>>,
 }
 
 pub struct Builder {
@@ -82,7 +87,7 @@ impl Builder {
     where
         C: Connect + Clone,
     {
-        let client = hyper_util::client::legacy::Client::builder(TokioExecutor::new())
+        let client = Client::builder(TokioExecutor::new())
             .set_host(false)
             .pool_idle_timeout(Duration::from_secs(30))
             .build(connector);
@@ -91,9 +96,10 @@ impl Builder {
             client,
             uri: self.uri.to_owned(),
             propagate_headers: HeaderMap::new(),
-            propagate_header_names: self.propagate_header_names.to_owned(),
+            propagate_header_names: self.propagate_header_names.clone(),
             max_sub_requests: self.max_sub_requests,
             strategy: self.strategy,
+            ext_http_stats: None,
         }
     }
 }
@@ -110,6 +116,11 @@ impl<C> Backend<C> {
 
     pub fn uri(&self) -> Uri {
         self.uri.to_owned()
+    }
+
+    /// Set external request stats
+    pub fn set_ext_http_stats(&mut self, stats: Arc<dyn ExtRequestStats>) {
+        self.ext_http_stats.replace(stats);
     }
 
     pub fn propagate_header_names(&self) -> HeaderNameList {
@@ -151,6 +162,7 @@ impl<C> Backend<C> {
 
     fn make_request(&self, req: Request) -> Result<http::Request<Full<Bytes>>> {
         trace!("strategy: {:?}", self.strategy);
+
         let builder = match self.strategy {
             BackendStrategy::Direct => {
                 let mut headers = req.headers.into_iter().collect::<Vec<(String, String)>>();
@@ -290,6 +302,13 @@ where
             warn!(cause=?error, "making request to backend");
             HttpError::RequestError
         })?;
+
+        // start external request stats timer
+        let _stats_timer = self
+            .ext_http_stats
+            .as_ref()
+            .map(|s| ExtStatsTimer::new(s.clone()));
+
         let res = self.client.request(request).await.map_err(|error| {
             warn!(cause=?error, "sending request to backend");
             HttpError::RequestError

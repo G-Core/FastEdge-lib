@@ -1,15 +1,17 @@
+use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
-use bytesize::ByteSize;
 use http::{Method, Request, Response, StatusCode};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use reactor::gcore::fastedge;
+use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{store::StoreBuilder, InstancePre};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
@@ -25,18 +27,18 @@ impl<C> HttpExecutor for HttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
 {
-    async fn execute<B, R>(
-        &self,
+    async fn execute<B>(
+        self,
         req: Request<B>,
-        on_response: R,
+        stats: Arc<dyn StatsVisitor>,
     ) -> anyhow::Result<Response<HyperOutgoingBody>>
     where
-        R: FnOnce(StatusCode, ByteSize, Duration) + Send + 'static,
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
         tracing::trace!("start execute");
-        let start_ = Instant::now();
+        // Start timing for stats
+        let stats_timer = StatsTimer::new(stats.clone());
 
         let (parts, body) = req.into_parts();
         let method = to_fastedge_http_method(&parts.method)?;
@@ -70,14 +72,16 @@ where
             body,
         };
 
-        let properties = crate::executor::get_properties(&parts.headers);
+        let properties = executor::get_properties(&parts.headers);
 
-        let store_builder = self.store_builder.clone().with_properties(properties);
-        let mut http_backend = self.backend.clone();
+        let store_builder = self.store_builder.with_properties(properties);
+        let mut http_backend = self.backend;
 
         http_backend
             .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;
+
+        http_backend.set_ext_http_stats(stats.clone());
 
         let propagate_header_names = http_backend.propagate_header_names();
         let backend_uri = http_backend.uri();
@@ -86,6 +90,7 @@ where
             uri: backend_uri,
             propagate_headers: parts.headers,
             propagate_header_names,
+            stats: stats.clone(),
         };
 
         let mut store = store_builder.build(state)?;
@@ -115,8 +120,8 @@ where
                 return Err(error);
             }
         };
-        let status_code = ::http::StatusCode::try_from(resp.status)?;
-        let builder = ::http::Response::builder().status(status_code);
+        let status_code = StatusCode::try_from(resp.status)?;
+        let builder = Response::builder().status(status_code);
         let builder = if let Some(headers) = resp.headers {
             headers
                 .iter()
@@ -125,12 +130,9 @@ where
             builder
         };
 
-        let elapsed = Instant::now().duration_since(start_);
-        on_response(
-            status_code,
-            ByteSize::b(store.memory_used() as u64),
-            elapsed,
-        );
+        drop(stats_timer); // Stop timing for stats
+        stats.status_code(status_code.as_u16());
+        stats.memory_used(store.memory_used() as u64);
 
         let body = resp
             .body
@@ -180,14 +182,14 @@ mod tests {
     };
     use bytes::Bytes;
     use claims::*;
-    use dictionary::Dictionary;
+    use http_backend::stats::ExtRequestStats;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector};
     use http_body_util::Empty;
-    use key_value_store::KeyValueStore;
+    use key_value_store::ReadStats;
     use runtime::app::{KvStoreOption, SecretOption, Status};
     use runtime::logger::{Logger, NullAppender};
     use runtime::service::ServiceBuilder;
-    use runtime::util::stats::{StatRow, StatsWriter};
+    use runtime::util::stats::CdnPhase;
     use runtime::{
         componentize_if_necessary, App, ContextT, PreCompiledLoader, Router, WasiVersion,
         WasmConfig, WasmEngine,
@@ -195,8 +197,46 @@ mod tests {
     use secret::SecretStore;
     use smol_str::{SmolStr, ToSmolStr};
     use std::collections::HashMap;
+    use utils::{Dictionary, UserDiagStats};
     use wasmtime::component::Component;
     use wasmtime::{Engine, Module};
+
+    #[derive(Clone)]
+    struct TestStats;
+
+    impl ReadStats for TestStats {
+        fn count_kv_read(&self, _value: i32) {}
+
+        fn count_kv_byod_read(&self, _value: i32) {}
+    }
+
+    impl UserDiagStats for TestStats {
+        fn set_user_diag(&self, _diag: &str) {}
+    }
+
+    impl ExtRequestStats for TestStats {
+        fn observe_ext(&self, _elapsed: Duration) {}
+    }
+
+    impl StatsVisitor for TestStats {
+        fn status_code(&self, _status_code: u16) {}
+
+        fn memory_used(&self, _memory_used: u64) {}
+
+        fn fail_reason(&self, _fail_reason: u32) {}
+
+        fn observe(&self, _elapsed: Duration) {}
+
+        fn get_time_elapsed(&self) -> u64 {
+            0
+        }
+
+        fn get_memory_used(&self) -> u64 {
+            0
+        }
+
+        fn cdn_phase(&self, _phase: CdnPhase) {}
+    }
 
     #[derive(Clone)]
     struct TestContext {
@@ -231,8 +271,17 @@ mod tests {
             todo!()
         }
 
-        fn make_key_value_store(&self, _stores: &Vec<KvStoreOption>) -> KeyValueStore {
+        fn make_key_value_store(&self, _stores: &Vec<KvStoreOption>) -> key_value_store::Builder {
             todo!()
+        }
+
+        fn new_stats_row(
+            &self,
+            _request_id: &SmolStr,
+            _app: &SmolStr,
+            _cfg: &App,
+        ) -> Arc<dyn StatsVisitor> {
+            Arc::new(TestStats)
         }
     }
 
@@ -253,10 +302,6 @@ mod tests {
         fn load_module(&self, _id: u64) -> anyhow::Result<Module> {
             Module::new(&self.engine, DUMMY_SAMPLE)
         }
-    }
-
-    impl StatsWriter for TestContext {
-        fn write_stats(&self, _stat: StatRow) {}
     }
 
     impl Router for TestContext {
@@ -330,6 +375,7 @@ mod tests {
             debug_until: None,
             secrets: vec![],
             kv_stores: vec![],
+            plan_id: 0,
         })
     }
 
@@ -354,7 +400,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_success() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "success.test.com")
@@ -370,10 +416,10 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("1", req).await);
+        let res = assert_ok!(http_service.handle_request("1".to_smolstr(), req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -389,7 +435,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_timeout() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "timeout.test.com")
@@ -413,6 +459,7 @@ mod tests {
             debug_until: None,
             secrets: vec![],
             kv_stores: vec![],
+            plan_id: 0,
         });
 
         let context = TestContext {
@@ -421,10 +468,10 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("2", req).await);
+        let res = assert_ok!(http_service.handle_request("2".to_smolstr(), req).await);
         assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
@@ -439,7 +486,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_insufficient_memory() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/?size=200000")
             .header("server_name", "insufficient_memory.test.com")
@@ -463,6 +510,7 @@ mod tests {
             debug_until: None,
             secrets: vec![],
             kv_stores: vec![],
+            plan_id: 0,
         });
 
         let context = TestContext {
@@ -471,10 +519,10 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("3", req).await);
+        let res = assert_ok!(http_service.handle_request("3".to_smolstr(), req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
         assert_eq!(3, headers.len());
@@ -489,7 +537,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn draft_app() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
@@ -505,9 +553,9 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("4", req).await);
+        let res = assert_ok!(http_service.handle_request("4".to_smolstr(), req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -515,7 +563,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn disabled_app() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
@@ -531,9 +579,9 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("5", req).await);
+        let res = assert_ok!(http_service.handle_request("5".to_smolstr(), req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -541,7 +589,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn rate_limit_app() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
@@ -557,9 +605,9 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("6", req).await);
+        let res = assert_ok!(http_service.handle_request("6".to_smolstr(), req).await);
         assert_eq!(StatusCode::TOO_MANY_REQUESTS, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -567,7 +615,7 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn suspended_app() {
-        let req = assert_ok!(http::Request::builder()
+        let req = assert_ok!(Request::builder()
             .method("GET")
             .uri("http://www.rust-lang.org/")
             .header("server_name", "draft.test.com")
@@ -583,9 +631,9 @@ mod tests {
             engine: make_engine(),
         };
 
-        let http_service: HttpService<TestContext> =
+        let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("7", req).await);
+        let res = assert_ok!(http_service.handle_request("7".to_smolstr(), req).await);
         assert_eq!(StatusCode::NOT_ACCEPTABLE, res.status());
         assert_eq!(0, res.headers().len());
     }

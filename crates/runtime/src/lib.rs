@@ -1,7 +1,9 @@
 use crate::app::KvStoreOption;
-use dictionary::Dictionary;
-use key_value_store::KeyValueStore;
+use crate::store::HasStats;
+use http_backend::stats::ExtStatsTimer;
+use std::sync::Arc;
 use std::{fmt::Debug, ops::Deref};
+use utils::{Dictionary, Utils};
 use wasmtime_wasi::ResourceTable;
 use wasmtime_wasi::WasiCtxView;
 use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
@@ -28,6 +30,7 @@ pub mod util;
 
 use crate::app::SecretOption;
 use crate::logger::Logger;
+use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
@@ -37,10 +40,9 @@ use smol_str::SmolStr;
 use std::borrow::Cow;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
 use wasmtime_wasi_http::body::HyperOutgoingBody;
-use wasmtime_wasi_http::types::OutgoingRequestConfig;
 use wasmtime_wasi_http::{
     bindings::http::types::ErrorCode,
-    types::{default_send_request, HostFutureIncomingResponse},
+    types::{default_send_request_handler, HostFutureIncomingResponse, OutgoingRequestConfig},
 };
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 
@@ -91,8 +93,9 @@ pub struct Data<T: 'static> {
     pub logger: Option<Logger>,
     http: WasiHttpCtx,
     pub secret_store: SecretStore,
-    pub key_value_store: KeyValueStore,
+    pub key_value_store: key_value_store::StoreImpl,
     pub dictionary: Dictionary,
+    pub utils: Utils,
 }
 
 pub trait BackendRequest {
@@ -117,7 +120,7 @@ impl<T: Send> IoView for Data<T> {
     }
 }
 
-impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
+impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
@@ -137,10 +140,17 @@ impl<T: Send + BackendRequest> WasiHttpView for Data<T> {
         })?;
         let use_tls = matches!(head.uri.scheme_str(), Some("https"));
         let request = Request::from_parts(head, body);
-        Ok(default_send_request(
-            request,
-            OutgoingRequestConfig { use_tls, ..config },
-        ))
+        // start external request stats timer
+        let stats = self.inner.get_stats();
+
+        let handle = wasmtime_wasi::runtime::spawn(async move {
+            let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until request is done
+            Ok(
+                default_send_request_handler(request, OutgoingRequestConfig { use_tls, ..config })
+                    .await,
+            )
+        });
+        Ok(HostFutureIncomingResponse::pending(handle))
     }
 
     fn table(&mut self) -> &mut ResourceTable {
@@ -161,14 +171,6 @@ impl<T> Data<T> {
             Wasi::Preview1(_) => unreachable!("using WASI Preview 1 functions with Preview 2 ctx"),
             Wasi::Preview2(ctx) => ctx,
         }
-    }
-
-    pub fn secret_store_ref(&self) -> &SecretStore {
-        &self.secret_store
-    }
-
-    pub fn key_value_store_ref(&self) -> &KeyValueStore {
-        &self.key_value_store
     }
 }
 
@@ -405,7 +407,14 @@ pub trait ContextT {
 
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore>;
 
-    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> KeyValueStore;
+    fn make_key_value_store(&self, stores: &Vec<KvStoreOption>) -> key_value_store::Builder;
+
+    fn new_stats_row(
+        &self,
+        request_id: &SmolStr,
+        app: &SmolStr,
+        cfg: &App,
+    ) -> Arc<dyn StatsVisitor>;
 }
 
 pub trait ExecutorCache {

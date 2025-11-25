@@ -1,14 +1,16 @@
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
+use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
-use ::http::{header, HeaderMap, Request, Response, StatusCode, Uri};
+use ::http::{header, HeaderMap, Request, Response, Uri};
 use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
-use bytesize::ByteSize;
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
+use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{store::StoreBuilder, InstancePre};
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
@@ -27,18 +29,18 @@ impl<C> HttpExecutor for WasiHttpExecutorImpl<C>
 where
     C: Clone + Send + Sync + 'static,
 {
-    async fn execute<B, R>(
-        &self,
+    async fn execute<B>(
+        self,
         req: Request<B>,
-        on_response: R,
+        stats: Arc<dyn StatsVisitor>,
     ) -> anyhow::Result<Response<HyperOutgoingBody>>
     where
-        R: FnOnce(StatusCode, ByteSize, Duration) + Send + 'static,
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
         tracing::trace!("start execute");
-        let start_ = Instant::now();
+        // Start timing for stats
+        let stats_timer = StatsTimer::new(stats.clone());
 
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let (mut parts, body) = req.into_parts();
@@ -68,9 +70,9 @@ where
         let body = Full::new(body).map_err(|never| match never {});
         let body = body.boxed();
 
-        let properties = crate::executor::get_properties(&parts.headers);
-        let store_builder = self.store_builder.to_owned().with_properties(properties);
-        let mut http_backend = self.backend.to_owned();
+        let properties = executor::get_properties(&parts.headers);
+        let store_builder = self.store_builder.with_properties(properties);
+        let mut http_backend = self.backend;
 
         http_backend
             .propagate_headers(parts.headers.clone())
@@ -97,6 +99,7 @@ where
             uri: backend_uri,
             propagate_headers,
             propagate_header_names,
+            stats: stats.clone(),
         };
 
         let mut store = store_builder.build(state).context("store build")?;
@@ -115,14 +118,9 @@ where
 
         let proxy = proxy_pre.instantiate_async(&mut store).await?;
 
-        let duration = Duration::from_millis(store.data().timeout);
-
-        /*
-            Channel to receive http status code for asynchronious response processing of WASI-HTTP.
-        */
-        let (status_code_tx, status_code_rx) = tokio::sync::oneshot::channel();
-
+        let task_stats = stats.clone();
         let task = tokio::task::spawn(async move {
+            let duration = Duration::from_millis(store.data().timeout);
             if let Err(e) = tokio::time::timeout(
                 duration,
                 proxy
@@ -134,39 +132,16 @@ where
                 tracing::warn!(cause=?e, "incoming handler");
                 return Err(e);
             };
-            let elapsed = Instant::now().duration_since(start_);
-            /*
-                Used by WASI-HTTP to send status code prior response processing.
-                If there is no status code then default value is returned.
-                For synchronious HTTP processing the status_code parameter is set and no value in the channel.
-            */
-            let status_code = status_code_rx.await.unwrap_or_else(|error| {
-                tracing::trace!(cause=?error, "unknown status code");
-                StatusCode::default()
-            });
 
-            on_response(
-                status_code,
-                ByteSize::b(store.memory_used() as u64),
-                elapsed,
-            );
+            drop(stats_timer); // Stop timing for stats
+            task_stats.memory_used(store.memory_used() as u64);
+
             Ok(())
         });
 
         match receiver.await {
             Ok(Ok(response)) => {
-                /*
-                   Status code sender is closed if response handler processing was done.
-                */
-                if !status_code_tx.is_closed() {
-                    if let Err(error) = status_code_tx.send(response.status()) {
-                        tracing::warn!(cause=?error, "sending status code")
-                    }
-                    tracing::debug!("returned status code: '{}'", response.status(),);
-                } else {
-                    tracing::warn!("status code sender is closed");
-                }
-
+                stats.status_code(response.status().as_u16());
                 Ok(response)
             }
             Ok(Err(e)) => Err(e.into()),
