@@ -1,8 +1,19 @@
+## [0.13.3] - 2025-11-25
+
+### 🐛 Bug Fixes
+
+- Add public host validation to prevent private host usage
+- Format host validation error message for clarity and update dependencies
+- Clippy suggestion
 ## [0.13.2] - 2025-11-04
 
 ### 🐛 Bug Fixes
 
 - Update Redis dependency to version 0.32 and improve error handling in async item retrieval
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.13.1] - 2025-11-04
 
 ### 🐛 Bug Fixes
