@@ -1,3 +1,4 @@
+use http_backend::is_public_host;
 use anyhow::Error;
 use http::request::Parts;
 use http::uri::Scheme;
@@ -44,6 +45,8 @@ impl<C> BackendRequest for HttpState<C> {
                         })
                     })
                     .unwrap_or_default();
+
+                anyhow::ensure!(is_public_host(&original_host), "private host not allowed: {}", original_host);
 
                 static FILTER_HEADERS: [HeaderName; 6] = [
                     header::HOST,
