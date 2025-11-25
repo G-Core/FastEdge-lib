@@ -2,6 +2,7 @@ pub mod stats;
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -219,6 +220,13 @@ impl<C> Backend<C> {
                 let original_host = original_host
                     .or_else(|| request_host_header.clone())
                     .unwrap_or_default();
+
+                anyhow::ensure!(
+                    is_public_host(&original_host),
+                    "private host not allowed: {}",
+                    original_host
+                );
+
                 // filter headers
                 let mut headers = req
                     .headers
@@ -486,6 +494,54 @@ impl hyper_util::client::legacy::connect::Connection for Connection {
     fn connected(&self) -> hyper_util::client::legacy::connect::Connected {
         hyper_util::client::legacy::connect::Connected::new()
     }
+}
+
+pub fn is_public_host(host: &str) -> bool {
+    // Try to parse as IP address
+    match host.parse::<IpAddr>() {
+        Ok(ip) => !is_private_ip(&ip),
+        Err(_) => true, // Not an IP address, assume it's a hostname
+    }
+}
+
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => is_private_ipv4(ipv4),
+        IpAddr::V6(ipv6) => is_private_ipv6(ipv6),
+    }
+}
+
+/// Check if an IPv4 address is private
+fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
+    ip.octets()[0] == 0 // "This network"
+        || ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || (
+        ip.octets()[0] == 192 && ip.octets()[1] == 0 && ip.octets()[2] == 0
+            && ip.octets()[3] != 9 && ip.octets()[3] != 10
+    )
+        || ip.is_documentation()
+        || ip.is_broadcast()
+}
+
+/// Check if an IPv6 address is private
+fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
+    ip.is_unspecified()
+        || ip.is_loopback()
+        || matches!(ip.segments(), [0, 0, 0, 0, 0, 0xffff, _, _])
+        || matches!(ip.segments(), [0x64, 0xff9b, 1, _, _, _, _, _])
+        || matches!(ip.segments(), [0x100, 0, 0, 0, _, _, _, _])
+        || (matches!(ip.segments(), [0x2001, b, _, _, _, _, _, _] if b < 0x200)
+            && !(u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0001
+                || u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0002
+                || matches!(ip.segments(), [0x2001, 3, _, _, _, _, _, _])
+                || matches!(ip.segments(), [0x2001, 4, 0x112, _, _, _, _, _])
+                || matches!(ip.segments(), [0x2001, b, _, _, _, _, _, _] if (0x20..=0x3F).contains(&b))))
+        || matches!(ip.segments(), [0x2002, _, _, _, _, _, _, _])
+        || matches!(ip.segments(), [0x5f00, ..])
+        || ip.is_unique_local()
+        || ip.is_unicast_link_local()
 }
 
 #[cfg(test)]
