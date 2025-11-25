@@ -518,7 +518,7 @@ fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
                 || u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0002
                 || matches!(ip.segments(), [0x2001, 3, _, _, _, _, _, _])
                 || matches!(ip.segments(), [0x2001, 4, 0x112, _, _, _, _, _])
-                || matches!(ip.segments(), [0x2001, b, _, _, _, _, _, _] if b >= 0x20 && b <= 0x3F)))
+                || matches!(ip.segments(), [0x2001, b, _, _, _, _, _, _] if (0x20..=0x3F).contains(&b))))
         || matches!(ip.segments(), [0x2002, _, _, _, _, _, _, _])
         || matches!(ip.segments(), [0x5f00, ..])
         || ip.is_unique_local()
