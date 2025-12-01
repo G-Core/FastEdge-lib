@@ -943,7 +943,10 @@ mod tests {
 
         // IPv6 with port
         assert_eq!(extract_host("[::1]:8080"), "::1");
-        assert_eq!(extract_host("[2001:4860:4860::8888]:443"), "2001:4860:4860::8888");
+        assert_eq!(
+            extract_host("[2001:4860:4860::8888]:443"),
+            "2001:4860:4860::8888"
+        );
 
         // IPv6 without port
         assert_eq!(extract_host("[::1]"), "::1");
@@ -969,7 +972,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
 
         // Test private network
         let req = Request {
@@ -980,7 +986,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
 
         // Test another private network
         let req = Request {
@@ -991,7 +1000,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
 
         // Test link-local
         let req = Request {
@@ -1002,7 +1014,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
     }
 
     #[test]
@@ -1020,7 +1035,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
 
         // Test with Host header containing private IP with port
         let req = Request {
@@ -1031,7 +1049,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
     }
 
     #[test]
@@ -1049,7 +1070,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
 
         // Test unique local
         let req = Request {
@@ -1060,7 +1084,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
 
         // Test link-local
         let req = Request {
@@ -1071,7 +1098,10 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("private host not allowed"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
     }
 
     #[test]
@@ -1136,6 +1166,4 @@ mod tests {
         let result = backend.make_request(req);
         assert!(result.is_ok());
     }
-
-
 }
