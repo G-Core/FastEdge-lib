@@ -527,6 +527,7 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 }
 
 /// Check if an IPv4 address is private
+/// This is a a copu of std::net::Ipv4Addr::is_global with inverted logic and some additions
 fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
     ip.octets()[0] == 0 // "This network"
         || ip.is_private()
@@ -541,6 +542,7 @@ fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
 }
 
 /// Check if an IPv6 address is private
+/// This is a a copu of std::net::Ipv6Addr::is_global with inverted logic and some additions
 fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
     ip.is_unspecified()
         || ip.is_loopback()
