@@ -247,7 +247,7 @@ impl Default for WasmConfig {
         // Maximum number of slots in the pooling allocator to keep "warm", or those
         // to keep around to possibly satisfy an affine allocation request or an
         // instantiation of a module previously instantiated within the pool.
-        pooling_allocation_config.max_unused_warm_slots(10);
+        pooling_allocation_config.max_unused_warm_slots(700);
 
         inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
             pooling_allocation_config,
@@ -295,7 +295,7 @@ impl WasmConfigBuilder {
         pooling_allocation_config.max_core_instance_size(MB);
         pooling_allocation_config.max_tables_per_module(1);
         pooling_allocation_config.table_elements(98765);
-        pooling_allocation_config.max_unused_warm_slots(10);
+        pooling_allocation_config.max_unused_warm_slots(700);
 
         inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
             pooling_allocation_config,
