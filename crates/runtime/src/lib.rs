@@ -219,7 +219,7 @@ impl Default for WasmConfig {
         inner.wasm_backtrace_details(WasmBacktraceDetails::Enable);
         inner.async_support(true);
         inner.consume_fuel(false); // this is custom Gcore setting
-        inner.profiler(ProfilingStrategy::None);
+        inner.profiler(ProfilingStrategy::PerfMap);
         inner.epoch_interruption(true); // this is custom Gcore setting
         inner.wasm_component_model(true);
 
@@ -276,7 +276,7 @@ impl WasmConfigBuilder {
         inner.wasm_backtrace_details(WasmBacktraceDetails::Enable);
         inner.async_support(true);
         inner.consume_fuel(false); // this is custom Gcore setting
-        inner.profiler(ProfilingStrategy::None);
+        inner.profiler(ProfilingStrategy::PerfMap);
         inner.epoch_interruption(true); // this is custom Gcore setting
         inner.wasm_component_model(true);
 
