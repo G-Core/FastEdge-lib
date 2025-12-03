@@ -119,25 +119,31 @@ where
         let proxy = proxy_pre.instantiate_async(&mut store).await?;
 
         let task_stats = stats.clone();
-        let task = tokio::task::spawn(async move {
-            let duration = Duration::from_millis(store.data().timeout);
-            if let Err(e) = tokio::time::timeout(
-                duration,
-                proxy
-                    .wasi_http_incoming_handler()
-                    .call_handle(&mut store, req, out),
-            )
-            .await?
-            {
-                tracing::warn!(cause=?e, "incoming handler");
-                return Err(e);
-            };
+        let task = tokio::task::spawn_blocking(move || {
+            // Create a new runtime handle or use block_in_place
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async move {
+                let duration = Duration::from_millis(store.data().timeout);
 
-            drop(stats_timer); // Stop timing for stats
-            task_stats.memory_used(store.memory_used() as u64);
+                tokio::time::timeout(
+                    duration,
+                    proxy
+                        .wasi_http_incoming_handler()
+                        .call_handle(&mut store, req, out),
+                )
+                    .await
+                    .map_err(|_| anyhow!("timeout"))?
+                    .map_err(|e| {
+                        tracing::warn!(cause=?e, "incoming handler");
+                        e
+                    })?;
 
-            Ok(())
+                drop(stats_timer);
+                task_stats.memory_used(store.memory_used() as u64);
+                Ok::<_, anyhow::Error>(())
+            })
         });
+
 
         match receiver.await {
             Ok(Ok(response)) => {
