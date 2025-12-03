@@ -153,8 +153,18 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
         Ok(HostFutureIncomingResponse::pending(handle))
     }
 
+
+
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
+    }
+
+    fn outgoing_body_buffer_chunks(&mut self) -> usize {
+        10
+    }
+
+    fn outgoing_body_chunk_size(&mut self) -> usize {
+        10485760
     }
 }
 
