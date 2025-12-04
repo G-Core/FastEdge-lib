@@ -2,6 +2,7 @@ pub mod stats;
 
 use std::fmt::Debug;
 use std::future::Future;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -216,9 +217,17 @@ impl<C> Backend<C> {
                         None
                     }
                 });
+
                 let original_host = original_host
                     .or_else(|| request_host_header.clone())
                     .unwrap_or_default();
+
+                anyhow::ensure!(
+                    is_public_host(&original_host),
+                    "private host not allowed: {}",
+                    original_host
+                );
+
                 // filter headers
                 let mut headers = req
                     .headers
@@ -486,6 +495,70 @@ impl hyper_util::client::legacy::connect::Connection for Connection {
     fn connected(&self) -> hyper_util::client::legacy::connect::Connected {
         hyper_util::client::legacy::connect::Connected::new()
     }
+}
+
+fn extract_host(addr: &str) -> &str {
+    if addr.starts_with('[') {
+        // IPv6 with port: [::1]:8080
+        addr.split(']')
+            .next()
+            .unwrap_or(addr)
+            .trim_start_matches('[')
+    } else {
+        // IPv4 with port or just host
+        addr.rsplit_once(':').map(|(host, _)| host).unwrap_or(addr)
+    }
+}
+
+pub fn is_public_host(host: &str) -> bool {
+    let host = extract_host(host);
+    // Try to parse as IP address
+    match host.parse::<IpAddr>() {
+        Ok(ip) => !is_private_ip(&ip),
+        Err(_) => true, // Not an IP address, assume it's a hostname
+    }
+}
+
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => is_private_ipv4(ipv4),
+        IpAddr::V6(ipv6) => is_private_ipv6(ipv6),
+    }
+}
+
+/// Check if an IPv4 address is private
+/// This is a a copu of std::net::Ipv4Addr::is_global with inverted logic and some additions
+fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
+    ip.octets()[0] == 0 // "This network"
+        || ip.is_private()
+        || ip.is_loopback()
+        || ip.is_link_local()
+        || (
+        ip.octets()[0] == 192 && ip.octets()[1] == 0 && ip.octets()[2] == 0
+            && ip.octets()[3] != 9 && ip.octets()[3] != 10
+    )
+        || ip.is_documentation()
+        || ip.is_broadcast()
+}
+
+/// Check if an IPv6 address is private
+/// This is a a copu of std::net::Ipv6Addr::is_global with inverted logic and some additions
+fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
+    ip.is_unspecified()
+        || ip.is_loopback()
+        || matches!(ip.segments(), [0, 0, 0, 0, 0, 0xffff, _, _])
+        || matches!(ip.segments(), [0x64, 0xff9b, 1, _, _, _, _, _])
+        || matches!(ip.segments(), [0x100, 0, 0, 0, _, _, _, _])
+        || (matches!(ip.segments(), [0x2001, b, _, _, _, _, _, _] if b < 0x200)
+            && !(u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0001
+                || u128::from_be_bytes(ip.octets()) == 0x2001_0001_0000_0000_0000_0000_0000_0002
+                || matches!(ip.segments(), [0x2001, 3, _, _, _, _, _, _])
+                || matches!(ip.segments(), [0x2001, 4, 0x112, _, _, _, _, _])
+                || matches!(ip.segments(), [0x2001, b, _, _, _, _, _, _] if (0x20..=0x3F).contains(&b))))
+        || matches!(ip.segments(), [0x2002, _, _, _, _, _, _, _])
+        || matches!(ip.segments(), [0x5f00, ..])
+        || ip.is_unique_local()
+        || ip.is_unicast_link_local()
 }
 
 #[cfg(test)]
@@ -771,5 +844,326 @@ mod tests {
 
         let error = claims::assert_err!(backend.send_request(req).await);
         assert_eq!("too-many-requests", error.name());
+    }
+
+    #[test]
+    fn test_is_public_host_private_ipv4() {
+        // Loopback
+        assert!(!is_public_host("127.0.0.1"));
+        assert!(!is_public_host("127.0.0.1:8080"));
+
+        // Private networks
+        assert!(!is_public_host("10.0.0.1"));
+        assert!(!is_public_host("10.255.255.255:3000"));
+        assert!(!is_public_host("172.16.0.1"));
+        assert!(!is_public_host("172.31.255.254:8080"));
+        assert!(!is_public_host("192.168.1.1"));
+        assert!(!is_public_host("192.168.0.1:9000"));
+
+        // Link-local
+        assert!(!is_public_host("169.254.0.1"));
+        assert!(!is_public_host("169.254.169.254:80"));
+
+        // Broadcast
+        assert!(!is_public_host("255.255.255.255"));
+
+        // This network (0.0.0.0/8)
+        assert!(!is_public_host("0.0.0.0"));
+        assert!(!is_public_host("0.1.2.3:8080"));
+
+        // Documentation addresses
+        assert!(!is_public_host("192.0.2.1"));
+        assert!(!is_public_host("198.51.100.1"));
+        assert!(!is_public_host("203.0.113.1"));
+    }
+
+    #[test]
+    fn test_is_public_host_public_ipv4() {
+        // Public IP addresses
+        assert!(is_public_host("8.8.8.8"));
+        assert!(is_public_host("8.8.8.8:53"));
+        assert!(is_public_host("1.1.1.1"));
+        assert!(is_public_host("1.1.1.1:443"));
+        assert!(is_public_host("93.184.216.34"));
+        assert!(is_public_host("93.184.216.34:80"));
+    }
+
+    #[test]
+    fn test_is_public_host_private_ipv6() {
+        // Loopback
+        assert!(!is_public_host("[::1]"));
+        assert!(!is_public_host("[::1]:8080"));
+
+        // Unspecified
+        assert!(!is_public_host("[::]"));
+        assert!(!is_public_host("[::]:8080"));
+
+        // Link-local
+        assert!(!is_public_host("[fe80::1]"));
+        assert!(!is_public_host("[fe80::1]:8080"));
+
+        // Unique local
+        assert!(!is_public_host("[fc00::1]"));
+        assert!(!is_public_host("[fd00::1]"));
+        assert!(!is_public_host("[fd00::1]:9000"));
+
+        // IPv4-mapped IPv6
+        assert!(!is_public_host("[::ffff:127.0.0.1]"));
+        assert!(!is_public_host("[::ffff:192.168.1.1]"));
+    }
+
+    #[test]
+    fn test_is_public_host_public_ipv6() {
+        // Public IPv6 addresses
+        assert!(is_public_host("[2001:4860:4860::8888]"));
+        assert!(is_public_host("[2001:4860:4860::8888]:443"));
+        assert!(is_public_host("[2606:4700:4700::1111]"));
+        assert!(is_public_host("[2606:4700:4700::1111]:80"));
+    }
+
+    #[test]
+    fn test_is_public_host_domain_names() {
+        // Domain names should be considered public
+        assert!(is_public_host("example.com"));
+        assert!(is_public_host("example.com:8080"));
+        assert!(is_public_host("www.example.com"));
+        assert!(is_public_host("api.example.com:443"));
+        assert!(is_public_host("subdomain.example.co.uk"));
+        assert!(is_public_host("localhost")); // hostname, not IP
+    }
+
+    #[test]
+    fn test_extract_host() {
+        // IPv4 with port
+        assert_eq!(extract_host("127.0.0.1:8080"), "127.0.0.1");
+        assert_eq!(extract_host("192.168.1.1:3000"), "192.168.1.1");
+
+        // IPv4 without port
+        assert_eq!(extract_host("127.0.0.1"), "127.0.0.1");
+
+        // IPv6 with port
+        assert_eq!(extract_host("[::1]:8080"), "::1");
+        assert_eq!(
+            extract_host("[2001:4860:4860::8888]:443"),
+            "2001:4860:4860::8888"
+        );
+
+        // IPv6 without port
+        assert_eq!(extract_host("[::1]"), "::1");
+
+        // Domain names
+        assert_eq!(extract_host("example.com:8080"), "example.com");
+        assert_eq!(extract_host("example.com"), "example.com");
+        assert_eq!(extract_host("sub.example.com:443"), "sub.example.com");
+    }
+
+    #[test]
+    fn test_make_request_rejects_private_ipv4() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+            .build(connector);
+
+        // Test loopback
+        let req = Request {
+            method: Method::Get,
+            uri: "http://127.0.0.1/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+
+        // Test private network
+        let req = Request {
+            method: Method::Get,
+            uri: "http://192.168.1.1:8080/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+
+        // Test another private network
+        let req = Request {
+            method: Method::Get,
+            uri: "http://10.0.0.1/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+
+        // Test link-local
+        let req = Request {
+            method: Method::Get,
+            uri: "http://169.254.169.254/metadata".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+    }
+
+    #[test]
+    fn test_make_request_rejects_private_ipv4_from_host_header() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+            .build(connector);
+
+        // Test with Host header containing private IP
+        let req = Request {
+            method: Method::Get,
+            uri: "/path".to_string(),
+            headers: vec![("host".to_string(), "192.168.1.1".to_string())],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+
+        // Test with Host header containing private IP with port
+        let req = Request {
+            method: Method::Get,
+            uri: "/path".to_string(),
+            headers: vec![("host".to_string(), "127.0.0.1:8080".to_string())],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+    }
+
+    #[test]
+    fn test_make_request_rejects_private_ipv6() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+            .build(connector);
+
+        // Test loopback
+        let req = Request {
+            method: Method::Get,
+            uri: "http://[::1]/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+
+        // Test unique local
+        let req = Request {
+            method: Method::Get,
+            uri: "http://[fc00::1]:8080/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+
+        // Test link-local
+        let req = Request {
+            method: Method::Get,
+            uri: "http://[fe80::1]/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("private host not allowed"));
+    }
+
+    #[test]
+    fn test_make_request_accepts_public_ip() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+            .build(connector);
+
+        // Test public IPv4
+        let req = Request {
+            method: Method::Get,
+            uri: "http://8.8.8.8/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+
+        // Test public IPv6
+        let req = Request {
+            method: Method::Get,
+            uri: "http://[2001:4860:4860::8888]/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+
+        // Test domain name
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_make_request_direct_strategy_allows_private_ip() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::Direct)
+            .build(connector);
+
+        // Direct strategy should allow private IPs
+        let req = Request {
+            method: Method::Get,
+            uri: "http://127.0.0.1/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+
+        let req = Request {
+            method: Method::Get,
+            uri: "http://192.168.1.1/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
     }
 }

@@ -2,6 +2,7 @@ use anyhow::Error;
 use http::request::Parts;
 use http::uri::Scheme;
 use http::{header, HeaderMap, HeaderName, Uri};
+use http_backend::is_public_host;
 use http_backend::Backend;
 use runtime::store::HasStats;
 use runtime::util::stats::StatsVisitor;
@@ -46,6 +47,12 @@ impl<C> BackendRequest for HttpState<C> {
                         })
                     })
                     .unwrap_or_default();
+
+                anyhow::ensure!(
+                    is_public_host(&original_host),
+                    "private host not allowed: {}",
+                    original_host
+                );
 
                 static FILTER_HEADERS: [HeaderName; 6] = [
                     header::HOST,
