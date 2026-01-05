@@ -254,7 +254,7 @@ where
             Ok(app_name) => app_name,
         };
         // lookup for application config and binary_id
-        tracing::info!(
+        tracing::debug!(
             "Processing request for application '{}' on URL: {}",
             app_name,
             request.uri()
