@@ -348,7 +348,7 @@ mod tests {
 
             let component = self.loader().load_component(cfg.binary_id)?;
             let instance_pre = engine.component_instantiate_pre(&component)?;
-            tracing::debug!("Added '{}' to cache", name);
+            tracing::info!("Added '{}' to cache", name);
             Ok(HttpExecutorImpl::new(
                 instance_pre,
                 store_builder,
