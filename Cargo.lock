@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "fastedge-run"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1465,7 +1465,7 @@ dependencies = [
 
 [[package]]
 name = "http-backend"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "anyhow",
  "claims",
@@ -1507,7 +1507,7 @@ dependencies = [
 
 [[package]]
 name = "http-service"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1864,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "key-value-store"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "async-trait",
  "reactor",
@@ -2685,7 +2685,7 @@ dependencies = [
 
 [[package]]
 name = "reactor"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "wasmtime",
 ]
@@ -2802,7 +2802,7 @@ dependencies = [
 
 [[package]]
 name = "runtime"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2979,7 +2979,7 @@ checksum = "0cd08a21f852bd2fe42e3b2a6c76a0db6a95a5b5bd29c0521dd0b30fa1712ec8"
 
 [[package]]
 name = "secret"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "anyhow",
  "reactor",
@@ -3727,7 +3727,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils"
-version = "0.13.3"
+version = "0.13.4"
 dependencies = [
  "reactor",
 ]
