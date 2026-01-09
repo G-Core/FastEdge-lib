@@ -1,8 +1,41 @@
+## [0.13.4] - 2026-01-06
+
+### 🚀 Features
+
+- Add stats tracking to HTTP execution context
+- Simplify method signatures and improve executor property handling
+- Update request ID handling and stats row creation to use SmolStr references
+- Add stats tracking and new fields to HTTP state and key-value store
+- Refactor dictionary module to utils and implement UserDiagStats trait
+- Add external request stats tracking and implement ExtRequestStats trait
+- Refactor external request stats handling and update WasiHttpView trait
+- Clean up code formatting and improve readability in various modules
+- Improve code readability in open function by adjusting formatting
+- Remove unnecessary instrumentation from backend_request method
+
+### 🐛 Bug Fixes
+
+- Update unit test handle_request calls to use SmolStr references
+- Add public host validation to prevent private host usage
+- Add public host validation and extract host function; downgrade package versions to 0.13.0-2
+- Update private IP address checks
+- Improve readability of error assertions in request tests
+- Reduce info logging level to debug for cache addition and request processing
+- Change logging level from debug to info for cache addition
+
+### ⚙️ Miscellaneous Tasks
+
+- Update wit hash to reflect latest changes
+- Release
 ## [0.13.2] - 2025-11-04
 
 ### 🐛 Bug Fixes
 
 - Update Redis dependency to version 0.32 and improve error handling in async item retrieval
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.13.1] - 2025-11-04
 
 ### 🐛 Bug Fixes
