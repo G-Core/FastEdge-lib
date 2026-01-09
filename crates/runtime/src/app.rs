@@ -29,6 +29,7 @@ pub struct App {
     pub secrets: Vec<SecretOption>,
     #[serde(default)]
     pub kv_stores: Vec<KvStoreOption>,
+    #[serde(default)]
     pub plan_id: u64,
 }
 
