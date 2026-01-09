@@ -1,3 +1,8 @@
+## [0.13.5] - 2026-01-09
+
+### 🐛 Bug Fixes
+
+- Set default plan_id field in app configuration struct
 ## [0.13.4] - 2026-01-06
 
 ### 🚀 Features
@@ -26,6 +31,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update wit hash to reflect latest changes
+- Release
 - Release
 ## [0.13.2] - 2025-11-04
 
