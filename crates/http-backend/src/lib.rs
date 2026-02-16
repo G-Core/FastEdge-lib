@@ -1,5 +1,6 @@
 pub mod stats;
 
+use smol_str::SmolStr;
 use std::fmt::Debug;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -53,17 +54,19 @@ pub struct FastEdgeConnector {
 
 #[derive(Clone)]
 pub struct Backend<C> {
-    client: Client<C, Full<Bytes>>,
+    pub client: Client<C, Full<Bytes>>,
     uri: Uri,
     propagate_headers: HeaderMap,
     propagate_header_names: HeaderNameList,
     max_sub_requests: usize,
     pub strategy: BackendStrategy,
     ext_http_stats: Option<Arc<dyn ExtRequestStats>>,
+    hostname: Option<SmolStr>,
 }
 
 pub struct Builder {
     uri: Uri,
+    hostname: Option<SmolStr>,
     propagate_header_names: HeaderNameList,
     max_sub_requests: usize,
     strategy: BackendStrategy,
@@ -74,6 +77,12 @@ impl Builder {
         self.uri = uri;
         self
     }
+
+    pub fn hostname(&mut self, hostname: SmolStr) -> &mut Self {
+        self.hostname = Some(hostname);
+        self
+    }
+
     pub fn propagate_headers_names(&mut self, propagate: HeaderNameList) -> &mut Self {
         self.propagate_header_names = propagate;
         self
@@ -100,6 +109,7 @@ impl Builder {
             max_sub_requests: self.max_sub_requests,
             strategy: self.strategy,
             ext_http_stats: None,
+            hostname: self.hostname.clone(),
         }
     }
 }
@@ -108,6 +118,7 @@ impl<C> Backend<C> {
     pub fn builder(strategy: BackendStrategy) -> Builder {
         Builder {
             uri: Uri::default(),
+            hostname: None,
             propagate_header_names: vec![],
             max_sub_requests: usize::MAX,
             strategy,
@@ -116,6 +127,10 @@ impl<C> Backend<C> {
 
     pub fn uri(&self) -> Uri {
         self.uri.to_owned()
+    }
+
+    pub fn hostname(&self) -> Option<SmolStr> {
+        self.hostname.clone()
     }
 
     /// Set external request stats
