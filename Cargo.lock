@@ -307,7 +307,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -336,7 +336,7 @@ dependencies = [
  "maybe-owned",
  "rustix 1.1.2",
  "rustix-linux-procfs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "winx",
 ]
 
@@ -482,7 +482,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -535,31 +535,23 @@ dependencies = [
 
 [[package]]
 name = "cranelift-assembler-x64"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "cranelift-assembler-x64-meta",
 ]
 
 [[package]]
 name = "cranelift-assembler-x64-meta"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "cranelift-srcgen",
 ]
 
 [[package]]
 name = "cranelift-bforest"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
- "cranelift-entity 0.123.2",
-]
-
-[[package]]
-name = "cranelift-bitset"
-version = "0.123.2"
-dependencies = [
- "serde",
- "serde_derive",
+ "cranelift-entity 0.123.4",
 ]
 
 [[package]]
@@ -572,17 +564,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "cranelift-bitset"
+version = "0.123.4"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "cranelift-codegen"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "bumpalo",
  "cranelift-assembler-x64",
  "cranelift-bforest",
- "cranelift-bitset 0.123.2",
+ "cranelift-bitset 0.123.4",
  "cranelift-codegen-meta",
  "cranelift-codegen-shared",
  "cranelift-control",
- "cranelift-entity 0.123.2",
+ "cranelift-entity 0.123.4",
  "cranelift-isle",
  "gimli",
  "hashbrown 0.15.5",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "cranelift-codegen-meta"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "cranelift-assembler-x64-meta",
  "cranelift-codegen-shared",
@@ -609,11 +609,11 @@ dependencies = [
 
 [[package]]
 name = "cranelift-codegen-shared"
-version = "0.123.2"
+version = "0.123.4"
 
 [[package]]
 name = "cranelift-control"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "arbitrary",
 ]
@@ -621,6 +621,7 @@ dependencies = [
 [[package]]
 name = "cranelift-entity"
 version = "0.123.2"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
 dependencies = [
  "cranelift-bitset 0.123.2",
  "serde",
@@ -629,17 +630,16 @@ dependencies = [
 
 [[package]]
 name = "cranelift-entity"
-version = "0.123.2"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
+version = "0.123.4"
 dependencies = [
- "cranelift-bitset 0.123.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "cranelift-bitset 0.123.4",
  "serde",
  "serde_derive",
 ]
 
 [[package]]
 name = "cranelift-frontend"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "cranelift-codegen",
  "log",
@@ -649,11 +649,11 @@ dependencies = [
 
 [[package]]
 name = "cranelift-isle"
-version = "0.123.2"
+version = "0.123.4"
 
 [[package]]
 name = "cranelift-native"
-version = "0.123.2"
+version = "0.123.4"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "cranelift-srcgen"
-version = "0.123.2"
+version = "0.123.4"
 
 [[package]]
 name = "crc32fast"
@@ -876,7 +876,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -937,7 +937,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix 1.1.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -990,7 +990,7 @@ checksum = "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
 dependencies = [
  "io-lifetimes",
  "rustix 1.1.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1476,6 +1476,7 @@ dependencies = [
  "mock-http-connector",
  "pin-project",
  "reactor",
+ "smol_str",
  "tokio",
  "tower-service",
  "tracing",
@@ -1766,7 +1767,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
 dependencies = [
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1789,7 +1790,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2518,9 +2519,9 @@ dependencies = [
 
 [[package]]
 name = "pulley-interpreter"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
- "cranelift-bitset 0.123.2",
+ "cranelift-bitset 0.123.4",
  "log",
  "pulley-macros",
  "wasmtime-internal-math",
@@ -2528,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "pulley-macros"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2826,10 +2827,10 @@ dependencies = [
  "utils",
  "wasi-common",
  "wasmtime",
- "wasmtime-environ 36.0.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wasmtime-environ 36.0.2",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
- "wasmtime-wasi-io 36.0.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wasmtime-wasi-io 36.0.2",
  "wasmtime-wasi-nn",
  "wit-component",
 ]
@@ -2865,7 +2866,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2878,7 +2879,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3263,7 +3264,7 @@ dependencies = [
  "fd-lock",
  "io-lifetimes",
  "rustix 0.38.44",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "winx",
 ]
 
@@ -3289,7 +3290,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3806,7 +3807,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "wasmtime",
- "wiggle 36.0.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wiggle 36.0.2",
  "windows-sys 0.60.2",
 ]
 
@@ -3955,7 +3956,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "addr2line",
  "anyhow",
@@ -3988,7 +3989,7 @@ dependencies = [
  "target-lexicon",
  "wasm-encoder 0.236.1",
  "wasmparser 0.236.1",
- "wasmtime-environ 36.0.2",
+ "wasmtime-environ 36.0.4",
  "wasmtime-internal-asm-macros",
  "wasmtime-internal-cache",
  "wasmtime-internal-component-macro",
@@ -4009,11 +4010,31 @@ dependencies = [
 [[package]]
 name = "wasmtime-environ"
 version = "36.0.2"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
+dependencies = [
+ "anyhow",
+ "cranelift-bitset 0.123.2",
+ "cranelift-entity 0.123.2",
+ "gimli",
+ "indexmap",
+ "log",
+ "object",
+ "postcard",
+ "serde",
+ "serde_derive",
+ "smallvec",
+ "target-lexicon",
+ "wasmparser 0.236.1",
+]
+
+[[package]]
+name = "wasmtime-environ"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cpp_demangle",
- "cranelift-bitset 0.123.2",
- "cranelift-entity 0.123.2",
+ "cranelift-bitset 0.123.4",
+ "cranelift-entity 0.123.4",
  "gimli",
  "indexmap",
  "log",
@@ -4032,35 +4053,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasmtime-environ"
-version = "36.0.2"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
-dependencies = [
- "anyhow",
- "cranelift-bitset 0.123.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
- "cranelift-entity 0.123.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
- "gimli",
- "indexmap",
- "log",
- "object",
- "postcard",
- "serde",
- "serde_derive",
- "smallvec",
- "target-lexicon",
- "wasmparser 0.236.1",
-]
-
-[[package]]
 name = "wasmtime-internal-asm-macros"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "cfg-if",
 ]
 
 [[package]]
 name = "wasmtime-internal-cache"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "base64",
@@ -4078,7 +4079,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-component-macro"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -4091,17 +4092,17 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-component-util"
-version = "36.0.2"
+version = "36.0.4"
 
 [[package]]
 name = "wasmtime-internal-cranelift"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cfg-if",
  "cranelift-codegen",
  "cranelift-control",
- "cranelift-entity 0.123.2",
+ "cranelift-entity 0.123.4",
  "cranelift-frontend",
  "cranelift-native",
  "gimli",
@@ -4113,14 +4114,14 @@ dependencies = [
  "target-lexicon",
  "thiserror 2.0.17",
  "wasmparser 0.236.1",
- "wasmtime-environ 36.0.2",
+ "wasmtime-environ 36.0.4",
  "wasmtime-internal-math",
  "wasmtime-internal-versioned-export-macros",
 ]
 
 [[package]]
 name = "wasmtime-internal-fiber"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cc",
@@ -4134,7 +4135,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-jit-debug"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "cc",
  "object",
@@ -4144,7 +4145,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-jit-icache-coherence"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -4154,18 +4155,18 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-math"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "wasmtime-internal-slab"
-version = "36.0.2"
+version = "36.0.4"
 
 [[package]]
 name = "wasmtime-internal-unwinder"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cfg-if",
@@ -4176,7 +4177,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-versioned-export-macros"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4185,7 +4186,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-winch"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -4193,14 +4194,14 @@ dependencies = [
  "object",
  "target-lexicon",
  "wasmparser 0.236.1",
- "wasmtime-environ 36.0.2",
+ "wasmtime-environ 36.0.4",
  "wasmtime-internal-cranelift",
  "winch-codegen",
 ]
 
 [[package]]
 name = "wasmtime-internal-wit-bindgen"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "bitflags 2.10.0",
@@ -4211,7 +4212,7 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-wasi"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4233,8 +4234,8 @@ dependencies = [
  "tracing",
  "url",
  "wasmtime",
- "wasmtime-wasi-io 36.0.2",
- "wiggle 36.0.2",
+ "wasmtime-wasi-io 36.0.4",
+ "wiggle 36.0.4",
  "windows-sys 0.60.2",
 ]
 
@@ -4257,19 +4258,8 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wasmtime-wasi-io 36.0.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wasmtime-wasi-io 36.0.2",
  "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "wasmtime-wasi-io"
-version = "36.0.2"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "futures",
- "wasmtime",
 ]
 
 [[package]]
@@ -4285,8 +4275,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmtime-wasi-io"
+version = "36.0.4"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "futures",
+ "wasmtime",
+]
+
+[[package]]
 name = "wasmtime-wasi-nn"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "candle-core",
@@ -4297,7 +4298,7 @@ dependencies = [
  "tracing",
  "walkdir",
  "wasmtime",
- "wiggle 36.0.2",
+ "wiggle 36.0.4",
  "windows",
 ]
 
@@ -4353,6 +4354,7 @@ dependencies = [
 [[package]]
 name = "wiggle"
 version = "36.0.2"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4365,8 +4367,7 @@ dependencies = [
 
 [[package]]
 name = "wiggle"
-version = "36.0.2"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4374,12 +4375,13 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "wasmtime",
- "wiggle-macro 36.0.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wiggle-macro 36.0.4",
 ]
 
 [[package]]
 name = "wiggle-generate"
 version = "36.0.2"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
 dependencies = [
  "anyhow",
  "heck",
@@ -4391,8 +4393,7 @@ dependencies = [
 
 [[package]]
 name = "wiggle-generate"
-version = "36.0.2"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "heck",
@@ -4405,6 +4406,7 @@ dependencies = [
 [[package]]
 name = "wiggle-macro"
 version = "36.0.2"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4414,13 +4416,12 @@ dependencies = [
 
 [[package]]
 name = "wiggle-macro"
-version = "36.0.2"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#649569feed89cb1f1d5bf4ce7bbbad09b6c0d3c0"
+version = "36.0.4"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
- "wiggle-generate 36.0.2 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wiggle-generate 36.0.4",
 ]
 
 [[package]]
@@ -4445,7 +4446,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4456,7 +4457,7 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "winch-codegen"
-version = "36.0.2"
+version = "36.0.4"
 dependencies = [
  "anyhow",
  "cranelift-assembler-x64",
@@ -4467,7 +4468,7 @@ dependencies = [
  "target-lexicon",
  "thiserror 2.0.17",
  "wasmparser 0.236.1",
- "wasmtime-environ 36.0.2",
+ "wasmtime-environ 36.0.4",
  "wasmtime-internal-cranelift",
  "wasmtime-internal-math",
 ]
@@ -4579,15 +4580,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
@@ -4755,7 +4747,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f3fd376f71958b862e7afb20cfe5a22830e1963462f3a17f49d82a6c1d1f42d"
 dependencies = [
  "bitflags 2.10.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

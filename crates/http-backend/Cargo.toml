@@ -17,6 +17,7 @@ hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", 
 http-body-util = "0.1"
 pin-project = "1.1"
 tower-service = "0.3"
+smol_str = {workspace = true}
 
 [dev-dependencies]
 claims = "0.8"
