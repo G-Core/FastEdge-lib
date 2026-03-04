@@ -6,8 +6,9 @@ publish.workspace = true
 authors.workspace = true
 
 [features]
-default = ["kafka_log"]
+default = ["kafka_log", "victoria_log"]
 kafka_log = []
+victoria_log = []
 metrics = ["prometheus", "lazy_static"]
 
 [dependencies]
