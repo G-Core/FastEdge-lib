@@ -79,6 +79,8 @@ pub enum Log {
     None,
     #[cfg(feature = "kafka_log")]
     Kafka,
+    #[cfg(feature = "victoria_log")]
+    Victoria,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +192,61 @@ mod tests {
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));
+    }
+
+    #[test]
+    fn test_log_deserialize_default() {
+        let log: Log = assert_ok!(serde_json::from_str("\"none\""));
+        assert_eq!(log, Log::None);
+    }
+
+    #[test]
+    fn test_log_deserialize_missing_defaults_to_none() {
+        #[derive(Deserialize)]
+        struct Wrapper {
+            #[serde(default)]
+            log: Log,
+        }
+        let w: Wrapper = assert_ok!(serde_json::from_str("{}"));
+        assert_eq!(w.log, Log::None);
+    }
+
+    #[cfg(feature = "kafka_log")]
+    #[test]
+    fn test_log_deserialize_kafka() {
+        let log: Log = assert_ok!(serde_json::from_str("\"kafka\""));
+        assert_eq!(log, Log::Kafka);
+    }
+
+    #[cfg(feature = "victoria_log")]
+    #[test]
+    fn test_log_deserialize_victoria_logs() {
+        let log: Log = assert_ok!(serde_json::from_str("\"victoria\""));
+        assert_eq!(log, Log::Victoria);
+    }
+
+    #[cfg(feature = "victoria_log")]
+    #[test]
+    fn deserialize_app_with_victoria_log() {
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+            "plan_id": 0,
+            "status": 1,
+            "log": "victoria"
+        });
+        let json = assert_ok!(serde_json::to_string(&json));
+        let app: App = assert_ok!(serde_json::from_str(&json));
+        assert_eq!(app.log, Log::Victoria);
+    }
+
+    #[test]
+    fn test_log_deserialize_invalid() {
+        assert_err!(serde_json::from_str::<Log>("\"unknown\""));
     }
 
     #[test]
