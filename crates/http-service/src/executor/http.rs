@@ -187,7 +187,7 @@ mod tests {
     use http_body_util::Empty;
     use key_value_store::ReadStats;
     use runtime::app::{KvStoreOption, SecretOption, Status};
-    use runtime::logger::{Logger, NullAppender};
+    use runtime::logger::Logger;
     use runtime::service::ServiceBuilder;
     use runtime::util::stats::CdnPhase;
     use runtime::{
@@ -249,7 +249,7 @@ mod tests {
         type BackendConnector = FastEdgeConnector;
 
         fn make_logger(&self, _app_name: SmolStr, _wrk: &App) -> Logger {
-            Logger::new(NullAppender)
+            Logger::new()
         }
 
         fn backend(&self) -> Backend<FastEdgeConnector> {
