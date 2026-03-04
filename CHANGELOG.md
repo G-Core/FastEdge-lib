@@ -1,8 +1,28 @@
+## [0.14.0] - 2026-03-04
+
+### 🚀 Features
+
+- Add hostname support to Backend and Builder structs
+- Implement multi-writer support in Logger for multiple appenders
+
+### 🐛 Bug Fixes
+
+- Change duration buckets to fastedge request duration metrics
+- Remove NullAppender from Logger initialization in http.rs
+- Remove NullAppender from Logger initialization in http.rs
+
+### ⚙️ Miscellaneous Tasks
+
+- Update dependencies in Cargo.lock to latest versions
 ## [0.13.5] - 2026-01-09
 
 ### 🐛 Bug Fixes
 
 - Set default plan_id field in app configuration struct
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.13.4] - 2026-01-06
 
 ### 🚀 Features
