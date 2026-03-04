@@ -17,11 +17,117 @@ use wasmtime_wasi_io::streams::StreamResult;
 #[derive(Clone)]
 pub struct Logger {
     properties: HashMap<String, String>,
-    appender: Arc<dyn AppenderBuilder + Send + Sync>,
+    appenders: Vec<Arc<dyn AppenderBuilder + Send + Sync>>,
 }
 
 pub trait AppenderBuilder {
     fn build(&self, properties: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync>;
+}
+
+/// Fans out writes sequentially to multiple [`AsyncWrite`] sinks.
+struct MultiWriter {
+    writers: Vec<Box<dyn AsyncWrite + Send + Sync>>,
+    write_current: usize,
+    write_n: usize,
+    flush_current: usize,
+    shutdown_current: usize,
+}
+
+impl MultiWriter {
+    fn new(writers: Vec<Box<dyn AsyncWrite + Send + Sync>>) -> Self {
+        Self {
+            writers,
+            write_current: 0,
+            write_n: 0,
+            flush_current: 0,
+            shutdown_current: 0,
+        }
+    }
+}
+
+impl AsyncWrite for MultiWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        let this = self.get_mut();
+
+        if this.writers.is_empty() {
+            return Poll::Ready(Ok(buf.len()));
+        }
+
+        // First writer determines how many bytes are accepted.
+        if this.write_current == 0 {
+            // SAFETY: writers are heap-allocated (Box) and won't move.
+            match unsafe { Pin::new_unchecked(&mut *this.writers[0]) }.poll_write(cx, buf) {
+                Poll::Ready(Ok(n)) => {
+                    this.write_n = n;
+                    this.write_current = 1;
+                }
+                Poll::Ready(Err(e)) => {
+                    tracing::warn!(cause=?e, "MultiWriter: appender 0 write error");
+                    this.write_n = buf.len();
+                    this.write_current = 1;
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        // Remaining writers receive exactly write_n bytes.
+        while this.write_current < this.writers.len() {
+            let idx = this.write_current;
+            let n = this.write_n;
+            // SAFETY: writers are heap-allocated (Box) and won't move.
+            match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_write(cx, &buf[..n]) {
+                Poll::Ready(Ok(_)) => this.write_current += 1,
+                Poll::Ready(Err(e)) => {
+                    tracing::warn!(cause=?e, "MultiWriter: appender {idx} write error");
+                    this.write_current += 1;
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        let n = this.write_n;
+        this.write_current = 0;
+        Poll::Ready(Ok(n))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        let this = self.get_mut();
+
+        while this.flush_current < this.writers.len() {
+            let idx = this.flush_current;
+            // SAFETY: writers are heap-allocated (Box) and won't move.
+            match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_flush(cx) {
+                Poll::Ready(_) => this.flush_current += 1,
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        this.flush_current = 0;
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        let this = self.get_mut();
+
+        while this.shutdown_current < this.writers.len() {
+            let idx = this.shutdown_current;
+            // SAFETY: writers are heap-allocated (Box) and won't move.
+            match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_shutdown(cx) {
+                Poll::Ready(_) => this.shutdown_current += 1,
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        this.shutdown_current = 0;
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl IsTerminal for Logger {
@@ -30,27 +136,54 @@ impl IsTerminal for Logger {
     }
 }
 
-#[async_trait]
 impl StdoutStream for Logger {
     fn async_stream(&self) -> Box<dyn AsyncWrite + Send + Sync> {
-        self.appender.build(self.properties.clone())
+        let writers = self
+            .appenders
+            .iter()
+            .map(|a| a.build(self.properties.clone()))
+            .collect();
+        Box::new(MultiWriter::new(writers))
     }
 }
 
 impl Logger {
-    pub fn new<S: AppenderBuilder + Sync + Send + 'static>(sink: S) -> Self {
+    pub fn new() -> Self {
         Self {
             properties: Default::default(),
-            appender: Arc::new(sink),
+            appenders: vec![],
         }
     }
 
+    /// Builder-style method to attach an additional appender.
+    pub fn with_appender<S: AppenderBuilder + Sync + Send + 'static>(mut self, sink: S) -> Self {
+        self.appenders.push(Arc::new(sink));
+        self
+    }
+
+    /// Attach an additional appender to an existing logger.
+    pub fn add_appender<S: AppenderBuilder + Sync + Send + 'static>(&mut self, sink: S) {
+        self.appenders.push(Arc::new(sink));
+    }
+
     pub async fn write_msg(&self, msg: String) {
-        if let Err(error) = Box::into_pin(self.async_stream())
-            .write_all(msg.as_bytes())
-            .await
-        {
-            tracing::warn!(cause=?error, "write_msg");
+        let bytes = msg.as_bytes();
+        for appender in &self.appenders {
+            if let Err(error) = Box::into_pin(appender.build(self.properties.clone()))
+                .write_all(bytes)
+                .await
+            {
+                tracing::warn!(cause=?error, "write_msg");
+            }
+        }
+    }
+}
+
+impl Default for Logger {
+    fn default() -> Self {
+        Self {
+            properties: Default::default(),
+            appenders: vec![Arc::new(NullAppender)],
         }
     }
 }
@@ -61,7 +194,7 @@ impl Extend<(String, String)> for Logger {
     }
 }
 
-pub struct NullAppender;
+struct NullAppender;
 
 impl AppenderBuilder for NullAppender {
     fn build(&self, _fields: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync> {
