@@ -307,7 +307,7 @@ where
             Err(error) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
-                tracing::warn!(cause=?error,
+                tracing::warn!(cause=?error, app=%app_name,
                     "failure on getting context"
                 );
                 return internal_fastedge_error("context error");
