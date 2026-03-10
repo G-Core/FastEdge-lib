@@ -1,3 +1,20 @@
+## [0.15.0] - 2026-03-10
+
+### 🚀 Features
+
+- Add support for victoria_log feature with deserialization tests
+
+### 🐛 Bug Fixes
+
+- Update CLI get_store method to search by param instead of name and add tests
+- Update Appender trait to include flush_event_datetime method
+- Add flush_time field to Logger and update poll_flush method
+- Refactor Logger initialization and improve writer pinning
+- Remove NullAppender implementation and clear appenders vector
+
+### 📚 Documentation
+
+- Update usage guide for fastedge-run tool with detailed command options and examples
 ## [0.14.0] - 2026-03-04
 
 ### 🚀 Features
@@ -14,6 +31,7 @@
 ### ⚙️ Miscellaneous Tasks
 
 - Update dependencies in Cargo.lock to latest versions
+- Release
 ## [0.13.5] - 2026-01-09
 
 ### 🐛 Bug Fixes
