@@ -35,6 +35,7 @@ struct MultiWriter {
     write_current: usize,
     write_n: usize,
     flush_current: usize,
+    flush_time: Option<DateTime<Utc>>,
     shutdown_current: usize,
 }
 
@@ -45,6 +46,7 @@ impl MultiWriter {
             write_current: 0,
             write_n: 0,
             flush_current: 0,
+            flush_time: None,
             shutdown_current: 0,
         }
     }
@@ -101,11 +103,19 @@ impl AsyncWrite for MultiWriter {
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         let this = self.get_mut();
-        let time = Utc::now();
+
+        if this.flush_time.is_none() {
+            let time = Utc::now();
+            this.flush_time = Some(time);
+        }
         while this.flush_current < this.writers.len() {
             let idx = this.flush_current;
             // SAFETY: writers are heap-allocated (Box) and won't move.
-            unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.flush_event_datetime(time);
+
+            if let Some(time) = this.flush_time.clone() {
+                unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.flush_event_datetime(time);
+            }
+
             match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_flush(cx) {
                 Poll::Ready(_) => this.flush_current += 1,
                 Poll::Pending => return Poll::Pending,
@@ -113,6 +123,7 @@ impl AsyncWrite for MultiWriter {
         }
 
         this.flush_current = 0;
+        this.flush_time = None;
         Poll::Ready(Ok(()))
     }
 
