@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use std::any::Any;
 use std::collections::HashMap;
 use std::io::IoSlice;
@@ -21,12 +22,16 @@ pub struct Logger {
 }
 
 pub trait AppenderBuilder {
-    fn build(&self, properties: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync>;
+    fn build(&self, properties: HashMap<String, String>) -> Box<dyn Appender>;
+}
+
+pub trait Appender: AsyncWrite + Send + Sync {
+    fn flush_event_datetime(self: Pin<&mut Self>, time: DateTime<Utc>);
 }
 
 /// Fans out writes sequentially to multiple [`AsyncWrite`] sinks.
 struct MultiWriter {
-    writers: Vec<Box<dyn AsyncWrite + Send + Sync>>,
+    writers: Vec<Box<dyn Appender>>,
     write_current: usize,
     write_n: usize,
     flush_current: usize,
@@ -34,7 +39,7 @@ struct MultiWriter {
 }
 
 impl MultiWriter {
-    fn new(writers: Vec<Box<dyn AsyncWrite + Send + Sync>>) -> Self {
+    fn new(writers: Vec<Box<dyn Appender>>) -> Self {
         Self {
             writers,
             write_current: 0,
@@ -96,10 +101,11 @@ impl AsyncWrite for MultiWriter {
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         let this = self.get_mut();
-
+        let time = Utc::now();
         while this.flush_current < this.writers.len() {
             let idx = this.flush_current;
             // SAFETY: writers are heap-allocated (Box) and won't move.
+            unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.flush_event_datetime(time);
             match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_flush(cx) {
                 Poll::Ready(_) => this.flush_current += 1,
                 Poll::Pending => return Poll::Pending,
@@ -197,7 +203,7 @@ impl Extend<(String, String)> for Logger {
 struct NullAppender;
 
 impl AppenderBuilder for NullAppender {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync> {
+    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn Appender> {
         Box::new(NullAppender)
     }
 }
@@ -205,6 +211,10 @@ impl AppenderBuilder for NullAppender {
 #[async_trait]
 impl Pollable for NullAppender {
     async fn ready(&mut self) {}
+}
+
+impl Appender for NullAppender {
+    fn flush_event_datetime(self: Pin<&mut Self>, _time: DateTime<Utc>) {}
 }
 
 impl AsyncWrite for NullAppender {
@@ -295,7 +305,7 @@ impl Default for Console {
 }
 
 impl AppenderBuilder for Console {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn AsyncWrite + Send + Sync> {
+    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn Appender> {
         Box::new(Console::default())
     }
 }
@@ -303,6 +313,10 @@ impl AppenderBuilder for Console {
 #[async_trait]
 impl Pollable for Console {
     async fn ready(&mut self) {}
+}
+
+impl Appender for Console {
+    fn flush_event_datetime(self: Pin<&mut Self>, _time: DateTime<Utc>) {}
 }
 
 impl AsyncWrite for Console {
