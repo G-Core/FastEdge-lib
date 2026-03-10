@@ -51,7 +51,7 @@ impl PreCompiledLoader<u64> for Context {
 impl ContextT for Context {
     type BackendConnector = HttpsConnector<HttpConnector>;
     fn make_logger(&self, _app_name: SmolStr, _wrk: &App) -> Logger {
-        let logger = Logger::new();
+        let logger = Logger::default();
         logger.with_appender(Console::default())
     }
 

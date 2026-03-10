@@ -249,7 +249,7 @@ mod tests {
         type BackendConnector = FastEdgeConnector;
 
         fn make_logger(&self, _app_name: SmolStr, _wrk: &App) -> Logger {
-            Logger::new()
+            Logger::default()
         }
 
         fn backend(&self) -> Backend<FastEdgeConnector> {
