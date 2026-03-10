@@ -174,11 +174,13 @@ impl Logger {
 
     pub async fn write_msg(&self, msg: String) {
         let bytes = msg.as_bytes();
+        let time = Utc::now();
         for appender in &self.appenders {
             let mut pin = Box::into_pin(appender.build(self.properties.clone()));
             if let Err(error) = pin.write_all(bytes).await {
                 tracing::warn!(cause=?error, "write_msg");
             }
+            pin.as_mut().flush_event_datetime(time);
             if let Err(error) = pin.flush().await {
                 tracing::warn!(cause=?error, "write_msg flush");
             }
@@ -190,7 +192,7 @@ impl Default for Logger {
     fn default() -> Self {
         Self {
             properties: Default::default(),
-            appenders: vec![Arc::new(NullAppender)],
+            appenders: vec![],
         }
     }
 }
@@ -198,96 +200,6 @@ impl Default for Logger {
 impl Extend<(String, String)> for Logger {
     fn extend<T: IntoIterator<Item = (String, String)>>(&mut self, iter: T) {
         self.properties.extend(iter)
-    }
-}
-
-struct NullAppender;
-
-impl AppenderBuilder for NullAppender {
-    fn build(&self, _fields: HashMap<String, String>) -> Box<dyn Appender> {
-        Box::new(NullAppender)
-    }
-}
-
-#[async_trait]
-impl Pollable for NullAppender {
-    async fn ready(&mut self) {}
-}
-
-impl Appender for NullAppender {
-    fn flush_event_datetime(self: Pin<&mut Self>, _time: DateTime<Utc>) {}
-}
-
-impl AsyncWrite for NullAppender {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        if cfg!(debug_assertions) {
-            Pin::new(&mut tokio::io::stdout()).poll_write(cx, buf)
-        } else {
-            // null write
-            Poll::Ready(Ok(buf.len()))
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl OutputStream for NullAppender {
-    fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
-        if cfg!(debug_assertions) {
-            print!("{}", std::str::from_utf8(&bytes).unwrap());
-        } else {
-            // null write
-        };
-        Ok(())
-    }
-
-    fn flush(&mut self) -> StreamResult<()> {
-        Ok(())
-    }
-
-    fn check_write(&mut self) -> StreamResult<usize> {
-        Ok(usize::MAX)
-    }
-}
-
-#[async_trait]
-impl WasiFile for NullAppender {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    async fn get_filetype(&self) -> Result<FileType, Error> {
-        Ok(FileType::Pipe)
-    }
-
-    async fn get_fdflags(&self) -> Result<FdFlags, Error> {
-        Ok(FdFlags::APPEND)
-    }
-
-    async fn write_vectored<'a>(&self, bufs: &[IoSlice<'a>]) -> Result<u64, Error> {
-        let n = bufs.iter().fold(0, |n, buf| {
-            if cfg!(debug_assertions) {
-                print!("{}", std::str::from_utf8(buf).unwrap());
-            } else {
-                // null write
-            };
-            n + buf.len()
-        });
-
-        Ok(n as u64)
     }
 }
 
