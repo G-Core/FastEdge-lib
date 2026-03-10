@@ -66,8 +66,7 @@ impl AsyncWrite for MultiWriter {
 
         // First writer determines how many bytes are accepted.
         if this.write_current == 0 {
-            // SAFETY: writers are heap-allocated (Box) and won't move.
-            match unsafe { Pin::new_unchecked(&mut *this.writers[0]) }.poll_write(cx, buf) {
+            match pin_writer(&mut *this.writers[0]).poll_write(cx, buf) {
                 Poll::Ready(Ok(n)) => {
                     this.write_n = n;
                     this.write_current = 1;
@@ -85,8 +84,7 @@ impl AsyncWrite for MultiWriter {
         while this.write_current < this.writers.len() {
             let idx = this.write_current;
             let n = this.write_n;
-            // SAFETY: writers are heap-allocated (Box) and won't move.
-            match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_write(cx, &buf[..n]) {
+            match pin_writer(&mut *this.writers[idx]).poll_write(cx, &buf[..n]) {
                 Poll::Ready(Ok(_)) => this.write_current += 1,
                 Poll::Ready(Err(e)) => {
                     tracing::warn!(cause=?e, "MultiWriter: appender {idx} write error");
@@ -104,19 +102,13 @@ impl AsyncWrite for MultiWriter {
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
         let this = self.get_mut();
 
-        if this.flush_time.is_none() {
-            let time = Utc::now();
-            this.flush_time = Some(time);
-        }
+        let time = *this.flush_time.get_or_insert_with(Utc::now);
+
         while this.flush_current < this.writers.len() {
             let idx = this.flush_current;
-            // SAFETY: writers are heap-allocated (Box) and won't move.
+            pin_writer(&mut *this.writers[idx]).flush_event_datetime(time);
 
-            if let Some(time) = this.flush_time.clone() {
-                unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.flush_event_datetime(time);
-            }
-
-            match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_flush(cx) {
+            match pin_writer(&mut *this.writers[idx]).poll_flush(cx) {
                 Poll::Ready(_) => this.flush_current += 1,
                 Poll::Pending => return Poll::Pending,
             }
@@ -135,8 +127,7 @@ impl AsyncWrite for MultiWriter {
 
         while this.shutdown_current < this.writers.len() {
             let idx = this.shutdown_current;
-            // SAFETY: writers are heap-allocated (Box) and won't move.
-            match unsafe { Pin::new_unchecked(&mut *this.writers[idx]) }.poll_shutdown(cx) {
+            match pin_writer(&mut *this.writers[idx]).poll_shutdown(cx) {
                 Poll::Ready(_) => this.shutdown_current += 1,
                 Poll::Pending => return Poll::Pending,
             }
@@ -145,6 +136,11 @@ impl AsyncWrite for MultiWriter {
         this.shutdown_current = 0;
         Poll::Ready(Ok(()))
     }
+}
+
+fn pin_writer(w: &mut dyn Appender) -> Pin<&mut dyn Appender> {
+    // SAFETY: Box contents are heap-allocated and will not move.
+    unsafe { Pin::new_unchecked(w) }
 }
 
 impl IsTerminal for Logger {
@@ -165,13 +161,6 @@ impl StdoutStream for Logger {
 }
 
 impl Logger {
-    pub fn new() -> Self {
-        Self {
-            properties: Default::default(),
-            appenders: vec![],
-        }
-    }
-
     /// Builder-style method to attach an additional appender.
     pub fn with_appender<S: AppenderBuilder + Sync + Send + 'static>(mut self, sink: S) -> Self {
         self.appenders.push(Arc::new(sink));
@@ -186,11 +175,12 @@ impl Logger {
     pub async fn write_msg(&self, msg: String) {
         let bytes = msg.as_bytes();
         for appender in &self.appenders {
-            if let Err(error) = Box::into_pin(appender.build(self.properties.clone()))
-                .write_all(bytes)
-                .await
-            {
+            let mut pin = Box::into_pin(appender.build(self.properties.clone()));
+            if let Err(error) = pin.write_all(bytes).await {
                 tracing::warn!(cause=?error, "write_msg");
+            }
+            if let Err(error) = pin.flush().await {
+                tracing::warn!(cause=?error, "write_msg flush");
             }
         }
     }
