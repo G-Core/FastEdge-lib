@@ -178,7 +178,8 @@ mod tests {
     use crate::executor::http::HttpExecutorImpl;
     use crate::{
         ContextHeaders, ExecutorFactory, HttpService, FASTEDGE_EXECUTION_TIMEOUT,
-        FASTEDGE_OUT_OF_MEMORY,
+        FASTEDGE_OUT_OF_MEMORY, INTERNAL_STATUS_OUT_OF_MEMORY, INTERNAL_STATUS_TIMEOUT_ELAPSED,
+        INTERNAL_STATUS_TIMEOUT_INTERRUPT, X_CDN_INTERNAL_STATUS,
     };
     use bytes::Bytes;
     use claims::*;
@@ -474,13 +475,23 @@ mod tests {
         let res = assert_ok!(http_service.handle_request("2".to_smolstr(), req).await);
         assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
         let headers = res.headers();
-        assert_eq!(3, headers.len());
+        assert_eq!(4, headers.len());
         assert_eq!(
             "*",
             assert_some!(headers.get("access-control-allow-origin"))
         );
         assert_eq!("no-store", assert_some!(headers.get("cache-control")));
         assert_eq!("03", assert_some!(headers.get("RES_HEADER_03")));
+        let internal_status = assert_some!(headers.get(X_CDN_INTERNAL_STATUS))
+            .to_str()
+            .unwrap()
+            .parse::<u16>()
+            .unwrap();
+        assert!(
+            internal_status == INTERNAL_STATUS_TIMEOUT_INTERRUPT
+                || internal_status == INTERNAL_STATUS_TIMEOUT_ELAPSED,
+            "expected timeout internal status code, got {internal_status}"
+        );
     }
 
     #[tokio::test]
@@ -525,13 +536,19 @@ mod tests {
         let res = assert_ok!(http_service.handle_request("3".to_smolstr(), req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
-        assert_eq!(3, headers.len());
+        assert_eq!(4, headers.len());
         assert_eq!(
             "*",
             assert_some!(headers.get("access-control-allow-origin"))
         );
         assert_eq!("no-store", assert_some!(headers.get("cache-control")));
         assert_eq!("03", assert_some!(headers.get("RES_HEADER_03")));
+        assert_eq!(
+            INTERNAL_STATUS_OUT_OF_MEMORY.to_string(),
+            assert_some!(headers.get(X_CDN_INTERNAL_STATUS))
+                .to_str()
+                .unwrap()
+        );
     }
 
     #[tokio::test]
