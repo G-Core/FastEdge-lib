@@ -182,6 +182,22 @@ fastedge-run http \
   --max-duration 5000  # 5-second execution timeout
 ```
 
+### Internal status codes
+
+On every 5xx error response the runtime adds an `X-CDN-Internal-Status` response header with a
+numeric code in the range **3000–3999** that identifies the exact failure reason:
+
+| Code | HTTP status | Meaning |
+|------|-------------|---------|
+| `3000` | 530 | Context setup error — failed to instantiate the Wasm executor |
+| `3001` | 530 | Generic execute error (unclassified internal failure) |
+| `3002` | 533 | App exited with a non-zero exit code |
+| `3003` | 533 | Wasm trap — unknown or unclassified trap |
+| `3010` | 532 | Execution timeout — Wasm interrupt trap (`Trap::Interrupt`) |
+| `3011` | 532 | Execution timeout — async deadline exceeded (`tokio::Elapsed`) |
+| `3012` | 532 | Execution timeout — deadline elapsed (string-matched error) |
+| `3020` | 531 | Out of memory — `Trap::UnreachableCodeReached` |
+
 ### Dotenv support
 
 Pass `--dotenv` (optionally with a directory path; defaults to the current directory) to load
