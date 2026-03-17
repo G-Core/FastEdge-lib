@@ -31,6 +31,7 @@ pub mod executor;
 pub mod state;
 
 pub(crate) static TRACEPARENT: &str = "traceparent";
+pub(crate) static X_CDN_INTERNAL_STATUS: &str = "x-cdn-internal-status";
 
 #[cfg(target_family = "unix")]
 type OwnedFd = std::os::fd::OwnedFd;
@@ -44,6 +45,16 @@ const FASTEDGE_INTERNAL_ERROR: u16 = 530;
 const FASTEDGE_OUT_OF_MEMORY: u16 = 531;
 const FASTEDGE_EXECUTION_TIMEOUT: u16 = 532;
 const FASTEDGE_EXECUTION_PANIC: u16 = 533;
+
+/// Internal status codes returned in `X-CDN-Internal-Status` response header (range 3000–3999).
+pub(crate) const INTERNAL_STATUS_CONTEXT_ERROR: u16 = 3000;
+pub(crate) const INTERNAL_STATUS_EXECUTE_ERROR: u16 = 3001;
+pub(crate) const INTERNAL_STATUS_APP_EXIT_ERROR: u16 = 3002;
+pub(crate) const INTERNAL_STATUS_WASM_TRAP_OTHER: u16 = 3003;
+pub(crate) const INTERNAL_STATUS_TIMEOUT_INTERRUPT: u16 = 3010;
+pub(crate) const INTERNAL_STATUS_TIMEOUT_ELAPSED: u16 = 3011;
+pub(crate) const INTERNAL_STATUS_TIMEOUT_DEADLINE: u16 = 3012;
+pub(crate) const INTERNAL_STATUS_OUT_OF_MEMORY: u16 = 3020;
 
 #[derive(Default)]
 pub struct HttpConfig {
@@ -310,7 +321,7 @@ where
                 tracing::warn!(cause=?error, app=%app_name,
                     "failure on getting context"
                 );
-                return internal_fastedge_error("context error");
+                return internal_fastedge_error("context error", INTERNAL_STATUS_CONTEXT_ERROR);
             }
         };
 
@@ -331,7 +342,7 @@ where
             }
             Err(error) => {
                 tracing::warn!(cause=?error, "execute");
-                let (status_code, fail_reason, msg) = map_err(error);
+                let (status_code, fail_reason, msg, internal_code) = map_err(error);
                 stats.status_code(status_code);
                 stats.fail_reason(fail_reason as u32);
                 tracing::debug!(?fail_reason, ?request_id, "stats");
@@ -344,7 +355,9 @@ where
                     None,
                 );
 
-                let builder = hyper::Response::builder().status(status_code);
+                let builder = hyper::Response::builder()
+                    .status(status_code)
+                    .header(X_CDN_INTERNAL_STATUS, internal_code);
                 let res_headers = app_res_headers(cfg);
                 let builder = res_headers
                     .iter()
@@ -357,15 +370,16 @@ where
     }
 }
 
-fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
+fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
     let root_cause = error.root_cause();
-    let (status_code, fail_reason, msg) =
+    let (status_code, fail_reason, msg, internal_code) =
         if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
             if exit.0 == 0 {
                 (
                     StatusCode::OK.as_u16(),
                     AppResult::SUCCESS,
                     Empty::new().map_err(|never| match never {}).boxed(),
+                    0,
                 )
             } else {
                 (
@@ -374,6 +388,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                     Full::new(Bytes::from("fastedge: App failed"))
                         .map_err(|never| match never {})
                         .boxed(),
+                    INTERNAL_STATUS_APP_EXIT_ERROR,
                 )
             }
         } else if let Some(trap) = root_cause.downcast_ref::<wasmtime::Trap>() {
@@ -384,6 +399,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                     Full::new(Bytes::from("fastedge: Execution timeout"))
                         .map_err(|never| match never {})
                         .boxed(),
+                    INTERNAL_STATUS_TIMEOUT_INTERRUPT,
                 ),
                 wasmtime::Trap::UnreachableCodeReached => (
                     FASTEDGE_OUT_OF_MEMORY,
@@ -391,6 +407,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                     Full::new(Bytes::from("fastedge: Out of memory"))
                         .map_err(|never| match never {})
                         .boxed(),
+                    INTERNAL_STATUS_OUT_OF_MEMORY,
                 ),
                 _ => (
                     FASTEDGE_EXECUTION_PANIC,
@@ -398,6 +415,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                     Full::new(Bytes::from("fastedge: App failed"))
                         .map_err(|never| match never {})
                         .boxed(),
+                    INTERNAL_STATUS_WASM_TRAP_OTHER,
                 ),
             }
         } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
@@ -407,6 +425,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                 Full::new(Bytes::from("fastedge: Execution timeout"))
                     .map_err(|never| match never {})
                     .boxed(),
+                INTERNAL_STATUS_TIMEOUT_ELAPSED,
             )
         } else if root_cause.to_string().ends_with("deadline has elapsed") {
             (
@@ -415,6 +434,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                 Full::new(Bytes::from("fastedge: Execution timeout"))
                     .map_err(|never| match never {})
                     .boxed(),
+                INTERNAL_STATUS_TIMEOUT_DEADLINE,
             )
         } else {
             (
@@ -423,9 +443,10 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody) {
                 Full::new(Bytes::from("fastedge: Execute error"))
                     .map_err(|never| match never {})
                     .boxed(),
+                INTERNAL_STATUS_EXECUTE_ERROR,
             )
         };
-    (status_code, fail_reason, msg)
+    (status_code, fail_reason, msg, internal_code)
 }
 
 fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> SmolStr {
@@ -436,10 +457,14 @@ fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> SmolStr {
         .unwrap_or(nanoid::nanoid!().to_smolstr())
 }
 
-/// Creates an HTTP 500 response.
-fn internal_fastedge_error(msg: &'static str) -> Result<hyper::Response<HyperOutgoingBody>> {
+/// Creates an HTTP 530 response with an `X-CDN-Internal-Status` header.
+fn internal_fastedge_error(
+    msg: &'static str,
+    internal_code: u16,
+) -> Result<hyper::Response<HyperOutgoingBody>> {
     Ok(hyper::Response::builder()
         .status(FASTEDGE_INTERNAL_ERROR)
+        .header(X_CDN_INTERNAL_STATUS, internal_code)
         .body(
             Full::new(Bytes::from(format!("fastedge: {}", msg)))
                 .map_err(|never| match never {})
