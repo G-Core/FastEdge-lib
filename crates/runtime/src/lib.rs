@@ -280,11 +280,21 @@ impl WasmConfigBuilder {
         inner.epoch_interruption(true); // this is custom Gcore setting
         inner.wasm_component_model(true);
 
-        // Performance: explicit opt level and skip PC→wasm address map table in compiled modules.
-        // The address map is only needed to show wasm PCs in trap messages; omitting it reduces
-        // compiled artifact size and per-instantiation overhead.
+        // Performance: explicit opt level and make PC→wasm address map generation configurable.
+        // The address map improves trap/backtrace diagnostics, but increases compiled artifact
+        // size and per-instantiation overhead. Keep the current production behavior by default
+        // in release builds, enable it by default in debug builds, and allow explicit override
+        // for investigations via WASM_GENERATE_ADDRESS_MAP=true/false.
         inner.cranelift_opt_level(OptLevel::Speed);
-        inner.generate_address_map(false);
+        let generate_address_map = std::env::var("WASM_GENERATE_ADDRESS_MAP")
+            .ok()
+            .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => Some(true),
+                "0" | "false" | "no" | "off" => Some(false),
+                _ => None,
+            })
+            .unwrap_or(cfg!(debug_assertions));
+        inner.generate_address_map(generate_address_map);
 
         const MB: usize = 1 << 20;
         let mut pooling_allocation_config = PoolingAllocationConfig::default();
