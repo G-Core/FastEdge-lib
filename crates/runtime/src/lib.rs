@@ -14,8 +14,8 @@ use http_backend::Backend;
 use limiter::ProxyLimiter;
 use wasmtime::component::Component;
 use wasmtime::{
-    Engine, InstanceAllocationStrategy, Module, PoolingAllocationConfig, ProfilingStrategy,
-    WasmBacktraceDetails,
+    Engine, InstanceAllocationStrategy, Module, OptLevel, PoolingAllocationConfig,
+    ProfilingStrategy, WasmBacktraceDetails,
 };
 use wit_component::ComponentEncoder;
 
@@ -280,6 +280,12 @@ impl WasmConfigBuilder {
         inner.epoch_interruption(true); // this is custom Gcore setting
         inner.wasm_component_model(true);
 
+        // Performance: explicit opt level and skip PC→wasm address map table in compiled modules.
+        // The address map is only needed to show wasm PCs in trap messages; omitting it reduces
+        // compiled artifact size and per-instantiation overhead.
+        inner.cranelift_opt_level(OptLevel::Speed);
+        inner.generate_address_map(false);
+
         const MB: usize = 1 << 20;
         let mut pooling_allocation_config = PoolingAllocationConfig::default();
 
@@ -293,9 +299,19 @@ impl WasmConfigBuilder {
         }
 
         pooling_allocation_config.max_core_instance_size(MB);
-        pooling_allocation_config.max_tables_per_module(1);
+        pooling_allocation_config.max_tables_per_module(10);
+        pooling_allocation_config.max_memories_per_module(10);
         pooling_allocation_config.table_elements(98765);
         pooling_allocation_config.max_unused_warm_slots(10);
+
+        // Performance: keep pages warm between instantiations (Linux only).
+        // Avoids madvise(MADV_DONTNEED) syscalls when a pooled slot is reused, replacing them
+        // with a cheaper memset up to the threshold — reducing per-request deallocation latency.
+        pooling_allocation_config.linear_memory_keep_resident(2 * MB);
+        pooling_allocation_config.table_keep_resident(512 * 1024);
+
+        // Performance: batch decommit operations to amortize syscall overhead.
+        pooling_allocation_config.decommit_batch_size(16);
 
         inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
             pooling_allocation_config,
