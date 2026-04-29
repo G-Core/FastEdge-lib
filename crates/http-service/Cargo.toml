@@ -26,6 +26,7 @@ runtime = { path = "../runtime" }
 http-backend = { path = "../http-backend" }
 utils = { path = "../utils" }
 secret = { path = "../secret" }
+cache = { path = "../cache" }
 nanoid = "0.5"
 async-trait = "0.1"
 hyper-util = { version = "0.1", features = ["server", "server-graceful"] }
