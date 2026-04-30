@@ -1,7 +1,6 @@
-use reactor::gcore::fastedge::{cache, cache_sync, cache_types};
+use reactor::gcore::fastedge::{cache_sync, cache_types};
 use std::sync::Arc;
 use tracing::instrument;
-use wasmtime::component::{Accessor, HasData};
 
 pub use cache_types::{Error, Payload};
 
@@ -39,80 +38,8 @@ impl CacheImpl {
     }
 }
 
-// Required by cache::HostWithStore (the concurrent async interface)
-impl HasData for CacheImpl {
-    type Data<'a> = &'a mut Self;
-}
-
-// Empty marker traits
-impl cache::Host for CacheImpl {}
+// Empty marker trait
 impl cache_types::Host for CacheImpl {}
-
-// Implement the concurrent async cache interface (gcore:fastedge/cache)
-//
-// This uses the Accessor pattern for true concurrent execution. The backend
-// Arc is cloned out of the store via `accessor.with(...)` so the await
-// happens without holding the store lock - allowing other concurrent
-// host calls to make progress.
-impl cache::HostWithStore for CacheImpl {
-    #[instrument(skip(accessor), level = "trace")]
-    async fn get<T: 'static>(
-        accessor: &Accessor<T, Self>,
-        key: String,
-    ) -> Result<Option<Payload>, Error> {
-        let backend = accessor.with(|mut view| view.get().backend.clone());
-        backend.get(&key).await
-    }
-
-    #[instrument(skip(accessor, value), level = "trace")]
-    async fn set<T: 'static>(
-        accessor: &Accessor<T, Self>,
-        key: String,
-        value: Payload,
-        ttl_ms: Option<u64>,
-    ) -> Result<(), Error> {
-        let backend = accessor.with(|mut view| view.get().backend.clone());
-        backend.set(&key, value, ttl_ms).await
-    }
-
-    #[instrument(skip(accessor), level = "trace")]
-    async fn delete<T: 'static>(
-        accessor: &Accessor<T, Self>,
-        key: String,
-    ) -> Result<(), Error> {
-        let backend = accessor.with(|mut view| view.get().backend.clone());
-        backend.delete(&key).await
-    }
-
-    #[instrument(skip(accessor), level = "trace")]
-    async fn exists<T: 'static>(
-        accessor: &Accessor<T, Self>,
-        key: String,
-    ) -> Result<bool, Error> {
-        let backend = accessor.with(|mut view| view.get().backend.clone());
-        backend.exists(&key).await
-    }
-
-    #[instrument(skip(accessor), level = "trace")]
-    async fn incr<T: 'static>(
-        accessor: &Accessor<T, Self>,
-        key: String,
-        delta: i64,
-    ) -> Result<i64, Error> {
-        let backend = accessor.with(|mut view| view.get().backend.clone());
-        backend.incr(&key, delta).await
-    }
-
-    #[instrument(skip(accessor), level = "trace")]
-    async fn expire<T: 'static>(
-        accessor: &Accessor<T, Self>,
-        key: String,
-        ttl_ms: u64,
-    ) -> Result<bool, Error> {
-        let backend = accessor.with(|mut view| view.get().backend.clone());
-        backend.expire(&key, ttl_ms).await
-    }
-}
 
 // Implement the sync-style cache interface (gcore:fastedge/cache-sync)
 // This is simpler and serializes calls through &mut self.
@@ -178,34 +105,19 @@ impl CacheBackend for NoCacheBackend {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
-    /// Compile-only test: verify both `cache` (concurrent async) and
-    /// `cache-sync` (sync) linker registrations accept `CacheImpl`.
-    ///
-    /// IMPORTANT: For `cache::add_to_linker`, the second type parameter must
-    /// be `CacheImpl` itself (not `HasSelf<CacheImpl>`) because
-    /// `cache::HostWithStore` has actual methods that are implemented on
-    /// `CacheImpl` directly. This is the same pattern wasmtime uses for its
-    /// own concurrent host implementations (see wasmtime's
-    /// `component-async-tests/round_trip.rs`).
-    ///
-    /// For `cache_sync::add_to_linker`, either form works because
-    /// `cache_sync::HostWithStore` has a blanket impl for any `HasData`.
+    /// Compile-only test: verify `cache-sync` linker registration accepts `CacheImpl`.
     #[allow(dead_code)]
     fn _verify_linker_compat<T: 'static + Send>(
         linker: &mut wasmtime::component::Linker<T>,
         getter: fn(&mut T) -> &mut CacheImpl,
     ) -> wasmtime::Result<()> {
-        // Concurrent async interface - must use CacheImpl as the D type
-        cache::add_to_linker::<_, CacheImpl>(linker, getter)?;
-        // Sync interface - works with either CacheImpl or HasSelf<CacheImpl>
-        cache_sync::add_to_linker::<_, CacheImpl>(linker, getter)?;
+        cache_sync::add_to_linker::<_, wasmtime::component::HasSelf<CacheImpl>>(linker, getter)?;
         Ok(())
     }
 
@@ -222,7 +134,10 @@ mod tests {
         }
 
         fn with_data(self, key: &str, value: Payload) -> Self {
-            self.data.lock().unwrap().insert(key.to_string(), (value, None));
+            self.data
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), (value, None));
             self
         }
     }
@@ -234,7 +149,10 @@ mod tests {
         }
 
         async fn set(&self, key: &str, value: Payload, ttl_ms: Option<u64>) -> Result<(), Error> {
-            self.data.lock().unwrap().insert(key.to_string(), (value, ttl_ms));
+            self.data
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), (value, ttl_ms));
             Ok(())
         }
 
@@ -252,14 +170,18 @@ mod tests {
             let current = if let Some((val, ttl)) = data.get(key) {
                 let s = String::from_utf8(val.clone())
                     .map_err(|_| Error::Other("Invalid UTF-8".to_string()))?;
-                let num: i64 = s.parse()
+                let num: i64 = s
+                    .parse()
                     .map_err(|_| Error::Other("Not a number".to_string()))?;
                 (num, *ttl)
             } else {
                 (0, None)
             };
             let new_value = current.0 + delta;
-            data.insert(key.to_string(), (new_value.to_string().into_bytes(), current.1));
+            data.insert(
+                key.to_string(),
+                (new_value.to_string().into_bytes(), current.1),
+            );
             Ok(new_value)
         }
 
@@ -309,7 +231,13 @@ mod tests {
         let backend = Arc::new(MockCacheBackend::new());
         let mut cache_impl = CacheImpl::new(backend);
 
-        let result = cache_sync::Host::set(&mut cache_impl, "key1".to_string(), b"value1".to_vec(), None).await;
+        let result = cache_sync::Host::set(
+            &mut cache_impl,
+            "key1".to_string(),
+            b"value1".to_vec(),
+            None,
+        )
+        .await;
         assert!(result.is_ok());
 
         // Verify it was set
@@ -322,7 +250,13 @@ mod tests {
         let backend = Arc::new(MockCacheBackend::new());
         let mut cache_impl = CacheImpl::new(backend);
 
-        let result = cache_sync::Host::set(&mut cache_impl, "key1".to_string(), b"value1".to_vec(), Some(5000)).await;
+        let result = cache_sync::Host::set(
+            &mut cache_impl,
+            "key1".to_string(),
+            b"value1".to_vec(),
+            Some(5000),
+        )
+        .await;
         assert!(result.is_ok());
 
         let get_result = cache_sync::Host::get(&mut cache_impl, "key1".to_string()).await;
@@ -335,7 +269,9 @@ mod tests {
         let mut cache_impl = CacheImpl::new(backend);
 
         // Verify key exists
-        let exists = cache_sync::Host::exists(&mut cache_impl, "key1".to_string()).await.unwrap();
+        let exists = cache_sync::Host::exists(&mut cache_impl, "key1".to_string())
+            .await
+            .unwrap();
         assert!(exists);
 
         // Delete it
@@ -343,7 +279,9 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify it's gone
-        let exists = cache_sync::Host::exists(&mut cache_impl, "key1".to_string()).await.unwrap();
+        let exists = cache_sync::Host::exists(&mut cache_impl, "key1".to_string())
+            .await
+            .unwrap();
         assert!(!exists);
     }
 
@@ -406,7 +344,8 @@ mod tests {
         let backend = Arc::new(MockCacheBackend::new());
         let mut cache_impl = CacheImpl::new(backend);
 
-        let result = cache_sync::Host::expire(&mut cache_impl, "nonexistent".to_string(), 5000).await;
+        let result =
+            cache_sync::Host::expire(&mut cache_impl, "nonexistent".to_string(), 5000).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), false);
     }
@@ -428,27 +367,63 @@ mod tests {
         let mut cache_impl = CacheImpl::new(backend);
 
         // Set multiple values
-        cache_sync::Host::set(&mut cache_impl, "key1".to_string(), b"value1".to_vec(), None).await.unwrap();
-        cache_sync::Host::set(&mut cache_impl, "key2".to_string(), b"value2".to_vec(), Some(1000)).await.unwrap();
-        cache_sync::Host::set(&mut cache_impl, "counter".to_string(), b"0".to_vec(), None).await.unwrap();
+        cache_sync::Host::set(
+            &mut cache_impl,
+            "key1".to_string(),
+            b"value1".to_vec(),
+            None,
+        )
+        .await
+        .unwrap();
+        cache_sync::Host::set(
+            &mut cache_impl,
+            "key2".to_string(),
+            b"value2".to_vec(),
+            Some(1000),
+        )
+        .await
+        .unwrap();
+        cache_sync::Host::set(&mut cache_impl, "counter".to_string(), b"0".to_vec(), None)
+            .await
+            .unwrap();
 
         // Verify all exist
-        assert!(cache_sync::Host::exists(&mut cache_impl, "key1".to_string()).await.unwrap());
-        assert!(cache_sync::Host::exists(&mut cache_impl, "key2".to_string()).await.unwrap());
-        assert!(cache_sync::Host::exists(&mut cache_impl, "counter".to_string()).await.unwrap());
+        assert!(
+            cache_sync::Host::exists(&mut cache_impl, "key1".to_string())
+                .await
+                .unwrap()
+        );
+        assert!(
+            cache_sync::Host::exists(&mut cache_impl, "key2".to_string())
+                .await
+                .unwrap()
+        );
+        assert!(
+            cache_sync::Host::exists(&mut cache_impl, "counter".to_string())
+                .await
+                .unwrap()
+        );
 
         // Increment counter
-        let val = cache_sync::Host::incr(&mut cache_impl, "counter".to_string(), 10).await.unwrap();
+        let val = cache_sync::Host::incr(&mut cache_impl, "counter".to_string(), 10)
+            .await
+            .unwrap();
         assert_eq!(val, 10);
 
         // Update expiry
-        let updated = cache_sync::Host::expire(&mut cache_impl, "key1".to_string(), 2000).await.unwrap();
+        let updated = cache_sync::Host::expire(&mut cache_impl, "key1".to_string(), 2000)
+            .await
+            .unwrap();
         assert!(updated);
 
         // Delete one
-        cache_sync::Host::delete(&mut cache_impl, "key2".to_string()).await.unwrap();
-        assert!(!cache_sync::Host::exists(&mut cache_impl, "key2".to_string()).await.unwrap());
+        cache_sync::Host::delete(&mut cache_impl, "key2".to_string())
+            .await
+            .unwrap();
+        assert!(
+            !cache_sync::Host::exists(&mut cache_impl, "key2".to_string())
+                .await
+                .unwrap()
+        );
     }
 }
-
-

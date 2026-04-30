@@ -231,13 +231,6 @@ where
     }
 
     /// Wires up FastEdge-specific host imports defined in the `reactor` WIT world.
-    ///
-    /// Note on type parameters:
-    /// - Most interfaces use `HasSelf<_>` because their `HostWithStore`
-    ///   trait has a blanket impl for any `HasData` type.
-    /// - `cache` is special: its WIT uses `async func` declarations which
-    ///   generate a `HostWithStore` trait with real methods, so it must be
-    ///   linked with the concrete `cache::CacheImpl` type as the data marker.
     fn add_fastedge_imports(
         linker: &mut wasmtime::component::Linker<runtime::Data<HttpState<T::BackendConnector>>>,
     ) -> Result<()> {
@@ -250,14 +243,6 @@ where
         fe::secret::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.secret_store)?;
         fe::key_value::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.key_value_store)?;
         fe::utils::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.utils)?;
-
-        // Cache: concurrent async interface (uses Accessor pattern).
-        // Must use `cache::CacheImpl` as the data marker, NOT `HasSelf<_>`,
-        // because `cache::HostWithStore` is implemented on `CacheImpl` directly.
-        fe::cache::add_to_linker::<_, cache::CacheImpl>(linker, |data| &mut data.cache)?;
-
-        // Cache-sync: simpler `&mut self` interface — works with `HasSelf<_>`
-        // because `cache_sync::HostWithStore` has a blanket impl.
         fe::cache_sync::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.cache)?;
 
         Ok(())

@@ -377,6 +377,7 @@ mod tests {
             secrets: vec![],
             kv_stores: vec![],
             plan_id: 0,
+            cache_mode: Default::default(),
         })
     }
 
@@ -461,6 +462,7 @@ mod tests {
             secrets: vec![],
             kv_stores: vec![],
             plan_id: 0,
+            cache_mode: Default::default(),
         });
 
         let context = TestContext {
@@ -522,6 +524,7 @@ mod tests {
             secrets: vec![],
             kv_stores: vec![],
             plan_id: 0,
+            cache_mode: Default::default(),
         });
 
         let context = TestContext {

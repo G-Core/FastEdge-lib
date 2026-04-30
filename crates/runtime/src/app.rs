@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::de::Visitor;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::fmt;
@@ -31,6 +31,8 @@ pub struct App {
     pub kv_stores: Vec<KvStoreOption>,
     #[serde(default)]
     pub plan_id: u64,
+    #[serde(default)]
+    pub cache_mode: CacheMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -93,9 +95,22 @@ pub enum Status {
     Suspended = 5,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+#[repr(u8)]
+pub enum CacheMode {
+    Disabled = 0,
+    Enabled = 1,
+}
+
 impl Default for Status {
     fn default() -> Self {
         Self::Enabled
+    }
+}
+
+impl Default for CacheMode {
+    fn default() -> Self {
+        Self::Disabled
     }
 }
 
@@ -129,6 +144,48 @@ impl<'de> Deserialize<'de> for Status {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_u64(StatusVisitor)
+    }
+}
+
+struct CacheModeVisitor;
+
+impl<'de> Visitor<'de> for CacheModeVisitor {
+    type Value = CacheMode;
+
+    fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+        formatter.write_str("unsigned integer value (0 = disabled, 1 = enabled)")
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match v {
+            0 => Ok(CacheMode::Disabled),
+            1 => Ok(CacheMode::Enabled),
+            _ => Err(E::custom("cache_mode not in range: [0..1]")),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for CacheMode {
+    fn deserialize<D>(deserializer: D) -> Result<CacheMode, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_u64(CacheModeVisitor)
+    }
+}
+
+impl Serialize for CacheMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(match self {
+            CacheMode::Disabled => 0,
+            CacheMode::Enabled => 1,
+        })
     }
 }
 
@@ -189,6 +246,7 @@ mod tests {
             }],
             kv_stores: vec![],
             plan_id: 0,
+            cache_mode: CacheMode::Disabled,
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));
@@ -278,5 +336,86 @@ mod tests {
         assert_eq!(kv.prefix, "pre2");
         assert_eq!(kv.cache_size, 5000);
         assert_eq!(kv.cache_ttl, 120);
+    }
+
+    #[test]
+    fn test_cache_mode_deserialize_disabled() {
+        assert_eq!(
+            CacheMode::Disabled,
+            assert_ok!(serde_json::from_str::<CacheMode>("0"))
+        );
+    }
+
+    #[test]
+    fn test_cache_mode_deserialize_enabled() {
+        assert_eq!(
+            CacheMode::Enabled,
+            assert_ok!(serde_json::from_str::<CacheMode>("1"))
+        );
+    }
+
+    #[test]
+    fn test_cache_mode_deserialize_out_of_range() {
+        assert_err!(serde_json::from_str::<CacheMode>("2"));
+        assert_err!(serde_json::from_str::<CacheMode>("255"));
+    }
+
+    #[test]
+    fn test_cache_mode_deserialize_invalid_type() {
+        // Strings are not accepted - only unsigned integers
+        assert_err!(serde_json::from_str::<CacheMode>("\"enabled\""));
+        assert_err!(serde_json::from_str::<CacheMode>("true"));
+    }
+
+    #[test]
+    fn test_cache_mode_default_is_disabled() {
+        assert_eq!(CacheMode::default(), CacheMode::Disabled);
+    }
+
+    #[test]
+    fn test_cache_mode_serialize() {
+        assert_eq!("0", assert_ok!(serde_json::to_string(&CacheMode::Disabled)));
+        assert_eq!("1", assert_ok!(serde_json::to_string(&CacheMode::Enabled)));
+    }
+
+    #[test]
+    fn test_cache_mode_roundtrip() {
+        for mode in [CacheMode::Disabled, CacheMode::Enabled] {
+            let serialized = assert_ok!(serde_json::to_string(&mode));
+            let deserialized: CacheMode = assert_ok!(serde_json::from_str(&serialized));
+            assert_eq!(mode, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_cache_mode_default_when_missing() {
+        // Verify `#[serde(default)]` on App.cache_mode works
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+        });
+        let json = assert_ok!(serde_json::to_string(&json));
+        let app: App = assert_ok!(serde_json::from_str(&json));
+        assert_eq!(app.cache_mode, CacheMode::Disabled);
+    }
+
+    #[test]
+    fn test_cache_mode_explicit_enabled_in_app() {
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+            "cache_mode": 1,
+        });
+        let json = assert_ok!(serde_json::to_string(&json));
+        let app: App = assert_ok!(serde_json::from_str(&json));
+        assert_eq!(app.cache_mode, CacheMode::Enabled);
     }
 }
