@@ -18,6 +18,7 @@ pub struct HttpState<C> {
 }
 
 impl<C> BackendRequest for HttpState<C> {
+    #[tracing::instrument(skip(self), ret, err)]   
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {
             http_backend::BackendStrategy::Direct => {
@@ -69,7 +70,9 @@ impl<C> BackendRequest for HttpState<C> {
                     .into_iter()
                     .filter_map(|(k, v)| k.map(|k| (k, v)))
                     .filter(|(k, _)| {
-                        !FILTER_HEADERS.contains(k) && !self.propagate_header_names.contains(k)
+                        let ret = !FILTER_HEADERS.contains(k) && !self.propagate_header_names.contains(k);
+                        tracing::trace!("filter header: {:?} -> {}", k, ret);
+                        ret
                     })
                     .collect::<HeaderMap>();
 
@@ -82,7 +85,9 @@ impl<C> BackendRequest for HttpState<C> {
                     original_url.scheme_str().unwrap_or("http").parse()?,
                 );
 
-                headers.extend(self.propagate_headers.clone());
+                /*headers.extend(self.propagate_headers.clone().into_iter().filter_map(
+                    |(k, v)| k.filter(|k| !FILTER_HEADERS.contains(k)).map(|k| (k, v)),
+                ));*/
 
                 let authority = self
                     .http_backend
