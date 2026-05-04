@@ -35,7 +35,7 @@ pub trait StatsVisitor: ReadStats + UserDiagStats + ExtRequestStats + Send + Syn
     /// Register memory used by wasm execution
     fn memory_used(&self, memory_used: u64);
     /// Register failure reason code
-    fn fail_reason(&self, fail_reason: u32);
+    fn fail_reason(&self, fail_reason: i32);
     /// Observe elapsed time
     fn observe(&self, elapsed: Duration);
     /// Get elapsed time in microseconds

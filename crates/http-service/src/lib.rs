@@ -367,7 +367,7 @@ where
                 tracing::warn!(cause=?error, "execute");
                 let (status_code, fail_reason, msg, internal_code) = map_err(error);
                 stats.status_code(status_code);
-                stats.fail_reason(fail_reason as u32);
+                stats.fail_reason(fail_reason as i32);
                 tracing::debug!(?fail_reason, ?request_id, "stats");
 
                 #[cfg(feature = "metrics")]
