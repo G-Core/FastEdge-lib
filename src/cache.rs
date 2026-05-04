@@ -1,7 +1,7 @@
 use cache::{CacheBackend, Error, Payload};
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub struct MemoryCacheBackend {
@@ -23,17 +23,13 @@ impl MemoryCacheBackend {
     pub fn new() -> Self {
         Self::default()
     }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Entry>> {
-        self.entries.lock().expect("cache mutex poisoned")
-    }
 }
 
 #[async_trait::async_trait]
 impl CacheBackend for MemoryCacheBackend {
     async fn get(&self, key: &str) -> Result<Option<Payload>, Error> {
         let now = Instant::now();
-        let mut entries = self.lock();
+        let mut entries = self.entries.lock().await;
         match entries.get(key) {
             Some(entry) if entry.is_expired(now) => {
                 entries.remove(key);
@@ -46,19 +42,21 @@ impl CacheBackend for MemoryCacheBackend {
 
     async fn set(&self, key: &str, value: Payload, ttl_ms: Option<u64>) -> Result<(), Error> {
         let expires_at = ttl_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
-        self.lock()
+        self.entries
+            .lock()
+            .await
             .insert(key.to_string(), Entry { value, expires_at });
         Ok(())
     }
 
     async fn delete(&self, key: &str) -> Result<(), Error> {
-        self.lock().remove(key);
+        self.entries.lock().await.remove(key);
         Ok(())
     }
 
     async fn exists(&self, key: &str) -> Result<bool, Error> {
         let now = Instant::now();
-        let mut entries = self.lock();
+        let mut entries = self.entries.lock().await;
         match entries.get(key) {
             Some(entry) if entry.is_expired(now) => {
                 entries.remove(key);
@@ -71,7 +69,7 @@ impl CacheBackend for MemoryCacheBackend {
 
     async fn incr(&self, key: &str, delta: i64) -> Result<i64, Error> {
         let now = Instant::now();
-        let mut entries = self.lock();
+        let mut entries = self.entries.lock().await;
         let (current, expires_at) = match entries.get(key) {
             Some(entry) if entry.is_expired(now) => (0, None),
             Some(entry) => {
@@ -97,7 +95,7 @@ impl CacheBackend for MemoryCacheBackend {
 
     async fn expire(&self, key: &str, ttl_ms: u64) -> Result<bool, Error> {
         let now = Instant::now();
-        let mut entries = self.lock();
+        let mut entries = self.entries.lock().await;
         let expired = match entries.get(key) {
             Some(entry) => entry.is_expired(now),
             None => return Ok(false),

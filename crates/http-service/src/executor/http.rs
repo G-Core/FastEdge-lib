@@ -224,7 +224,7 @@ mod tests {
 
         fn memory_used(&self, _memory_used: u64) {}
 
-        fn fail_reason(&self, _fail_reason: u32) {}
+        fn fail_reason(&self, _fail_reason: i32) {}
 
         fn observe(&self, _elapsed: Duration) {}
 

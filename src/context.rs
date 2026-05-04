@@ -204,7 +204,7 @@ impl StatsVisitor for StatsStub {
             .store(memory_used, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn fail_reason(&self, _fail_reason: u32) {}
+    fn fail_reason(&self, _fail_reason: i32) {}
 
     fn observe(&self, elapsed: Duration) {
         self.elapsed.store(
