@@ -4119,7 +4119,6 @@ dependencies = [
  "cc",
  "cfg-if",
  "encoding_rs",
- "futures",
  "fxprof-processed-profile",
  "gimli",
  "hashbrown 0.15.5",

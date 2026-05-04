@@ -15,7 +15,7 @@ tracing = "0.1"
 hyper = { version = "1", features = ["full"] }
 http = "1.4"
 async-trait = "0.1"
-wasmtime = { git = "https://github.com/G-Core/wasmtime.git", features = ["component-model-async"], branch = "release-36.0.0"}
+wasmtime = { git = "https://github.com/G-Core/wasmtime.git", features = ["component-model"], branch = "release-36.0.0"}
 wasmtime-wasi = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
 wasmtime-wasi-io = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
 wasi-common = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}

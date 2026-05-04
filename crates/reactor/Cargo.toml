@@ -7,4 +7,4 @@ authors.workspace = true
 description = "Main reactor module with world exports and all generated bindgen for included components"
 
 [dependencies]
-wasmtime = { workspace = true, features = ["component-model-async"] }
+wasmtime = { workspace = true, features = ["component-model"] }
