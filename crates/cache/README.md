@@ -1,23 +1,22 @@
 # Cache Crate
 
-This crate provides host function implementations for the FastEdge cache interface, supporting both synchronous and asynchronous cache operations.
+This crate provides host function implementations for the FastEdge cache interface.
 
 ## Overview
 
 The cache crate implements the WIT-defined cache interfaces:
-- `gcore:fastedge/cache` - Async cache interface (placeholder) 
-- `gcore:fastedge/cache-sync` - Sync cache interface (fully implemented)
-- `gcore:fastedge/cache-types` - Shared types (Payload, Error)
+- `gcore:fastedge/cache-sync` - Synchronous-style cache interface
+- `gcore:fastedge/cache-types` - Shared types (`payload`, `error`)
 
 ## Features
 
 ### Cache Operations
 
 - **get** - Retrieve a value by key
-- **set** - Store a value with optional TTL (time-to-live)
+- **set** - Store a value with optional TTL (time-to-live in milliseconds)
 - **delete** - Remove a key-value pair
 - **exists** - Check if a key exists
-- **incr** - Atomically increment/decrement an integer value
+- **incr** - Atomically increment/decrement an integer value (`i64` delta)
 - **expire** - Update the TTL for a key
 
 ### Error Types
@@ -75,26 +74,23 @@ use std::sync::Arc;
 // Create a cache implementation with your backend
 let backend = Arc::new(MyCache::new());
 let cache_impl = CacheImpl::new(backend);
-
-// Use the cache
-cache_impl.set("key", b"value".to_vec(), Some(5000)).await?;
-let value = cache_impl.get("key").await?;
 ```
 
-### Adding to Linker
+### Adding to the Wasmtime Linker
 
-The cache implementation integrates with wasmtime's component model:
+`CacheImpl` implements `cache_sync::Host`, so it can be registered with a
+wasmtime component linker via the generated `add_to_linker` helper:
 
 ```rust
 use reactor::gcore::fastedge::cache_sync;
+use wasmtime::component::HasSelf;
 
-// Add to linker (actual integration example)
-cache_sync::add_to_linker::<T, D>(linker, host_getter)?;
+cache_sync::add_to_linker::<T, HasSelf<CacheImpl>>(linker, |state: &mut T| {
+    &mut state.cache_impl
+})?;
 ```
 
 ## Architecture
-
-### Simple and Direct
 
 ```
 ┌─────────────────────────────────────────┐
@@ -110,20 +106,21 @@ cache_sync::add_to_linker::<T, D>(linker, host_getter)?;
                    │ Direct call
 ┌──────────────────▼──────────────────────┐
 │        CacheBackend Implementation      │
-│  - Redis, memory, moka, etc.            │
+│  - Memory, Redis, moka, etc.            │
 │  - Thread-safe async operations         │
 └─────────────────────────────────────────┘
 ```
 
 ### Components
 
-- **`CacheBackend`** - Trait defining backend interface
-- **`CacheImpl`** - Host implementation wrapping a backend
-- **`NoCacheBackend`** - No-op backend that returns `AccessDenied`
+- **`CacheBackend`** - Async trait defining the backend interface (`Send + Sync`)
+- **`CacheImpl`** - Host implementation wrapping an `Arc<dyn CacheBackend>`
+- **`NoCacheBackend`** - No-op backend that returns `AccessDenied` for every
+  operation; useful as a default when caching is disabled
 
 ## Testing
 
-The crate includes comprehensive unit tests with mock implementations:
+The crate includes unit tests with a mock in-memory backend:
 
 ```bash
 cargo test -p cache
@@ -132,33 +129,33 @@ cargo test -p cache
 Tests cover:
 - Get/set/delete operations
 - Existence checks
-- Increment operations (including negative deltas)
+- Increment operations (including negative deltas and missing keys)
 - TTL and expiry management
-- Error conditions
-- Sync trait implementation
+- `AccessDenied` propagation from `NoCacheBackend`
+- Linker registration compatibility (compile-only)
 
 ## Thread Safety
 
-All implementations must be `Send + Sync`:
 - The `CacheBackend` trait requires `Send + Sync`
-- Operations use async functions for non-blocking I/O
-- Safe for concurrent access across tasks
+- All operations are `async` for non-blocking I/O
+- Backends are shared via `Arc<dyn CacheBackend>` and may be invoked concurrently
 
 ## Example Backends
 
-You can implement `CacheBackend` with various storage engines:
+`CacheBackend` can be implemented on top of any storage engine:
 
-- **In-memory** - HashMap with Mutex/RwLock
+- **In-memory** - `HashMap` behind a `tokio::Mutex`/`RwLock`
 - **Moka** - High-performance concurrent cache
 - **Redis** - Distributed cache
 - **Custom** - Any storage that fits your needs
 
+The FastEdge binary ships with an in-memory `MemoryCacheBackend` that supports
+TTL-based expiration; see `src/cache.rs` at the workspace root for a reference
+implementation.
+
 ## Future Work
 
-- Implement `cache::HostWithStore` for the async variant with Accessor pattern
-- Add ready-to-use backend implementations (Redis, Moka, etc.)
+- Ship ready-to-use backend implementations from this crate (Redis, Moka, …)
 - Add metrics and observability hooks
 - Support for batch operations
 - Cache warming and preloading strategies
-
-

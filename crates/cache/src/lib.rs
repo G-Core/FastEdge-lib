@@ -1,6 +1,5 @@
 use reactor::gcore::fastedge::{cache_sync, cache_types};
 use std::sync::Arc;
-use tracing::instrument;
 
 pub use cache_types::{Error, Payload};
 
@@ -44,32 +43,26 @@ impl cache_types::Host for CacheImpl {}
 // Implement the sync-style cache interface (gcore:fastedge/cache-sync)
 // This is simpler and serializes calls through &mut self.
 impl cache_sync::Host for CacheImpl {
-    #[instrument(skip(self), level = "trace", ret, err)]
     async fn get(&mut self, key: String) -> Result<Option<Payload>, Error> {
         self.backend.get(&key).await
     }
 
-    #[instrument(skip(self, value), level = "trace", ret, err)]
     async fn set(&mut self, key: String, value: Payload, ttl_ms: Option<u64>) -> Result<(), Error> {
         self.backend.set(&key, value, ttl_ms).await
     }
 
-    #[instrument(skip(self), level = "trace", ret, err)]
     async fn delete(&mut self, key: String) -> Result<(), Error> {
         self.backend.delete(&key).await
     }
 
-    #[instrument(skip(self), level = "trace", ret, err)]
     async fn exists(&mut self, key: String) -> Result<bool, Error> {
         self.backend.exists(&key).await
     }
 
-    #[instrument(skip(self), level = "trace", ret, err)]
     async fn incr(&mut self, key: String, delta: i64) -> Result<i64, Error> {
         self.backend.incr(&key, delta).await
     }
 
-    #[instrument(skip(self), level = "trace", ret, err)]
     async fn expire(&mut self, key: String, ttl_ms: u64) -> Result<bool, Error> {
         self.backend.expire(&key, ttl_ms).await
     }
