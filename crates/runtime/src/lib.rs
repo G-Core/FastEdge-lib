@@ -34,7 +34,7 @@ use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
-use http::Request;
+use http::{header, HeaderName, Request};
 use secret::SecretStore;
 use smol_str::SmolStr;
 use std::borrow::Cow;
@@ -156,6 +156,15 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
 
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
+    }
+
+    fn is_forbidden_header(&mut self, name: &HeaderName) -> bool {
+        // We want to allow the host header to be set.
+        if name.eq(&header::HOST) {
+            return false;
+        }
+        // Fall back to wasmtime's default forbidden-header policy.
+        wasmtime_wasi_http::types::DEFAULT_FORBIDDEN_HEADERS.contains(name)
     }
 }
 
