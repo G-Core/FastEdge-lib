@@ -17,6 +17,8 @@ pub struct HttpState<C> {
     pub(super) stats: Arc<dyn StatsVisitor>,
 }
 
+const FASTEDGE_HEADER_HOSTNAME: &[u8] = b"Fastedge_Header_Hostname";
+
 impl<C> BackendRequest for HttpState<C> {
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {
@@ -36,17 +38,23 @@ impl<C> BackendRequest for HttpState<C> {
                         (_, Some(port)) => format!("{}:{}", a.host(), port),
                     }
                 });
-                let original_host = original_host
-                    .or_else(|| {
-                        head.headers.iter().find_map(|(k, v)| {
-                            if k.as_str().eq_ignore_ascii_case("host") {
-                                v.to_str().ok().map(|c| c.to_string())
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                    .unwrap_or_default();
+                let request_host_header_value = head
+                    .headers
+                    .iter()
+                    .find(|(k, _)| k.eq(&header::HOST))
+                    .map(|(_, v)| v.to_owned());
+
+                let original_host = original_host.or_else(|| {
+                    request_host_header_value
+                        .as_ref()
+                        .and_then(|v| v.to_str().map(|v| v.to_string()).ok())
+                });
+
+                anyhow::ensure!(
+                    original_host.is_some(),
+                    "host is required for backend request"
+                );
+                let original_host = original_host.unwrap();
 
                 anyhow::ensure!(
                     is_public_host(&original_host),
@@ -81,6 +89,12 @@ impl<C> BackendRequest for HttpState<C> {
                     HeaderName::from_static("fastedge-scheme"),
                     original_url.scheme_str().unwrap_or("http").parse()?,
                 );
+                //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
+                if let Some(request_host_header) = request_host_header_value {
+                    let fastedge_header_hostname =
+                        HeaderName::from_bytes(FASTEDGE_HEADER_HOSTNAME)?;
+                    headers.insert(fastedge_header_hostname, request_host_header);
+                }
 
                 headers.extend(self.propagate_headers.clone());
 

@@ -1,3 +1,8 @@
+## [0.16.1] - 2026-05-05
+
+### 🚀 Features
+
+- Add `Fastedge_Header_Hostname` header support and allow `Host` header overrides
 ## [0.16.0] - 2026-05-05
 
 ### 🚀 Features
@@ -20,6 +25,7 @@
 
 - Update dependencies in Cargo.lock and Cargo.toml to latest versions
 - Update Wasmtime dependency to use `component-model` feature
+- Release
 ## [0.15.0] - 2026-03-10
 
 ### 🚀 Features
