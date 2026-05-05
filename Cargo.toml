@@ -65,6 +65,7 @@ http-backend = { path = "crates/http-backend" }
 utils = { path = "crates/utils" }
 secret = { path = "crates/secret" }
 key-value-store = { path = "crates/key-value-store" }
+cache = { path = "crates/cache" }
 hyper-tls = "0.6"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 http-body-util = "0.1"

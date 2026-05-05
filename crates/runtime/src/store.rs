@@ -91,6 +91,7 @@ pub struct StoreBuilder {
     secret_store: SecretStore,
     key_value_store: key_value_store::Builder,
     dictionary: Dictionary,
+    cache_backend: Option<Arc<dyn cache::CacheBackend>>,
 }
 
 impl StoreBuilder {
@@ -108,6 +109,7 @@ impl StoreBuilder {
             secret_store: Default::default(),
             key_value_store: key_value_store::Builder::default(),
             dictionary: Default::default(),
+            cache_backend: None,
         }
     }
 
@@ -179,6 +181,16 @@ impl StoreBuilder {
     /// Set key value dictionary
     pub fn dictionary(self, dictionary: Dictionary) -> Self {
         Self { dictionary, ..self }
+    }
+
+    /// Set the cache backend implementation. If not set, the cache
+    /// host functions will return `AccessDenied` for every operation
+    /// (see [`cache::NoCacheBackend`]).
+    pub fn cache_backend(self, cache_backend: Arc<dyn cache::CacheBackend>) -> Self {
+        Self {
+            cache_backend: Some(cache_backend),
+            ..self
+        }
     }
 
     pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
@@ -255,6 +267,10 @@ impl StoreBuilder {
 
         let key_value_store = self.key_value_store.build(inner.get_stats());
         let utils = Utils::new(inner.get_stats());
+        let cache_impl = cache::CacheImpl::new(
+            self.cache_backend
+                .unwrap_or_else(|| Arc::new(cache::NoCacheBackend)),
+        );
 
         let mut inner = wasmtime::Store::new(
             &self.engine,
@@ -271,6 +287,7 @@ impl StoreBuilder {
                 key_value_store,
                 dictionary: self.dictionary,
                 utils,
+                cache: cache_impl,
             },
         );
         inner.limiter(|state| &mut state.store_limits);

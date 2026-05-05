@@ -35,7 +35,7 @@ pub trait StatsVisitor: ReadStats + UserDiagStats + ExtRequestStats + Send + Syn
     /// Register memory used by wasm execution
     fn memory_used(&self, memory_used: u64);
     /// Register failure reason code
-    fn fail_reason(&self, fail_reason: u32);
+    fn fail_reason(&self, fail_reason: i32);
     /// Observe elapsed time
     fn observe(&self, elapsed: Duration);
     /// Get elapsed time in microseconds
@@ -83,7 +83,7 @@ impl Drop for StatsTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, Ordering};
     use std::sync::Mutex;
     use std::thread;
 
@@ -92,7 +92,7 @@ mod tests {
     struct MockStatsVisitor {
         status_code: AtomicU16,
         memory_used: AtomicU64,
-        fail_reason: AtomicU32,
+        fail_reason: AtomicI32,
         observed_duration: Mutex<Option<Duration>>,
         time_elapsed: AtomicU64,
         cdn_phase: AtomicI32,
@@ -115,7 +115,7 @@ mod tests {
             self.memory_used.load(Ordering::Relaxed)
         }
 
-        fn get_fail_reason(&self) -> u32 {
+        fn get_fail_reason(&self) -> i32 {
             self.fail_reason.load(Ordering::Relaxed)
         }
 
@@ -165,7 +165,7 @@ mod tests {
             self.memory_used.store(memory_used, Ordering::Relaxed);
         }
 
-        fn fail_reason(&self, fail_reason: u32) {
+        fn fail_reason(&self, fail_reason: i32) {
             self.fail_reason.store(fail_reason, Ordering::Relaxed);
         }
 

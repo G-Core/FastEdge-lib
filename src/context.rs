@@ -1,3 +1,4 @@
+use crate::cache::MemoryCacheBackend;
 use crate::executor::RunExecutor;
 use crate::key_value::CliStoreManager;
 use crate::secret::SecretImpl;
@@ -35,6 +36,7 @@ pub struct Context {
     pub(crate) backend: Backend<HttpsConnector<HttpConnector>>,
     pub(crate) wasm_bytes: Vec<u8>,
     pub(crate) wasi_http: bool,
+    pub(crate) cache_backend: Arc<MemoryCacheBackend>,
 }
 
 impl PreCompiledLoader<u64> for Context {
@@ -127,7 +129,8 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
             .logger(logger)
             .secret_store(secret_store)
             .key_value_store(key_value_store)
-            .dictionary(dictionary);
+            .dictionary(dictionary)
+            .cache_backend(self.cache_backend.clone());
 
         let component = self.loader().load_component(app.binary_id)?;
         let instance_pre = engine.component_instantiate_pre(&component)?;
@@ -201,7 +204,7 @@ impl StatsVisitor for StatsStub {
             .store(memory_used, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn fail_reason(&self, _fail_reason: u32) {}
+    fn fail_reason(&self, _fail_reason: i32) {}
 
     fn observe(&self, elapsed: Duration) {
         self.elapsed.store(

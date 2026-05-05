@@ -96,6 +96,7 @@ pub struct Data<T: 'static> {
     pub key_value_store: key_value_store::StoreImpl,
     pub dictionary: Dictionary,
     pub utils: Utils,
+    pub cache: cache::CacheImpl,
 }
 
 pub trait BackendRequest {

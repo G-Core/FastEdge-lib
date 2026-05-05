@@ -1,9 +1,11 @@
+mod cache;
 mod context;
 mod dotenv;
 mod executor;
 mod key_value;
 mod secret;
 
+use crate::cache::MemoryCacheBackend;
 use crate::context::StatsStub;
 use bytesize::MB;
 use clap::{Args, Parser, Subcommand};
@@ -13,12 +15,13 @@ use http_backend::{Backend, BackendStrategy};
 use http_service::{HttpConfig, HttpService};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
-use runtime::app::{KvStoreOption, Status};
+use runtime::app::{CacheMode, KvStoreOption, Status};
 use runtime::service::{Service, ServiceBuilder};
 use runtime::{App, SecretValue, WasmConfig};
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use wasmtime::Engine;
 
 #[derive(Debug, Parser)]
@@ -173,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
                 secrets,
                 kv_stores,
                 plan_id: 0,
+                cache_mode: CacheMode::Enabled,
             };
 
             let mut headers = dotenv_injector.merge_with_dotenv_variables(
@@ -190,6 +194,7 @@ async fn main() -> anyhow::Result<()> {
                 backend,
                 wasm_bytes,
                 wasi_http: run.wasi_http.unwrap_or_default(),
+                cache_backend: Arc::new(MemoryCacheBackend::new()),
             };
 
             let http: HttpService<Context, StatsStub> = ServiceBuilder::new(context).build()?;

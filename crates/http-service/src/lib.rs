@@ -193,34 +193,57 @@ where
 
     fn configure_engine(builder: &mut WasmEngineBuilder<Self::State>) -> Result<()> {
         let linker = builder.component_linker_ref();
+        Self::add_wasi_imports(linker)?;
+        Self::add_fastedge_imports(linker)?;
+        Ok(())
+    }
+}
+
+impl<T, S> HttpService<T, S>
+where
+    T: ContextT
+        + Router
+        + ContextHeaders
+        + ExecutorFactory<HttpState<T::BackendConnector>>
+        + Clone
+        + Sync
+        + Send
+        + 'static,
+    T::BackendConnector: Connect + Clone + Send + Sync + 'static,
+    T::Executor: HttpExecutor + Send + Sync,
+    S: StatsVisitor + Send + Sync + 'static,
+{
+    /// Wires up the standard WASI / WASI-HTTP / WASI-NN host imports.
+    ///
+    /// These come from upstream wasmtime crates and should normally not be
+    /// changed without bumping wasmtime versions in lockstep.
+    fn add_wasi_imports(
+        linker: &mut wasmtime::component::Linker<runtime::Data<HttpState<T::BackendConnector>>>,
+    ) -> Result<()> {
         // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
         wasmtime_wasi::p2::add_to_linker_async(linker)?;
         linker.allow_shadowing(true);
         wasmtime_wasi_http::add_to_linker_async(linker)?;
-
-        wasmtime_wasi_nn::wit::add_to_linker(linker, |data: &mut runtime::Data<Self::State>| {
+        wasmtime_wasi_nn::wit::add_to_linker(linker, |data: &mut runtime::Data<_>| {
             WasiNnView::new(&mut data.table, &mut data.wasi_nn)
         })?;
+        Ok(())
+    }
 
-        reactor::gcore::fastedge::http_client::add_to_linker::<_, HasSelf<_>>(linker, |data| {
+    /// Wires up FastEdge-specific host imports defined in the `reactor` WIT world.
+    fn add_fastedge_imports(
+        linker: &mut wasmtime::component::Linker<runtime::Data<HttpState<T::BackendConnector>>>,
+    ) -> Result<()> {
+        use reactor::gcore::fastedge as fe;
+
+        fe::http_client::add_to_linker::<_, HasSelf<_>>(linker, |data| {
             &mut data.as_mut().http_backend
         })?;
-
-        reactor::gcore::fastedge::dictionary::add_to_linker::<_, HasSelf<_>>(linker, |data| {
-            &mut data.dictionary
-        })?;
-
-        reactor::gcore::fastedge::secret::add_to_linker::<_, HasSelf<_>>(linker, |data| {
-            &mut data.secret_store
-        })?;
-
-        reactor::gcore::fastedge::key_value::add_to_linker::<_, HasSelf<_>>(linker, |data| {
-            &mut data.key_value_store
-        })?;
-
-        reactor::gcore::fastedge::utils::add_to_linker::<_, HasSelf<_>>(linker, |data| {
-            &mut data.utils
-        })?;
+        fe::dictionary::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.dictionary)?;
+        fe::secret::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.secret_store)?;
+        fe::key_value::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.key_value_store)?;
+        fe::utils::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.utils)?;
+        fe::cache_sync::add_to_linker::<_, HasSelf<_>>(linker, |data| &mut data.cache)?;
 
         Ok(())
     }
@@ -344,7 +367,7 @@ where
                 tracing::warn!(cause=?error, "execute");
                 let (status_code, fail_reason, msg, internal_code) = map_err(error);
                 stats.status_code(status_code);
-                stats.fail_reason(fail_reason as u32);
+                stats.fail_reason(fail_reason as i32);
                 tracing::debug!(?fail_reason, ?request_id, "stats");
 
                 #[cfg(feature = "metrics")]
