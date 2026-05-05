@@ -1,3 +1,25 @@
+## [0.16.0] - 2026-05-05
+
+### 🚀 Features
+
+- Redefine HTTP status codes and add internal status header for error responses
+- Optimize Wasmtime engine configuration for performance improvements
+- Added `cache` crate with README and update dependencies
+- Implemented `MemoryCacheBackend` with expiration and basic cache operations
+
+### 🐛 Bug Fixes
+
+- Update `fail_reason` type from `u32` to `i32` in stats for consistency
+
+### 🚜 Refactor
+
+- Change `fail_reason` type from `u32` to `i32`, migrate `MemoryCacheBackend` to use `tokio::Mutex` for async safety
+- Remove unused tracing annotations from `CacheImpl` and update `README` for clarity
+
+### ⚙️ Miscellaneous Tasks
+
+- Update dependencies in Cargo.lock and Cargo.toml to latest versions
+- Update Wasmtime dependency to use `component-model` feature
 ## [0.15.0] - 2026-03-10
 
 ### 🚀 Features
@@ -15,6 +37,10 @@
 ### 📚 Documentation
 
 - Update usage guide for fastedge-run tool with detailed command options and examples
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.14.0] - 2026-03-04
 
 ### 🚀 Features
