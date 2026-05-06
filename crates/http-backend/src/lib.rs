@@ -148,11 +148,11 @@ impl<C> Backend<C> {
     pub fn propagate_headers(&mut self, headers: HeaderMap) -> Result<()> {
         self.propagate_headers.clear();
 
-        if self.strategy == BackendStrategy::FastEdge {
-            if let Some(ref hostname) = self.hostname {
-                self.propagate_headers
-                    .insert(header::HOST, hostname.parse()?);
-            }
+        if self.strategy == BackendStrategy::FastEdge
+            && let Some(ref hostname) = self.hostname
+        {
+            self.propagate_headers
+                .insert(header::HOST, hostname.parse()?);
         }
         let headers = headers.into_iter().filter(|(k, _)| {
             if let Some(name) = k {
@@ -184,18 +184,16 @@ impl<C> Backend<C> {
                 if !headers
                     .iter()
                     .any(|(k, _)| k.eq_ignore_ascii_case(header::HOST.as_str()))
-                {
-                    if let Ok(uri) = req.uri.parse::<Uri>() {
-                        if let Some(host) = uri.authority().map(|a| {
-                            if let Some(port) = a.port() {
-                                format!("{}:{}", a.host(), port)
-                            } else {
-                                a.host().to_string()
-                            }
-                        }) {
-                            headers.push((header::HOST.as_str().to_string(), host))
+                    && let Ok(uri) = req.uri.parse::<Uri>()
+                    && let Some(host) = uri.authority().map(|a| {
+                        if let Some(port) = a.port() {
+                            format!("{}:{}", a.host(), port)
+                        } else {
+                            a.host().to_string()
                         }
-                    }
+                    })
+                {
+                    headers.push((header::HOST.as_str().to_string(), host))
                 }
 
                 let builder = http::Request::builder().uri(req.uri);
