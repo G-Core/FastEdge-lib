@@ -559,7 +559,7 @@ impl Display for AppName {
     }
 }
 
-const FASTEDGE_APP_ID_HEADER: &'static str = "fastedge_app_id";
+const FASTEDGE_APP_ID_HEADER: &str = "fastedge_app_id";
 
 /// Extracts the application identifier from an incoming HTTP request.
 ///
