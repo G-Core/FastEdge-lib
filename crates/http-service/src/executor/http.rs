@@ -36,7 +36,6 @@ where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
-        tracing::trace!("start execute");
         // Start timing for stats
         let stats_timer = StatsTimer::new(stats.clone());
 
@@ -349,7 +348,7 @@ mod tests {
 
             let component = self.loader().load_component(cfg.binary_id)?;
             let instance_pre = engine.component_instantiate_pre(&component)?;
-            tracing::info!("Added '{}' to cache", name);
+            tracing::debug!("Added '{}' to cache", name);
             Ok(HttpExecutorImpl::new(
                 instance_pre,
                 store_builder,

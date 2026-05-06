@@ -287,10 +287,12 @@ where
             }
             Ok(app_name) => app_name,
         };
+        let span = tracing::info_span!("handle", app = app_name.as_str());
+        let _enter = span.enter();
+
         // lookup for application config and binary_id
         tracing::debug!(
-            "Processing request for application '{}' on URL: {}",
-            app_name,
+            "Processing request URL: {}",
             request.uri()
         );
         let cfg = match self.context.lookup_by_name(&app_name).await {

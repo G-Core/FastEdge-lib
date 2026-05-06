@@ -38,7 +38,6 @@ where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
-        tracing::trace!("start execute");
         // Start timing for stats
         let stats_timer = StatsTimer::new(stats.clone());
 
@@ -61,7 +60,7 @@ where
             parts.uri = Uri::from_parts(uparts)?;
         }
 
-        //FIXME send streamed request body
+        //TODO: send streamed request body
         let body = body
             .collect()
             .await
@@ -105,7 +104,7 @@ where
         let mut store = store_builder.build(state).context("store build")?;
         let instance_pre = self.instance_pre.clone();
 
-        let request = hyper::Request::from_parts(parts, body);
+        let request = Request::from_parts(parts, body);
         let req = store
             .data_mut()
             .new_incoming_request(Scheme::Http, request)
