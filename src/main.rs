@@ -11,7 +11,7 @@ use bytesize::MB;
 use clap::{Args, Parser, Subcommand};
 use context::Context;
 use dotenv::{DotEnvInjector, EnvArgType};
-use http_backend::{Backend, BackendStrategy};
+use http_backend::{Backend, BackendStrategy, SERVER_NAME_HEADER};
 use http_service::{HttpConfig, HttpService};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -237,9 +237,12 @@ async fn main() -> anyhow::Result<()> {
 fn append_headers(geo: bool, headers: &mut HashMap<SmolStr, SmolStr>) {
     if !headers
         .keys()
-        .any(|k| "server_name".eq_ignore_ascii_case(k))
+        .any(|k| SERVER_NAME_HEADER.eq_ignore_ascii_case(k))
     {
-        headers.insert("server_name".to_smolstr(), "test.localhost".to_smolstr());
+        headers.insert(
+            SERVER_NAME_HEADER.to_smolstr(),
+            "test.localhost".to_smolstr(),
+        );
     }
 
     if geo {

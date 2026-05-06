@@ -1,6 +1,6 @@
 pub mod stats;
 
-use smol_str::SmolStr;
+use smol_str::{SmolStr, ToSmolStr};
 use std::fmt::Debug;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -9,13 +9,13 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use anyhow::{anyhow, Error, Result};
-use http::{header, uri::Scheme, HeaderMap, HeaderName, Uri};
+use anyhow::{Error, Result, anyhow};
+use http::{HeaderMap, HeaderName, Uri, header, uri::Scheme};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::rt::ReadBufCursor;
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::rt::TokioExecutor;
 use pin_project::pin_project;
 use tokio::net::TcpStream;
@@ -30,6 +30,8 @@ use reactor::gcore::fastedge::{
 };
 
 type HeaderNameList = Vec<HeaderName>;
+
+pub const SERVER_NAME_HEADER: &str = "server_name";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendStrategy {
@@ -78,8 +80,8 @@ impl Builder {
         self
     }
 
-    pub fn hostname(&mut self, hostname: SmolStr) -> &mut Self {
-        self.hostname = Some(hostname);
+    pub fn hostname(&mut self, hostname: impl ToSmolStr) -> &mut Self {
+        self.hostname = Some(hostname.to_smolstr());
         self
     }
 
@@ -146,15 +148,11 @@ impl<C> Backend<C> {
     pub fn propagate_headers(&mut self, headers: HeaderMap) -> Result<()> {
         self.propagate_headers.clear();
 
-        if self.strategy == BackendStrategy::FastEdge {
-            let server_name = headers
-                .get("server_name")
-                .and_then(|v| v.to_str().ok())
-                .ok_or(anyhow!("header Server_name is missing"))?;
-            self.propagate_headers.insert(
-                HeaderName::from_static("host"),
-                be_base_domain(server_name).parse()?,
-            );
+        if self.strategy == BackendStrategy::FastEdge
+            && let Some(ref hostname) = self.hostname
+        {
+            self.propagate_headers
+                .insert(header::HOST, hostname.parse()?);
         }
         let headers = headers.into_iter().filter(|(k, _)| {
             if let Some(name) = k {
@@ -186,18 +184,16 @@ impl<C> Backend<C> {
                 if !headers
                     .iter()
                     .any(|(k, _)| k.eq_ignore_ascii_case(header::HOST.as_str()))
-                {
-                    if let Ok(uri) = req.uri.parse::<Uri>() {
-                        if let Some(host) = uri.authority().map(|a| {
-                            if let Some(port) = a.port() {
-                                format!("{}:{}", a.host(), port)
-                            } else {
-                                a.host().to_string()
-                            }
-                        }) {
-                            headers.push((header::HOST.as_str().to_string(), host))
+                    && let Ok(uri) = req.uri.parse::<Uri>()
+                    && let Some(host) = uri.authority().map(|a| {
+                        if let Some(port) = a.port() {
+                            format!("{}:{}", a.host(), port)
+                        } else {
+                            a.host().to_string()
                         }
-                    }
+                    })
+                {
+                    headers.push((header::HOST.as_str().to_string(), host))
                 }
 
                 let builder = http::Request::builder().uri(req.uri);
@@ -368,17 +364,6 @@ where
             body,
         })
     }
-}
-
-fn be_base_domain(server_name: &str) -> String {
-    let base_domain = match server_name.find('.') {
-        None => server_name,
-        Some(i) => {
-            let (_, domain) = server_name.split_at(i + 1);
-            domain
-        }
-    };
-    format!("be.{}", base_domain)
 }
 
 // extract canonical host name
@@ -600,9 +585,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -632,9 +617,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -664,9 +649,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -725,9 +710,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -765,10 +750,10 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .build(connector);
         let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
         headers.insert(
             "No-Propagate-Header",
             claims::assert_ok!("VALUE".try_into()),
@@ -803,11 +788,11 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .uri(assert_ok!("http://be.server/backend_path/".parse()))
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
 
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
@@ -838,11 +823,11 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .max_sub_requests(2)
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
 
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
@@ -987,10 +972,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test private network
         let req = Request {
@@ -1001,10 +988,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test another private network
         let req = Request {
@@ -1015,10 +1004,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test link-local
         let req = Request {
@@ -1029,10 +1020,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
     }
 
     #[test]
@@ -1050,10 +1043,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test with Host header containing private IP with port
         let req = Request {
@@ -1064,10 +1059,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
     }
 
     #[test]
@@ -1085,10 +1082,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test unique local
         let req = Request {
@@ -1099,10 +1098,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test link-local
         let req = Request {
@@ -1113,10 +1114,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use crate::service::Service;
 use crate::WasmEngine;
+use crate::service::Service;
 use tokio_util::sync::CancellationToken;
 
 pub struct StubService;

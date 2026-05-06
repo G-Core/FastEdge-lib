@@ -2,8 +2,8 @@ use crate::cache::MemoryCacheBackend;
 use crate::executor::RunExecutor;
 use crate::key_value::CliStoreManager;
 use crate::secret::SecretImpl;
-use http_backend::stats::ExtRequestStats;
 use http_backend::Backend;
+use http_backend::stats::ExtRequestStats;
 use http_service::executor::{HttpExecutorImpl, WasiHttpExecutorImpl};
 use http_service::state::HttpState;
 use http_service::{ContextHeaders, ExecutorFactory};
@@ -14,14 +14,14 @@ use runtime::app::{KvStoreOption, SecretOption};
 use runtime::logger::{Console, Logger};
 use runtime::util::stats::{CdnPhase, StatsVisitor};
 use runtime::{
-    componentize_if_necessary, App, ContextT, ExecutorCache, PreCompiledLoader, Router,
-    WasiVersion, WasmEngine,
+    App, ContextT, ExecutorCache, PreCompiledLoader, Router, WasiVersion, WasmEngine,
+    componentize_if_necessary,
 };
 use secret::SecretStore;
 use smol_str::SmolStr;
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use utils::{Dictionary, UserDiagStats};
 use wasmtime::component::Component;

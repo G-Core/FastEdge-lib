@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,12 +8,13 @@ use wasmtime_wasi_nn::wit::WasiNnView;
 
 pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
-use anyhow::{bail, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use bytes::Bytes;
 use http::{
-    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
     HeaderMap, HeaderName, HeaderValue, StatusCode,
+    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
 };
+use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{body::Body, server::conn::http1, service::service_fn};
 use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
@@ -20,11 +22,12 @@ use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
-    app::Status, service::Service, App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
+    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder, app::Status, service::Service,
 };
 use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
 use tokio::{net::TcpListener, time::error::Elapsed};
+use tracing::Instrument;
 pub use wasmtime_wasi_http::body::HyperOutgoingBody;
 
 pub mod executor;
@@ -287,26 +290,32 @@ where
             }
             Ok(app_name) => app_name,
         };
-        let span = tracing::info_span!("handle", app = app_name.as_str());
+
+        let span = tracing::info_span!("handle", app = %app_name);
         let _enter = span.enter();
 
         // lookup for application config and binary_id
-        tracing::debug!(
-            "Processing request URL: {}",
-            request.uri()
-        );
-        let cfg = match self.context.lookup_by_name(&app_name).await {
+        tracing::debug!("Processing request URL: {}", request.uri());
+        let lookup = match app_name {
+            AppName::Id(id) => self.context.lookup_by_id(id).instrument(span.clone()).await,
+            AppName::Name(name) => self
+                .context
+                .lookup_by_name(&name)
+                .instrument(span.clone())
+                .await
+                .map(|cfg| (name, cfg)),
+        };
+
+        let (app_name, cfg) = match lookup {
             None => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
-                tracing::info!(
-                    "Request for unknown application '{}' on URL: {}",
-                    app_name,
-                    request.uri()
-                );
+                tracing::info!("Request for unknown application on URL: {}", request.uri());
                 return not_found();
             }
-            Some(cfg) if cfg.status == Status::Draft || cfg.status == Status::Disabled => {
+            Some((app_name, cfg))
+                if cfg.status == Status::Draft || cfg.status == Status::Disabled =>
+            {
                 tracing::info!(
                     "Request for disabled application '{}' on URL: {}",
                     app_name,
@@ -314,7 +323,7 @@ where
                 );
                 return not_found();
             }
-            Some(cfg) if cfg.status == Status::RateLimited => {
+            Some((app_name, cfg)) if cfg.status == Status::RateLimited => {
                 tracing::info!(
                     "Request for rate limited application '{}' on URL: {}",
                     app_name,
@@ -322,7 +331,7 @@ where
                 );
                 return too_many_requests();
             }
-            Some(app_cfg) if app_cfg.status == Status::Suspended => {
+            Some((app_name, cfg)) if cfg.status == Status::Suspended => {
                 tracing::info!(
                     "Request for suspended application '{}' on URL: {}",
                     app_name,
@@ -331,7 +340,7 @@ where
                 return not_acceptable();
             }
 
-            Some(cfg) => cfg,
+            Some((app_name, cfg)) => (app_name, cfg),
         };
 
         // get cached execute context for this application
@@ -352,7 +361,11 @@ where
 
         let stats = self.context.new_stats_row(&request_id, &app_name, &cfg);
 
-        let response = match executor.execute(request, stats.clone()).await {
+        let response = match executor
+            .execute(request, stats.clone())
+            .instrument(span.clone())
+            .await
+        {
             Ok(mut response) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
@@ -522,11 +535,51 @@ fn not_acceptable() -> Result<hyper::Response<HyperOutgoingBody>> {
         .body(Empty::new().map_err(|never| match never {}).boxed())?)
 }
 
-/// borrows the request and returns the apps name
-/// app name can be either as sub-domain in a format '<app_name>.<domain>' (from `Server_name` header)
-/// or '<domain>/<app_name>' (from URL)
-fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<SmolStr> {
-    match req.headers().get("server_name") {
+#[derive(Debug, Clone)]
+pub(crate) enum AppName {
+    Name(SmolStr),
+    Id(u64),
+}
+
+impl<T> From<T> for AppName
+where
+    SmolStr: From<T>,
+{
+    fn from(s: T) -> Self {
+        AppName::Name(SmolStr::from(s))
+    }
+}
+
+impl Display for AppName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppName::Name(name) => write!(f, "{}", name),
+            AppName::Id(id) => write!(f, "{}", id),
+        }
+    }
+}
+
+const FASTEDGE_APP_ID_HEADER: &str = "fastedge_app_id";
+
+/// Extracts the application identifier from an incoming HTTP request.
+///
+/// Resolution order (first match wins):
+/// 1. `fastedge_app_id` header — parsed as a `u64` → [`AppName::Id`]
+/// 2. `server_name` header — the leftmost label of the hostname is used as the app name
+///    (e.g. `app.example.com` → `"app"`), unless it is `"www"`.
+/// 3. URL path — the first path segment is used as the app name
+///    (e.g. `/my-app/route` → `"my_app"`; hyphens are normalised to underscores).
+///
+/// Returns an error if none of the above yields a non-empty identifier.
+fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<AppName> {
+    if let Some(app_id) = req.headers().get(FASTEDGE_APP_ID_HEADER) {
+        let id = app_id.to_str().context("app_id header is not a string")?;
+        return Ok(AppName::Id(
+            id.parse::<u64>().context("app_id header is not a number")?,
+        ));
+    }
+
+    match req.headers().get(SERVER_NAME_HEADER) {
         None => {}
         Some(h) => {
             let full_hostname = h.to_str().unwrap();
@@ -535,7 +588,7 @@ fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<SmolStr> {
                 Some(i) => {
                     let (prefix, _) = full_hostname.split_at(i);
                     if prefix != "www" {
-                        return Ok(SmolStr::from(prefix));
+                        return Ok(AppName::from(prefix));
                     }
                 }
             }
@@ -548,13 +601,13 @@ fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<SmolStr> {
     }
 
     match path.find('/') {
-        None => Ok(SmolStr::from(path)),
+        None => Ok(AppName::from(path)),
         Some(i) => {
             let (prefix, _) = path.split_at(i);
             if prefix.contains('-') {
-                Ok(SmolStr::from(prefix.replace('-', "_")))
+                Ok(AppName::from(prefix.replace('-', "_")))
             } else {
-                Ok(SmolStr::from(prefix))
+                Ok(AppName::from(prefix))
             }
         }
     }
@@ -616,24 +669,163 @@ pub(crate) mod signal {
 mod tests {
     use test_case::test_case;
 
+    use crate::AppName;
     use crate::app_name_from_request;
     use bytes::Bytes;
-    use claims::assert_ok;
+    use claims::{assert_err, assert_ok};
+    use http_backend::SERVER_NAME_HEADER;
     use http_body_util::{BodyExt, Empty};
 
-    #[test_case("app.server.com", "server.com", "app"; "get app name from server_name header")]
-    fn test_app_name_from_request(server_name: &str, uri: &str, expected: &str) {
-        let req = assert_ok!(http::Request::builder()
-            .method("GET")
-            .uri(uri)
-            .header("server_name", server_name)
-            .body(
+    fn empty_body_request() -> http::request::Builder {
+        http::Request::builder().method("GET")
+    }
+
+    // ── Name variant: server_name header ──────────────────────────────────
+
+    #[test_case("app.server.com",  "/",        "app";      "server_name: normal subdomain")]
+    #[test_case("foo.example.org", "/ignored", "foo";      "server_name: path is ignored")]
+    fn test_app_name_from_server_name(server_name: &str, uri: &str, expected: &str) {
+        let req = assert_ok!(
+            empty_body_request()
+                .uri(uri)
+                .header(SERVER_NAME_HEADER, server_name)
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
+        let app_name = assert_ok!(app_name_from_request(&req));
+        assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == expected));
+    }
+
+    #[test]
+    fn test_app_name_server_name_www_falls_through_to_path() {
+        // "www" subdomain must be ignored and resolution must fall through to URL path
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/myapp/route")
+                .header(SERVER_NAME_HEADER, "www.example.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
+        let app_name = assert_ok!(app_name_from_request(&req));
+        assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == "myapp"));
+    }
+
+    #[test]
+    fn test_app_name_server_name_no_dot_falls_through_to_path() {
+        // hostname without a dot must fall through to URL path
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/myapp")
+                .header(SERVER_NAME_HEADER, "localhost")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
+        let app_name = assert_ok!(app_name_from_request(&req));
+        assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == "myapp"));
+    }
+
+    // ── Name variant: URL path ────────────────────────────────────────────
+
+    #[test_case("/myapp",         "myapp";   "path only, no subpath")]
+    #[test_case("/myapp/route",   "myapp";   "path with subpath")]
+    #[test_case("/my-app/route",  "my_app";  "hyphens normalised to underscores")]
+    fn test_app_name_from_path(uri: &str, expected: &str) {
+        let req = assert_ok!(
+            empty_body_request().uri(uri).body(
                 Empty::<Bytes>::new()
                     .map_err(|never| match never {})
                     .boxed()
-            ));
-
+            )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
-        assert_eq!(expected, app_name);
+        assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == expected));
+    }
+
+    // ── Id variant: fastedge_app_id header ───────────────────────────────
+
+    #[test]
+    fn test_app_name_from_app_id_header() {
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/")
+                .header("fastedge_app_id", "42")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
+        let app_name = assert_ok!(app_name_from_request(&req));
+        assert!(matches!(app_name, AppName::Id(42)));
+    }
+
+    #[test]
+    fn test_app_name_app_id_takes_priority_over_server_name() {
+        // fastedge_app_id must win over server_name
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/")
+                .header("fastedge_app_id", "99")
+                .header(SERVER_NAME_HEADER, "other.example.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
+        let app_name = assert_ok!(app_name_from_request(&req));
+        assert!(matches!(app_name, AppName::Id(99)));
+    }
+
+    #[test]
+    fn test_app_name_app_id_not_a_number_returns_error() {
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/")
+                .header("fastedge_app_id", "not-a-number")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
+        assert_err!(app_name_from_request(&req));
+    }
+
+    // ── Error cases ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_app_name_empty_path_returns_error() {
+        let req = assert_ok!(
+            empty_body_request().uri("/").body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            )
+        );
+        assert_err!(app_name_from_request(&req));
+    }
+
+    // ── Display impl ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_app_name_display_name() {
+        let name = AppName::Name("myapp".into());
+        assert_eq!("myapp", name.to_string());
+    }
+
+    #[test]
+    fn test_app_name_display_id() {
+        let id = AppName::Id(1234);
+        assert_eq!("1234", id.to_string());
     }
 }
