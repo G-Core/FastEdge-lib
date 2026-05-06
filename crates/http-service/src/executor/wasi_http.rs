@@ -12,6 +12,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
+use smol_str::SmolStr;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
@@ -44,9 +45,8 @@ where
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let (mut parts, body) = req.into_parts();
 
-        let Some(backend_hostname) = self.backend.hostname() else {
-            bail!("backend hostname is not set");
-        };
+        const LOCALHOST: SmolStr = SmolStr::new_inline("localhost");
+        let backend_hostname = self.backend.hostname().unwrap_or(LOCALHOST);
         let hostname = match backend_hostname.find('.') {
             None => backend_hostname.as_str(),
             Some(i) => {

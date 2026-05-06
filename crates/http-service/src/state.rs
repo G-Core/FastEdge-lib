@@ -21,7 +21,7 @@ pub struct HttpState<C> {
 const FASTEDGE_HEADER_HOSTNAME: &[u8] = b"Fastedge_Header_Hostname";
 
 impl<C> BackendRequest for HttpState<C> {
-    #[instrument(skip(self, head), ret)]
+    #[instrument(skip(self, head), level = "debug", ret)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {
             http_backend::BackendStrategy::Direct => {
