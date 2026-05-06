@@ -852,14 +852,11 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_no_app_name_returns_not_found() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("/")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(Request::builder().method("GET").uri("/").body(
+            Empty::<Bytes>::new()
+                .map_err(|never| match never {})
+                .boxed()
+        ));
 
         let context = TestContext {
             geo: load_geo_info(),

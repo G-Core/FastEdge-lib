@@ -1,6 +1,6 @@
 pub mod stats;
 
-use smol_str::SmolStr;
+use smol_str::{SmolStr, ToSmolStr};
 use std::fmt::Debug;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -80,8 +80,8 @@ impl Builder {
         self
     }
 
-    pub fn hostname(&mut self, hostname: SmolStr) -> &mut Self {
-        self.hostname = Some(hostname);
+    pub fn hostname(&mut self, hostname: impl ToSmolStr) -> &mut Self {
+        self.hostname = Some(hostname.to_smolstr());
         self
     }
 
@@ -587,9 +587,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -619,9 +619,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -651,9 +651,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -712,9 +712,9 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
             method: Method::Get,
@@ -752,10 +752,10 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .build(connector);
         let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
         headers.insert(
             "No-Propagate-Header",
             claims::assert_ok!("VALUE".try_into()),
@@ -790,11 +790,11 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .uri(assert_ok!("http://be.server/backend_path/".parse()))
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
 
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
@@ -825,11 +825,11 @@ mod tests {
         let connector = builder.build();
         let mut backend =
             Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
                 .propagate_headers_names(vec!["Propagate-Header".parse().unwrap()])
                 .max_sub_requests(2)
                 .build(connector);
-        let mut headers = HeaderMap::new();
-        headers.insert("Server_name", claims::assert_ok!("server".try_into()));
+        let headers = HeaderMap::new();
 
         claims::assert_ok!(backend.propagate_headers(headers));
         let req = Request {
