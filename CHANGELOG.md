@@ -1,8 +1,29 @@
+## [0.16.2] - 2026-05-06
+
+### 🚀 Features
+
+- Introduce `fastedge_app_id` header support and enhance app resolution logic
+
+### 🚜 Refactor
+
+- Adjust logging levels, rename `FIXME` to `TODO`, and minor code cleanup
+- Update `hostname` method to support `ToSmolStr` and enhance test cases
+- Reformating all code after switch to 2024 rust edition
+- Simplify header propagation logic with `&& let` chains
+- Use `SmolStr` for defaulting backend hostname and adjust tracing level to debug
+
+### ⚙️ Miscellaneous Tasks
+
+- Update Rust edition to 2024 and clean up static lifetime annotation
 ## [0.16.1] - 2026-05-05
 
 ### 🚀 Features
 
 - Add `Fastedge_Header_Hostname` header support and allow `Host` header overrides
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.0] - 2026-05-05
 
 ### 🚀 Features
