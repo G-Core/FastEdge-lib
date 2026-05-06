@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use http::{Request, Response};
 use http_body_util::BodyExt;
-use http_service::executor::{HttpExecutor, HttpExecutorImpl, WasiHttpExecutorImpl};
 use http_service::HyperOutgoingBody;
+use http_service::executor::{HttpExecutor, HttpExecutorImpl, WasiHttpExecutorImpl};
 use hyper::body::Body;
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;

@@ -34,7 +34,7 @@ use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
-use http::{header, HeaderName, Request};
+use http::{HeaderName, Request, header};
 use secret::SecretStore;
 use smol_str::SmolStr;
 use std::borrow::Cow;
@@ -42,7 +42,7 @@ use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::{
     bindings::http::types::ErrorCode,
-    types::{default_send_request_handler, HostFutureIncomingResponse, OutgoingRequestConfig},
+    types::{HostFutureIncomingResponse, OutgoingRequestConfig, default_send_request_handler},
 };
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 

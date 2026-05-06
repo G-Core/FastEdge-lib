@@ -83,8 +83,8 @@ impl Drop for StatsTimer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, Ordering};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU64, Ordering};
     use std::thread;
 
     // Mock implementation of StatsVisitor for testing

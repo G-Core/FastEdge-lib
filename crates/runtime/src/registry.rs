@@ -3,14 +3,15 @@ use std::ops::Deref;
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use moka::sync::Cache;
 use wasmtime_wasi_nn::backend::candle::CandleBackend;
 use wasmtime_wasi_nn::wit::types::GraphEncoding;
 use wasmtime_wasi_nn::{
-    backend::{openvino::OpenvinoBackend, BackendFromDir},
+    GraphRegistry, Registry,
+    backend::{BackendFromDir, openvino::OpenvinoBackend},
     wit::types::ExecutionTarget,
-    GraphRegistry, Registry, {Backend, Graph},
+    {Backend, Graph},
 };
 
 #[derive(Clone)]

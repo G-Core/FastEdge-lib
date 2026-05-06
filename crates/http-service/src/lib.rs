@@ -8,11 +8,11 @@ use wasmtime_wasi_nn::wit::WasiNnView;
 
 pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use bytes::Bytes;
 use http::{
-    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
     HeaderMap, HeaderName, HeaderValue, StatusCode,
+    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
 };
 use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
@@ -22,7 +22,7 @@ use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
-    app::Status, service::Service, App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
+    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder, app::Status, service::Service,
 };
 use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
@@ -669,8 +669,8 @@ pub(crate) mod signal {
 mod tests {
     use test_case::test_case;
 
-    use crate::app_name_from_request;
     use crate::AppName;
+    use crate::app_name_from_request;
     use bytes::Bytes;
     use claims::{assert_err, assert_ok};
     use http_backend::SERVER_NAME_HEADER;
@@ -685,14 +685,16 @@ mod tests {
     #[test_case("app.server.com",  "/",        "app";      "server_name: normal subdomain")]
     #[test_case("foo.example.org", "/ignored", "foo";      "server_name: path is ignored")]
     fn test_app_name_from_server_name(server_name: &str, uri: &str, expected: &str) {
-        let req = assert_ok!(empty_body_request()
-            .uri(uri)
-            .header(SERVER_NAME_HEADER, server_name)
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            empty_body_request()
+                .uri(uri)
+                .header(SERVER_NAME_HEADER, server_name)
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
         assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == expected));
     }
@@ -700,14 +702,16 @@ mod tests {
     #[test]
     fn test_app_name_server_name_www_falls_through_to_path() {
         // "www" subdomain must be ignored and resolution must fall through to URL path
-        let req = assert_ok!(empty_body_request()
-            .uri("/myapp/route")
-            .header(SERVER_NAME_HEADER, "www.example.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/myapp/route")
+                .header(SERVER_NAME_HEADER, "www.example.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
         assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == "myapp"));
     }
@@ -715,14 +719,16 @@ mod tests {
     #[test]
     fn test_app_name_server_name_no_dot_falls_through_to_path() {
         // hostname without a dot must fall through to URL path
-        let req = assert_ok!(empty_body_request()
-            .uri("/myapp")
-            .header(SERVER_NAME_HEADER, "localhost")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/myapp")
+                .header(SERVER_NAME_HEADER, "localhost")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
         assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == "myapp"));
     }
@@ -733,11 +739,13 @@ mod tests {
     #[test_case("/myapp/route",   "myapp";   "path with subpath")]
     #[test_case("/my-app/route",  "my_app";  "hyphens normalised to underscores")]
     fn test_app_name_from_path(uri: &str, expected: &str) {
-        let req = assert_ok!(empty_body_request().uri(uri).body(
-            Empty::<Bytes>::new()
-                .map_err(|never| match never {})
-                .boxed()
-        ));
+        let req = assert_ok!(
+            empty_body_request().uri(uri).body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
         assert!(matches!(&app_name, AppName::Name(n) if n.as_str() == expected));
     }
@@ -746,14 +754,16 @@ mod tests {
 
     #[test]
     fn test_app_name_from_app_id_header() {
-        let req = assert_ok!(empty_body_request()
-            .uri("/")
-            .header("fastedge_app_id", "42")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/")
+                .header("fastedge_app_id", "42")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
         assert!(matches!(app_name, AppName::Id(42)));
     }
@@ -761,29 +771,33 @@ mod tests {
     #[test]
     fn test_app_name_app_id_takes_priority_over_server_name() {
         // fastedge_app_id must win over server_name
-        let req = assert_ok!(empty_body_request()
-            .uri("/")
-            .header("fastedge_app_id", "99")
-            .header(SERVER_NAME_HEADER, "other.example.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/")
+                .header("fastedge_app_id", "99")
+                .header(SERVER_NAME_HEADER, "other.example.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
         let app_name = assert_ok!(app_name_from_request(&req));
         assert!(matches!(app_name, AppName::Id(99)));
     }
 
     #[test]
     fn test_app_name_app_id_not_a_number_returns_error() {
-        let req = assert_ok!(empty_body_request()
-            .uri("/")
-            .header("fastedge_app_id", "not-a-number")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            empty_body_request()
+                .uri("/")
+                .header("fastedge_app_id", "not-a-number")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
         assert_err!(app_name_from_request(&req));
     }
 
@@ -791,11 +805,13 @@ mod tests {
 
     #[test]
     fn test_app_name_empty_path_returns_error() {
-        let req = assert_ok!(empty_body_request().uri("/").body(
-            Empty::<Bytes>::new()
-                .map_err(|never| match never {})
-                .boxed()
-        ));
+        let req = assert_ok!(
+            empty_body_request().uri("/").body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            )
+        );
         assert_err!(app_name_from_request(&req));
     }
 

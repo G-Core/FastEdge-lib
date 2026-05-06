@@ -4,17 +4,17 @@ use std::time::Duration;
 use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
-use ::http::{header, HeaderMap, Request, Response, Uri};
-use anyhow::{anyhow, bail, Context};
+use ::http::{HeaderMap, Request, Response, Uri, header};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
-use runtime::{store::StoreBuilder, InstancePre};
-use wasmtime_wasi_http::bindings::http::types::Scheme;
+use runtime::{InstancePre, store::StoreBuilder};
 use wasmtime_wasi_http::bindings::ProxyPre;
-use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
+use wasmtime_wasi_http::bindings::http::types::Scheme;
+use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]

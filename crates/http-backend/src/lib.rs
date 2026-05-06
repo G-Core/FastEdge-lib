@@ -9,13 +9,13 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use anyhow::{anyhow, Error, Result};
-use http::{header, uri::Scheme, HeaderMap, HeaderName, Uri};
+use anyhow::{Error, Result, anyhow};
+use http::{HeaderMap, HeaderName, Uri, header, uri::Scheme};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::rt::ReadBufCursor;
-use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::{Connect, HttpConnector};
 use hyper_util::rt::TokioExecutor;
 use pin_project::pin_project;
 use tokio::net::TcpStream;
@@ -974,10 +974,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test private network
         let req = Request {
@@ -988,10 +990,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test another private network
         let req = Request {
@@ -1002,10 +1006,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test link-local
         let req = Request {
@@ -1016,10 +1022,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
     }
 
     #[test]
@@ -1037,10 +1045,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test with Host header containing private IP with port
         let req = Request {
@@ -1051,10 +1061,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
     }
 
     #[test]
@@ -1072,10 +1084,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test unique local
         let req = Request {
@@ -1086,10 +1100,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
 
         // Test link-local
         let req = Request {
@@ -1100,10 +1116,12 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("private host not allowed"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("private host not allowed")
+        );
     }
 
     #[test]

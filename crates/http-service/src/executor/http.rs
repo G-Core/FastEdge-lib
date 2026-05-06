@@ -1,7 +1,7 @@
 use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
 use http::{Method, Request, Response, StatusCode};
 use http_backend::Backend;
@@ -9,7 +9,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use reactor::gcore::fastedge;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
-use runtime::{store::StoreBuilder, InstancePre};
+use runtime::{InstancePre, store::StoreBuilder};
 use std::sync::Arc;
 use std::time::Duration;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
@@ -176,8 +176,8 @@ mod tests {
     use super::*;
     use crate::executor::http::HttpExecutorImpl;
     use crate::{
-        ContextHeaders, ExecutorFactory, HttpService, FASTEDGE_EXECUTION_TIMEOUT,
-        FASTEDGE_OUT_OF_MEMORY, INTERNAL_STATUS_OUT_OF_MEMORY, INTERNAL_STATUS_TIMEOUT_ELAPSED,
+        ContextHeaders, ExecutorFactory, FASTEDGE_EXECUTION_TIMEOUT, FASTEDGE_OUT_OF_MEMORY,
+        HttpService, INTERNAL_STATUS_OUT_OF_MEMORY, INTERNAL_STATUS_TIMEOUT_ELAPSED,
         INTERNAL_STATUS_TIMEOUT_INTERRUPT, X_CDN_INTERNAL_STATUS,
     };
     use bytes::Bytes;
@@ -191,8 +191,8 @@ mod tests {
     use runtime::service::ServiceBuilder;
     use runtime::util::stats::CdnPhase;
     use runtime::{
-        componentize_if_necessary, App, ContextT, PreCompiledLoader, Router, WasiVersion,
-        WasmConfig, WasmEngine,
+        App, ContextT, PreCompiledLoader, Router, WasiVersion, WasmConfig, WasmEngine,
+        componentize_if_necessary,
     };
     use secret::SecretStore;
     use smol_str::{SmolStr, ToSmolStr};
@@ -405,15 +405,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_success() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "success.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "success.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -440,15 +442,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_timeout() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "timeout.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "timeout.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let app = Some(App {
             binary_id: 1,
@@ -502,15 +506,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_insufficient_memory() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/?size=200000")
-            .header(SERVER_NAME_HEADER, "insufficient_memory.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/?size=200000")
+                .header(SERVER_NAME_HEADER, "insufficient_memory.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let app = Some(App {
             binary_id: 100,
@@ -560,15 +566,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn draft_app() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "draft.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "draft.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -586,15 +594,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn disabled_app() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "draft.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "draft.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -612,15 +622,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn rate_limit_app() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "draft.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "draft.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -638,15 +650,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn suspended_app() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "draft.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "draft.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -668,15 +682,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_success_with_fastedge_app_id() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header("fastedge_app_id", "12345")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header("fastedge_app_id", "12345")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -704,16 +720,18 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_fastedge_app_id_takes_priority_over_server_name() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header("fastedge_app_id", "777")
-            .header(SERVER_NAME_HEADER, "other.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header("fastedge_app_id", "777")
+                .header(SERVER_NAME_HEADER, "other.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -737,15 +755,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_fastedge_app_id_invalid_returns_not_found() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header("fastedge_app_id", "not-a-number")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header("fastedge_app_id", "not-a-number")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -765,15 +785,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_fastedge_app_id_unknown_app_returns_not_found() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header("fastedge_app_id", "42")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header("fastedge_app_id", "42")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         // No app registered in the mock router → lookup_by_id returns None
         let context = TestContext {
@@ -794,15 +816,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_fastedge_app_id_disabled_returns_not_found() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header("fastedge_app_id", "12345")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header("fastedge_app_id", "12345")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -824,15 +848,17 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_server_name_unknown_app_returns_not_found() {
-        let req = assert_ok!(Request::builder()
-            .method("GET")
-            .uri("http://www.rust-lang.org/")
-            .header(SERVER_NAME_HEADER, "ghost.test.com")
-            .body(
-                Empty::<Bytes>::new()
-                    .map_err(|never| match never {})
-                    .boxed()
-            ));
+        let req = assert_ok!(
+            Request::builder()
+                .method("GET")
+                .uri("http://www.rust-lang.org/")
+                .header(SERVER_NAME_HEADER, "ghost.test.com")
+                .body(
+                    Empty::<Bytes>::new()
+                        .map_err(|never| match never {})
+                        .boxed()
+                )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),
@@ -852,11 +878,13 @@ mod tests {
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_no_app_name_returns_not_found() {
-        let req = assert_ok!(Request::builder().method("GET").uri("/").body(
-            Empty::<Bytes>::new()
-                .map_err(|never| match never {})
-                .boxed()
-        ));
+        let req = assert_ok!(
+            Request::builder().method("GET").uri("/").body(
+                Empty::<Bytes>::new()
+                    .map_err(|never| match never {})
+                    .boxed()
+            )
+        );
 
         let context = TestContext {
             geo: load_geo_info(),

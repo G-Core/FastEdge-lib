@@ -1,12 +1,12 @@
 use anyhow::Error;
 use http::request::Parts;
 use http::uri::Scheme;
-use http::{header, HeaderMap, HeaderName, Uri};
-use http_backend::is_public_host;
+use http::{HeaderMap, HeaderName, Uri, header};
 use http_backend::Backend;
+use http_backend::is_public_host;
+use runtime::BackendRequest;
 use runtime::store::HasStats;
 use runtime::util::stats::StatsVisitor;
-use runtime::BackendRequest;
 use std::sync::Arc;
 use tracing::instrument;
 

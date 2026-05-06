@@ -2,7 +2,7 @@ use crate::limiter::ProxyLimiter;
 use crate::logger::Logger;
 use crate::registry::CachedGraphRegistry;
 use crate::util::stats::StatsVisitor;
-use crate::{Data, Wasi, WasiVersion, DEFAULT_EPOCH_TICK_INTERVAL};
+use crate::{DEFAULT_EPOCH_TICK_INTERVAL, Data, Wasi, WasiVersion};
 use anyhow::Result;
 use secret::SecretStore;
 use std::sync::Arc;

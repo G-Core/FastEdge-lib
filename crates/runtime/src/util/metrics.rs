@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use prometheus::{
-    self, register_histogram_vec, register_int_counter_vec, HistogramVec, IntCounterVec,
+    self, HistogramVec, IntCounterVec, register_histogram_vec, register_int_counter_vec,
 };
 
 use crate::AppResult;
