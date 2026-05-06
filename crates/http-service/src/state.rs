@@ -8,6 +8,7 @@ use runtime::store::HasStats;
 use runtime::util::stats::StatsVisitor;
 use runtime::BackendRequest;
 use std::sync::Arc;
+use tracing::instrument;
 
 pub struct HttpState<C> {
     pub(super) http_backend: Backend<C>,
@@ -20,6 +21,7 @@ pub struct HttpState<C> {
 const FASTEDGE_HEADER_HOSTNAME: &[u8] = b"Fastedge_Header_Hostname";
 
 impl<C> BackendRequest for HttpState<C> {
+    #[instrument(skip(self, head), ret)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {
             http_backend::BackendStrategy::Direct => {

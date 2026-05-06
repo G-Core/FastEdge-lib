@@ -44,18 +44,23 @@ where
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let (mut parts, body) = req.into_parts();
 
-        let server_name = parts
-            .headers
-            .get("server_name")
-            .and_then(|v| v.to_str().ok())
-            .ok_or(anyhow!("header Server_name is missing"))?;
+        let Some(backend_hostname) = self.backend.hostname() else {
+            bail!("backend hostname is not set");
+        };
+        let hostname = match backend_hostname.find('.') {
+            None => backend_hostname.as_str(),
+            Some(i) => {
+                let (_, domain) = backend_hostname.split_at(i + 1);
+                domain
+            }
+        };
 
         // fix relative uri to absolute
         if parts.uri.scheme().is_none() {
             let mut uparts = parts.uri.clone().into_parts();
             uparts.scheme = Some(::http::uri::Scheme::HTTP);
             if uparts.authority.is_none() {
-                uparts.authority = server_name.parse().ok()
+                uparts.authority = hostname.parse().ok()
             }
             parts.uri = Uri::from_parts(uparts)?;
         }
@@ -90,7 +95,7 @@ where
             })
             .collect();
 
-        propagate_headers.insert(header::HOST, be_base_domain(server_name).parse()?);
+        propagate_headers.insert(header::HOST, backend_hostname.parse()?);
 
         let backend_uri = http_backend.uri();
         let state = HttpState {
@@ -172,15 +177,4 @@ where
             backend,
         }
     }
-}
-
-fn be_base_domain(server_name: &str) -> String {
-    let base_domain = match server_name.find('.') {
-        None => server_name,
-        Some(i) => {
-            let (_, domain) = server_name.split_at(i + 1);
-            domain
-        }
-    };
-    format!("be.{}", base_domain)
 }

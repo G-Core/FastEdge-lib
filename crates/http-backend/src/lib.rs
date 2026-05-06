@@ -31,6 +31,8 @@ use reactor::gcore::fastedge::{
 
 type HeaderNameList = Vec<HeaderName>;
 
+pub const SERVER_NAME_HEADER: &str = "server_name";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendStrategy {
     Direct,
@@ -147,14 +149,10 @@ impl<C> Backend<C> {
         self.propagate_headers.clear();
 
         if self.strategy == BackendStrategy::FastEdge {
-            let server_name = headers
-                .get("server_name")
-                .and_then(|v| v.to_str().ok())
-                .ok_or(anyhow!("header Server_name is missing"))?;
-            self.propagate_headers.insert(
-                HeaderName::from_static("host"),
-                be_base_domain(server_name).parse()?,
-            );
+            if let Some(ref hostname) = self.hostname {
+                self.propagate_headers
+                    .insert(header::HOST, hostname.parse()?);
+            }
         }
         let headers = headers.into_iter().filter(|(k, _)| {
             if let Some(name) = k {
@@ -368,17 +366,6 @@ where
             body,
         })
     }
-}
-
-fn be_base_domain(server_name: &str) -> String {
-    let base_domain = match server_name.find('.') {
-        None => server_name,
-        Some(i) => {
-            let (_, domain) = server_name.split_at(i + 1);
-            domain
-        }
-    };
-    format!("be.{}", base_domain)
 }
 
 // extract canonical host name
