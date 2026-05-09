@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### 🐛 Bug Fixes
+
+- Respect wasm-set `Cache-Control` and `Access-Control-Allow-Origin` response headers. Runtime defaults (`no-store`, `*`) now only apply when the wasm component does not set them; per-app `rsp_headers` config still takes precedence over both. Previously these defaults were appended to every response, producing duplicate headers and (per RFC 9111) silently overriding any developer-set `Cache-Control`.
+
 ## [0.16.2] - 2026-05-06
 
 ### 🚀 Features

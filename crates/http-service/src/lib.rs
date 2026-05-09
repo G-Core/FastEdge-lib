@@ -375,7 +375,7 @@ where
                     Some(stats.get_memory_used()),
                 );
 
-                response.headers_mut().extend(app_res_headers(cfg));
+                apply_default_and_app_headers(response.headers_mut(), &cfg);
                 response
             }
             Err(error) => {
@@ -393,13 +393,13 @@ where
                     None,
                 );
 
-                let builder = hyper::Response::builder()
-                    .status(status_code)
-                    .header(X_CDN_INTERNAL_STATUS, internal_code);
-                let res_headers = app_res_headers(cfg);
-                let builder = res_headers
-                    .iter()
-                    .fold(builder, |builder, (k, v)| builder.header(k, v));
+                let mut builder = hyper::Response::builder().status(status_code);
+                if let Some(headers) = builder.headers_mut() {
+                    apply_default_and_app_headers(headers, &cfg);
+                    // X_CDN_INTERNAL_STATUS is reserved — forcibly insert *after* the helper
+                    // so per-app `rsp_headers` cannot spoof or stale-override the real error code.
+                    headers.insert(X_CDN_INTERNAL_STATUS, HeaderValue::from(internal_code));
+                }
 
                 builder.body(msg)?
             }
@@ -613,28 +613,36 @@ fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<AppName> {
     }
 }
 
-fn app_res_headers(app_cfg: App) -> HeaderMap {
-    let mut headers = HeaderMap::new();
-    headers.append(
-        ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_str("*").unwrap(),
-    );
-    headers.append(CACHE_CONTROL, HeaderValue::from_str("no-store").unwrap());
-    /* if specified, add/remove/overwrite response headers */
-    for (name, val) in app_cfg.rsp_headers {
-        if !val.is_empty() {
-            let Ok(key) = name.parse::<HeaderName>() else {
-                tracing::debug!("Unable to parse header name: {}", name);
-                continue;
-            };
-            let Ok(value) = val.parse::<HeaderValue>() else {
-                tracing::debug!("Unable to parse header value: {}", val);
-                continue;
-            };
-            headers.insert(key, value);
-        }
-    }
+/// Apply runtime defaults and per-app `rsp_headers` config to a response's headers.
+///
+/// Precedence (lowest → highest):
+///   1. Runtime defaults (`Access-Control-Allow-Origin: *`, `Cache-Control: no-store`)
+///      — only filled when neither the wasm component nor app config set them.
+///   2. Whatever the wasm component already wrote into `headers`.
+///   3. Per-app static `rsp_headers` (operator override) — replaces whatever is there.
+fn apply_default_and_app_headers(headers: &mut HeaderMap, app_cfg: &App) {
     headers
+        .entry(ACCESS_CONTROL_ALLOW_ORIGIN)
+        .or_insert_with(|| HeaderValue::from_static("*"));
+    headers
+        .entry(CACHE_CONTROL)
+        .or_insert_with(|| HeaderValue::from_static("no-store"));
+
+    /* if specified, add/overwrite response headers from app config */
+    for (name, val) in &app_cfg.rsp_headers {
+        if val.is_empty() {
+            continue;
+        }
+        let Ok(key) = name.parse::<HeaderName>() else {
+            tracing::debug!("Unable to parse header name: {}", name);
+            continue;
+        };
+        let Ok(value) = val.parse::<HeaderValue>() else {
+            tracing::debug!("Unable to parse header value: {}", val);
+            continue;
+        };
+        headers.insert(key, value);
+    }
 }
 
 fn app_req_headers(geo: impl Iterator<Item = (SmolStr, SmolStr)>) -> HeaderMap {
@@ -827,5 +835,204 @@ mod tests {
     fn test_app_name_display_id() {
         let id = AppName::Id(1234);
         assert_eq!("1234", id.to_string());
+    }
+
+    // ── apply_default_and_app_headers ────────────────────────────────────
+    //
+    // Precedence: per-app `rsp_headers` (operator) > wasm response (developer)
+    //             > runtime defaults (`*`, `no-store`).
+
+    mod apply_headers {
+        use crate::apply_default_and_app_headers;
+        use http::{
+            HeaderMap, HeaderValue,
+            header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
+        };
+        use runtime::{App, app::Status};
+        use smol_str::ToSmolStr;
+        use std::collections::HashMap;
+
+        fn test_app(rsp_headers: HashMap<smol_str::SmolStr, smol_str::SmolStr>) -> App {
+            App {
+                binary_id: 0,
+                max_duration: 10,
+                mem_limit: 1_400_000,
+                env: Default::default(),
+                rsp_headers,
+                log: Default::default(),
+                app_id: 12345,
+                client_id: 23456,
+                plan: "test_plan".to_smolstr(),
+                status: Status::Enabled,
+                debug_until: None,
+                secrets: vec![],
+                kv_stores: vec![],
+                plan_id: 0,
+                cache_mode: Default::default(),
+            }
+        }
+
+        #[test]
+        fn defaults_fill_when_wasm_silent() {
+            let mut headers = HeaderMap::new();
+            apply_default_and_app_headers(&mut headers, &test_app(HashMap::new()));
+
+            assert_eq!(
+                Some("*"),
+                headers
+                    .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .and_then(|v| v.to_str().ok())
+            );
+            assert_eq!(
+                Some("no-store"),
+                headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok())
+            );
+        }
+
+        #[test]
+        fn wasm_set_cache_control_is_preserved() {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=60"),
+            );
+
+            apply_default_and_app_headers(&mut headers, &test_app(HashMap::new()));
+
+            // Wasm value preserved, not appended-to or replaced.
+            assert_eq!(1, headers.get_all(CACHE_CONTROL).iter().count());
+            assert_eq!(
+                Some("public, max-age=60"),
+                headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok())
+            );
+            // CORS default still kicks in since wasm didn't set it.
+            assert_eq!(
+                Some("*"),
+                headers
+                    .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .and_then(|v| v.to_str().ok())
+            );
+        }
+
+        #[test]
+        fn wasm_set_cors_is_preserved() {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                ACCESS_CONTROL_ALLOW_ORIGIN,
+                HeaderValue::from_static("https://example.com"),
+            );
+
+            apply_default_and_app_headers(&mut headers, &test_app(HashMap::new()));
+
+            assert_eq!(
+                1,
+                headers.get_all(ACCESS_CONTROL_ALLOW_ORIGIN).iter().count()
+            );
+            assert_eq!(
+                Some("https://example.com"),
+                headers
+                    .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .and_then(|v| v.to_str().ok())
+            );
+            // Cache-control default still applied.
+            assert_eq!(
+                Some("no-store"),
+                headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok())
+            );
+        }
+
+        #[test]
+        fn app_config_replaces_wasm_value() {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=60"),
+            );
+
+            let cfg = test_app(HashMap::from([(
+                "Cache-Control".to_smolstr(),
+                "private, max-age=0".to_smolstr(),
+            )]));
+            apply_default_and_app_headers(&mut headers, &cfg);
+
+            // Per-app config wins over both wasm and default.
+            assert_eq!(1, headers.get_all(CACHE_CONTROL).iter().count());
+            assert_eq!(
+                Some("private, max-age=0"),
+                headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok())
+            );
+        }
+
+        #[test]
+        fn app_config_adds_custom_header() {
+            let mut headers = HeaderMap::new();
+            let cfg = test_app(HashMap::from([(
+                "X-Custom".to_smolstr(),
+                "yes".to_smolstr(),
+            )]));
+            apply_default_and_app_headers(&mut headers, &cfg);
+
+            assert_eq!(
+                Some("yes"),
+                headers.get("x-custom").and_then(|v| v.to_str().ok())
+            );
+            // Defaults still present.
+            assert_eq!(
+                Some("*"),
+                headers
+                    .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .and_then(|v| v.to_str().ok())
+            );
+            assert_eq!(
+                Some("no-store"),
+                headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok())
+            );
+        }
+
+        #[test]
+        fn reserved_internal_status_header_cannot_be_spoofed_by_app_config() {
+            // Mirrors the error-path order in lib.rs: apply defaults+app config first,
+            // then forcibly insert X_CDN_INTERNAL_STATUS so per-app rsp_headers can't
+            // override a reserved runtime header.
+            use crate::X_CDN_INTERNAL_STATUS;
+
+            let mut headers = HeaderMap::new();
+            let cfg = test_app(HashMap::from([(
+                "x-cdn-internal-status".to_smolstr(),
+                "9999".to_smolstr(),
+            )]));
+            apply_default_and_app_headers(&mut headers, &cfg);
+            // Real error code wins (here: 3010 = INTERNAL_STATUS_TIMEOUT_INTERRUPT).
+            headers.insert(X_CDN_INTERNAL_STATUS, HeaderValue::from(3010_u16));
+
+            assert_eq!(1, headers.get_all(X_CDN_INTERNAL_STATUS).iter().count());
+            assert_eq!(
+                Some("3010"),
+                headers
+                    .get(X_CDN_INTERNAL_STATUS)
+                    .and_then(|v| v.to_str().ok())
+            );
+        }
+
+        #[test]
+        fn app_config_empty_value_is_skipped() {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                CACHE_CONTROL,
+                HeaderValue::from_static("public, max-age=60"),
+            );
+
+            let cfg = test_app(HashMap::from([(
+                "Cache-Control".to_smolstr(),
+                "".to_smolstr(),
+            )]));
+            apply_default_and_app_headers(&mut headers, &cfg);
+
+            // Empty value in config is a no-op; wasm value survives.
+            assert_eq!(
+                Some("public, max-age=60"),
+                headers.get(CACHE_CONTROL).and_then(|v| v.to_str().ok())
+            );
+        }
     }
 }
