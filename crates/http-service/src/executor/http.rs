@@ -11,6 +11,7 @@ use reactor::gcore::fastedge;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 
@@ -73,7 +74,13 @@ where
 
         let properties = executor::get_properties(&parts.headers);
 
-        let store_builder = self.store_builder.with_properties(properties);
+        // Shared counter so external HTTP time in `http_backend.send_request`
+        // refunds epoch ticks via the Store's `epoch_deadline_callback`.
+        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
+        let store_builder = self
+            .store_builder
+            .with_properties(properties)
+            .epoch_pause_ms(epoch_pause_ms.clone());
         let mut http_backend = self.backend;
 
         http_backend
@@ -81,6 +88,7 @@ where
             .context("propagate headers")?;
 
         http_backend.set_ext_http_stats(stats.clone());
+        http_backend.set_epoch_pause_ms(epoch_pause_ms);
 
         let propagate_header_names = http_backend.propagate_header_names();
         let backend_uri = http_backend.uri();

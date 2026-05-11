@@ -6,8 +6,9 @@ use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Error, Result, anyhow};
 use http::{HeaderMap, HeaderName, Uri, header, uri::Scheme};
@@ -64,6 +65,10 @@ pub struct Backend<C> {
     pub strategy: BackendStrategy,
     ext_http_stats: Option<Arc<dyn ExtRequestStats>>,
     hostname: Option<SmolStr>,
+    /// Counter shared with the wasmtime Store: each outbound HTTP call
+    /// deposits its elapsed wall-clock time (ms) here so the epoch
+    /// deadline callback can refund those ticks to the guest.
+    epoch_pause_ms: Arc<AtomicU64>,
 }
 
 pub struct Builder {
@@ -112,6 +117,7 @@ impl Builder {
             strategy: self.strategy,
             ext_http_stats: None,
             hostname: self.hostname.clone(),
+            epoch_pause_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -138,6 +144,12 @@ impl<C> Backend<C> {
     /// Set external request stats
     pub fn set_ext_http_stats(&mut self, stats: Arc<dyn ExtRequestStats>) {
         self.ext_http_stats.replace(stats);
+    }
+
+    /// Share the epoch-pause counter with the Store so that outbound HTTP
+    /// time can be excluded from the guest's execution-time budget.
+    pub fn set_epoch_pause_ms(&mut self, counter: Arc<AtomicU64>) {
+        self.epoch_pause_ms = counter;
     }
 
     pub fn propagate_header_names(&self) -> HeaderNameList {
@@ -321,48 +333,57 @@ where
             .as_ref()
             .map(|s| ExtStatsTimer::new(s.clone()));
 
-        let res = self.client.request(request).await.map_err(|error| {
-            warn!(cause=?error, "sending request to backend");
-            HttpError::RequestError
-        })?;
-
-        let status = res.status().as_u16();
-        let (parts, body) = res.into_parts();
-        let headers = if !parts.headers.is_empty() {
-            Some(
-                parts
-                    .headers
-                    .iter()
-                    .filter_map(|(name, value)| match value.to_str() {
-                        Ok(value) => Some((name.to_string(), value.to_string())),
-                        Err(error) => {
-                            warn!(cause=?error, "invalid value: {:?}", value);
-                            None
-                        }
-                    })
-                    .collect::<Vec<(String, String)>>(),
-            )
-        } else {
-            None
-        };
-
-        let body_bytes = body
-            .collect()
-            .await
-            .map_err(|error| {
-                warn!(cause=?error, "receiving body from backend");
+        // Time the network I/O so we can refund the equivalent epoch ticks
+        // to the guest. Both the request send and the body read count.
+        let started = Instant::now();
+        let result = async {
+            let res = self.client.request(request).await.map_err(|error| {
+                warn!(cause=?error, "sending request to backend");
                 HttpError::RequestError
-            })?
-            .to_bytes();
-        let body = Some(body_bytes.to_vec());
+            })?;
 
-        trace!(?status, ?headers, len = body_bytes.len(), "reply");
+            let status = res.status().as_u16();
+            let (parts, body) = res.into_parts();
+            let headers = if !parts.headers.is_empty() {
+                Some(
+                    parts
+                        .headers
+                        .iter()
+                        .filter_map(|(name, value)| match value.to_str() {
+                            Ok(value) => Some((name.to_string(), value.to_string())),
+                            Err(error) => {
+                                warn!(cause=?error, "invalid value: {:?}", value);
+                                None
+                            }
+                        })
+                        .collect::<Vec<(String, String)>>(),
+                )
+            } else {
+                None
+            };
 
-        Ok(Response {
-            status,
-            headers,
-            body,
-        })
+            let body_bytes = body
+                .collect()
+                .await
+                .map_err(|error| {
+                    warn!(cause=?error, "receiving body from backend");
+                    HttpError::RequestError
+                })?
+                .to_bytes();
+            let body = Some(body_bytes.to_vec());
+
+            trace!(?status, ?headers, len = body_bytes.len(), "reply");
+
+            Ok::<_, HttpError>(Response {
+                status,
+                headers,
+                body,
+            })
+        }
+        .await;
+        self.epoch_pause_ms
+            .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        result
     }
 }
 

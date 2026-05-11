@@ -6,6 +6,7 @@ use crate::{DEFAULT_EPOCH_TICK_INTERVAL, Data, Wasi, WasiVersion};
 use anyhow::Result;
 use secret::SecretStore;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -13,10 +14,17 @@ use std::{
 };
 use tracing::{debug, instrument, trace};
 use utils::{Dictionary, Utils};
+use wasmtime::UpdateDeadline;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
+
+/// Default extra wall-clock budget (in ms) added to the tokio timeout that
+/// wraps wasm execution. Acts as a soft outer bound that must comfortably
+/// exceed the epoch budget once host I/O credit (e.g. external HTTP) extends
+/// the epoch deadline.
+pub const DEFAULT_MAX_EXTERNAL_DURATION_MS: u64 = 30_000;
 
 /// A `Store` holds the runtime state of a app instance.
 ///
@@ -92,6 +100,8 @@ pub struct StoreBuilder {
     key_value_store: key_value_store::Builder,
     dictionary: Dictionary,
     cache_backend: Option<Arc<dyn cache::CacheBackend>>,
+    epoch_pause_ms: Option<Arc<AtomicU64>>,
+    max_external_duration_ms: u64,
 }
 
 impl StoreBuilder {
@@ -110,6 +120,8 @@ impl StoreBuilder {
             key_value_store: key_value_store::Builder::default(),
             dictionary: Default::default(),
             cache_backend: None,
+            epoch_pause_ms: None,
+            max_external_duration_ms: DEFAULT_MAX_EXTERNAL_DURATION_MS,
         }
     }
 
@@ -193,6 +205,28 @@ impl StoreBuilder {
         }
     }
 
+    /// Provide the shared counter that host functions use to "pause" the
+    /// epoch deadline. Each ms accumulated here grants the guest extra
+    /// ticks when the epoch deadline next fires. If unset, the store
+    /// falls back to a private counter (no host call can deposit credit).
+    pub fn epoch_pause_ms(self, counter: Arc<AtomicU64>) -> Self {
+        Self {
+            epoch_pause_ms: Some(counter),
+            ..self
+        }
+    }
+
+    /// Wall-clock slack (in ms) added to the tokio timeout that wraps
+    /// wasm execution. Must comfortably exceed the worst-case total time
+    /// spent in epoch-paused host calls so the tokio bound does not fire
+    /// before the epoch one.
+    pub fn max_external_duration_ms(self, ms: u64) -> Self {
+        Self {
+            max_external_duration_ms: ms,
+            ..self
+        }
+    }
+
     pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
         // initialize application specific graph
         let backends: Vec<&str> = self
@@ -271,6 +305,9 @@ impl StoreBuilder {
             self.cache_backend
                 .unwrap_or_else(|| Arc::new(cache::NoCacheBackend)),
         );
+        let epoch_pause_ms = self
+            .epoch_pause_ms
+            .unwrap_or_else(|| Arc::new(AtomicU64::new(0)));
 
         let mut inner = wasmtime::Store::new(
             &self.engine,
@@ -279,7 +316,8 @@ impl StoreBuilder {
                 wasi,
                 wasi_nn,
                 store_limits: self.store_limits,
-                timeout: (self.max_duration + 1) * DEFAULT_EPOCH_TICK_INTERVAL,
+                timeout: (self.max_duration + 1) * DEFAULT_EPOCH_TICK_INTERVAL
+                    + self.max_external_duration_ms,
                 table,
                 logger,
                 http: WasiHttpCtx::new(),
@@ -288,12 +326,23 @@ impl StoreBuilder {
                 dictionary: self.dictionary,
                 utils,
                 cache: cache_impl,
+                epoch_pause_ms: epoch_pause_ms.clone(),
             },
         );
         inner.limiter(|state| &mut state.store_limits);
         // allow max number of epoch ticks (1 tick = 10 ms)
-        inner.set_epoch_deadline(self.max_duration); // allow max number of epoch ticks (1 tick = 10 ms)
-        inner.epoch_deadline_trap();
+        inner.set_epoch_deadline(self.max_duration);
+        // When the deadline fires, consume any host-call credit accumulated by
+        // `epoch_pause_ms` to extend it; if there is no credit, trap as before.
+        inner.epoch_deadline_callback(move |_ctx| {
+            let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
+            if credit_ms == 0 {
+                Err(anyhow::Error::new(wasmtime::Trap::Interrupt))
+            } else {
+                let credit_ticks = (credit_ms / DEFAULT_EPOCH_TICK_INTERVAL).max(1);
+                Ok(UpdateDeadline::Continue(credit_ticks))
+            }
+        });
         Ok(Store { inner })
     }
 }
