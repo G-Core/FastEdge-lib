@@ -4,6 +4,11 @@
 
 - Remove unused request IDs and streamline request handling
 - Improve header handling and tracing consistency
+- Remove default `ACCESS_CONTROL_ALLOW_ORIGIN` and `CACHE_CONTROL` headers for cleaner response handling
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.3] - 2026-05-11
 
 ### 🚜 Refactor
