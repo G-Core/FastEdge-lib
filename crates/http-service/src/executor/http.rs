@@ -426,7 +426,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("1".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -481,7 +481,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("2".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -545,7 +545,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("3".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -586,7 +586,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("4".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -614,7 +614,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("5".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -642,7 +642,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("6".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::TOO_MANY_REQUESTS, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -670,7 +670,7 @@ mod tests {
 
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
-        let res = assert_ok!(http_service.handle_request("7".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_ACCEPTABLE, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -703,7 +703,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("8".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
         assert_eq!(4, headers.len());
@@ -742,7 +742,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("9".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         // Reaching OK proves we resolved via lookup_by_id (otherwise our mock for
         // lookup_by_name path would have produced the same status, but we also
         // verify in `test_fastedge_app_id_invalid_returns_not_found` below that
@@ -776,7 +776,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("10".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -807,7 +807,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("11".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -837,7 +837,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("12".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -869,7 +869,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("13".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }
@@ -895,7 +895,7 @@ mod tests {
         let http_service: HttpService<TestContext, TestStats> =
             assert_ok!(ServiceBuilder::new(context).build());
 
-        let res = assert_ok!(http_service.handle_request("14".to_smolstr(), req).await);
+        let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
     }

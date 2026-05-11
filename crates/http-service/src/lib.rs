@@ -8,11 +8,11 @@ use wasmtime_wasi_nn::wit::WasiNnView;
 
 pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
-use anyhow::{Context, Error, Result, bail};
+use anyhow::{bail, Context, Error, Result};
 use bytes::Bytes;
 use http::{
-    HeaderMap, HeaderName, HeaderValue, StatusCode,
-    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
+    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL}, HeaderMap, HeaderName, HeaderValue,
+    StatusCode,
 };
 use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
@@ -22,7 +22,7 @@ use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
-    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder, app::Status, service::Service,
+    app::Status, service::Service, App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
 };
 use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
@@ -150,16 +150,13 @@ where
                         Ok((stream, _)) => {
                             tracing::debug!(remote=?stream.peer_addr(), "new http connection");
                             let connection = self_.clone();
-                            use tracing::Instrument;
                             let io = TokioIo::new(stream);
 
                             let service = service_fn(move |req| {
                                 let self_ = connection.clone();
-                                let request_id = remote_traceparent(&req);
                                 async move {
                                     self_
-                                        .handle_request(request_id.clone(), req)
-                                        .instrument(tracing::debug_span!("http", ?request_id))
+                                        .handle_request( req)
                                         .await
                                 }
                             });
@@ -269,7 +266,6 @@ where
     /// handle HTTP request.
     async fn handle_request<B>(
         &self,
-        request_id: SmolStr,
         mut request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
@@ -291,7 +287,8 @@ where
             Ok(app_name) => app_name,
         };
 
-        let span = tracing::info_span!("handle", app = %app_name);
+        let traceparent = remote_traceparent(&request);
+        let span = tracing::info_span!("handle", app = %app_name, traceparent = %traceparent);
         let _enter = span.enter();
 
         // lookup for application config and binary_id
@@ -359,7 +356,7 @@ where
             }
         };
 
-        let stats = self.context.new_stats_row(&request_id, &app_name, &cfg);
+        let stats = self.context.new_stats_row(&traceparent, &app_name, &cfg);
 
         let response = match executor
             .execute(request, stats.clone())
@@ -383,7 +380,7 @@ where
                 let (status_code, fail_reason, msg, internal_code) = map_err(error);
                 stats.status_code(status_code);
                 stats.fail_reason(fail_reason as i32);
-                tracing::debug!(?fail_reason, ?request_id, "stats");
+                tracing::debug!(?fail_reason, ?traceparent, "stats");
 
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
@@ -487,7 +484,11 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
     (status_code, fail_reason, msg, internal_code)
 }
 
-fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> SmolStr {
+fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr
+where
+    B: BodyExt + Send,
+    <B as Body>::Data: Send,
+{
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
@@ -669,8 +670,8 @@ pub(crate) mod signal {
 mod tests {
     use test_case::test_case;
 
-    use crate::AppName;
     use crate::app_name_from_request;
+    use crate::AppName;
     use bytes::Bytes;
     use claims::{assert_err, assert_ok};
     use http_backend::SERVER_NAME_HEADER;
