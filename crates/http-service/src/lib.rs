@@ -10,9 +10,7 @@ pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
 use anyhow::{Context, Error, Result, bail};
 use bytes::Bytes;
-use http::{
-    HeaderMap, HeaderName, HeaderValue, StatusCode,
-};
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{body::Body, server::conn::http1, service::service_fn};
