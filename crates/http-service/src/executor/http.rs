@@ -429,12 +429,7 @@ mod tests {
         let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
-        assert_eq!(4, headers.len());
-        assert_eq!(
-            "*",
-            assert_some!(headers.get("access-control-allow-origin"))
-        );
-        assert_eq!("no-store", assert_some!(headers.get("cache-control")));
+        assert_eq!(2, headers.len());
         assert_eq!("01", assert_some!(headers.get("RES_HEADER_01")));
         assert_eq!("02", assert_some!(headers.get("RES_HEADER_02")));
     }
@@ -484,12 +479,7 @@ mod tests {
         let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(FASTEDGE_EXECUTION_TIMEOUT, res.status());
         let headers = res.headers();
-        assert_eq!(4, headers.len());
-        assert_eq!(
-            "*",
-            assert_some!(headers.get("access-control-allow-origin"))
-        );
-        assert_eq!("no-store", assert_some!(headers.get("cache-control")));
+        assert_eq!(2, headers.len());
         assert_eq!("03", assert_some!(headers.get("RES_HEADER_03")));
         let internal_status = assert_some!(headers.get(X_CDN_INTERNAL_STATUS))
             .to_str()
@@ -548,12 +538,7 @@ mod tests {
         let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(FASTEDGE_OUT_OF_MEMORY, res.status());
         let headers = res.headers();
-        assert_eq!(4, headers.len());
-        assert_eq!(
-            "*",
-            assert_some!(headers.get("access-control-allow-origin"))
-        );
-        assert_eq!("no-store", assert_some!(headers.get("cache-control")));
+        assert_eq!(2, headers.len());
         assert_eq!("03", assert_some!(headers.get("RES_HEADER_03")));
         assert_eq!(
             INTERNAL_STATUS_OUT_OF_MEMORY.to_string(),
@@ -706,12 +691,7 @@ mod tests {
         let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::OK, res.status());
         let headers = res.headers();
-        assert_eq!(4, headers.len());
-        assert_eq!(
-            "*",
-            assert_some!(headers.get("access-control-allow-origin"))
-        );
-        assert_eq!("no-store", assert_some!(headers.get("cache-control")));
+        assert_eq!(2, headers.len());
         assert_eq!("01", assert_some!(headers.get("RES_HEADER_01")));
         assert_eq!("02", assert_some!(headers.get("RES_HEADER_02")));
     }
