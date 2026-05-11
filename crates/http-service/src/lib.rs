@@ -12,7 +12,6 @@ use anyhow::{Context, Error, Result, bail};
 use bytes::Bytes;
 use http::{
     HeaderMap, HeaderName, HeaderValue, StatusCode,
-    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
 };
 use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
@@ -615,11 +614,6 @@ fn app_name_from_request(req: &hyper::Request<impl Body>) -> Result<AppName> {
 
 fn app_res_headers(app_cfg: App) -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.append(
-        ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_str("*").unwrap(),
-    );
-    headers.append(CACHE_CONTROL, HeaderValue::from_str("no-store").unwrap());
     /* if specified, add/remove/overwrite response headers */
     for (name, val) in app_cfg.rsp_headers {
         if !val.is_empty() {
