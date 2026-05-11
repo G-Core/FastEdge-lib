@@ -150,16 +150,13 @@ where
                         Ok((stream, _)) => {
                             tracing::debug!(remote=?stream.peer_addr(), "new http connection");
                             let connection = self_.clone();
-                            use tracing::Instrument;
                             let io = TokioIo::new(stream);
 
                             let service = service_fn(move |req| {
                                 let self_ = connection.clone();
-                                let request_id = remote_traceparent(&req);
                                 async move {
                                     self_
-                                        .handle_request(request_id.clone(), req)
-                                        .instrument(tracing::debug_span!("http", ?request_id))
+                                        .handle_request(req)
                                         .await
                                 }
                             });
@@ -269,13 +266,13 @@ where
     /// handle HTTP request.
     async fn handle_request<B>(
         &self,
-        request_id: SmolStr,
         mut request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
+        let traceparent = remote_traceparent(&request);
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
@@ -285,13 +282,13 @@ where
             Err(error) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
-                tracing::info!(cause=?error, "App name not provided");
+                tracing::info!(cause=?error, traceparent = %traceparent, "App name not provided");
                 return not_found();
             }
             Ok(app_name) => app_name,
         };
 
-        let span = tracing::info_span!("handle", app = %app_name);
+        let span = tracing::info_span!("http", app = %app_name, traceparent = %traceparent);
         let _enter = span.enter();
 
         // lookup for application config and binary_id
@@ -359,7 +356,7 @@ where
             }
         };
 
-        let stats = self.context.new_stats_row(&request_id, &app_name, &cfg);
+        let stats = self.context.new_stats_row(&traceparent, &app_name, &cfg);
 
         let response = match executor
             .execute(request, stats.clone())
@@ -383,7 +380,7 @@ where
                 let (status_code, fail_reason, msg, internal_code) = map_err(error);
                 stats.status_code(status_code);
                 stats.fail_reason(fail_reason as i32);
-                tracing::debug!(?fail_reason, ?request_id, "stats");
+                tracing::debug!(?fail_reason, ?traceparent, "stats");
 
                 #[cfg(feature = "metrics")]
                 metrics::metrics(
@@ -487,7 +484,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
     (status_code, fail_reason, msg, internal_code)
 }
 
-fn remote_traceparent(req: &hyper::Request<hyper::body::Incoming>) -> SmolStr {
+fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())

@@ -7,12 +7,13 @@ use crate::state::HttpState;
 use ::http::{HeaderMap, Request, Response, Uri, header};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use http_backend::Backend;
+use http_backend::{Backend, SERVER_NAME_HEADER};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
 use smol_str::SmolStr;
+use tracing::Instrument;
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
@@ -46,7 +47,19 @@ where
         let (mut parts, body) = req.into_parts();
 
         const LOCALHOST: SmolStr = SmolStr::new_inline("localhost");
-        let backend_hostname = self.backend.hostname().unwrap_or(LOCALHOST);
+
+        // Resolve backend hostname using the following precedence:
+        // 1. `server_name` request header (if set and valid UTF-8)
+        // 2. backend's configured hostname
+        // 3. fallback to "localhost"
+        let backend_hostname: SmolStr = parts
+            .headers
+            .get(SERVER_NAME_HEADER)
+            .and_then(|v| v.to_str().ok())
+            .map(SmolStr::from)
+            .or_else(|| self.backend.hostname())
+            .unwrap_or(LOCALHOST);
+
         let hostname = match backend_hostname.find('.') {
             None => backend_hostname.as_str(),
             Some(i) => {
@@ -123,25 +136,28 @@ where
         let proxy = proxy_pre.instantiate_async(&mut store).await?;
 
         let task_stats = stats.clone();
-        let task = tokio::task::spawn(async move {
-            let duration = Duration::from_millis(store.data().timeout);
-            if let Err(e) = tokio::time::timeout(
-                duration,
-                proxy
-                    .wasi_http_incoming_handler()
-                    .call_handle(&mut store, req, out),
-            )
-            .await?
-            {
-                tracing::warn!(cause=?e, "incoming handler");
-                return Err(e);
-            };
+        let task = tokio::task::spawn(
+            async move {
+                let duration = Duration::from_millis(store.data().timeout);
+                if let Err(e) = tokio::time::timeout(
+                    duration,
+                    proxy
+                        .wasi_http_incoming_handler()
+                        .call_handle(&mut store, req, out),
+                )
+                .await?
+                {
+                    tracing::warn!(cause=?e, "incoming handler");
+                    return Err(e);
+                };
 
-            drop(stats_timer); // Stop timing for stats
-            task_stats.memory_used(store.memory_used() as u64);
+                drop(stats_timer); // Stop timing for stats
+                task_stats.memory_used(store.memory_used() as u64);
 
-            Ok(())
-        });
+                Ok(())
+            }
+            .in_current_span(),
+        );
 
         match receiver.await {
             Ok(Ok(response)) => {
