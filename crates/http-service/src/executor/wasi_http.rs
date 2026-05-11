@@ -46,27 +46,27 @@ where
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let (mut parts, body) = req.into_parts();
 
-        const LOCALHOST: SmolStr = SmolStr::new_inline("localhost");
-
+        let backend_hostname = self
+            .backend
+            .hostname()
+            .context("backend hostname must be set")?;
+        let backend_host_header = backend_hostname.parse().context("invalid hostname")?;
         // Resolve backend hostname using the following precedence:
         // 1. `server_name` request header (if set and valid UTF-8)
         // 2. backend's configured hostname
         // 3. fallback to "localhost"
-        let backend_hostname: SmolStr = parts
+        let hostname: SmolStr = parts
             .headers
             .get(SERVER_NAME_HEADER)
             .and_then(|v| v.to_str().ok())
             .map(SmolStr::from)
-            .or_else(|| self.backend.hostname())
-            .unwrap_or(LOCALHOST);
-
-        let hostname = match backend_hostname.find('.') {
-            None => backend_hostname.as_str(),
-            Some(i) => {
-                let (_, domain) = backend_hostname.split_at(i + 1);
-                domain
-            }
-        };
+            .unwrap_or_else(|| match backend_hostname.find('.') {
+                None => backend_hostname,
+                Some(i) => {
+                    let (_, domain) = backend_hostname.split_at(i + 1);
+                    SmolStr::from(domain)
+                }
+            });
 
         // fix relative uri to absolute
         if parts.uri.scheme().is_none() {
@@ -108,7 +108,7 @@ where
             })
             .collect();
 
-        propagate_headers.insert(header::HOST, backend_hostname.parse()?);
+        propagate_headers.insert(header::HOST, backend_host_header);
 
         let backend_uri = http_backend.uri();
         let state = HttpState {
