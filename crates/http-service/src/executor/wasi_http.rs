@@ -4,19 +4,19 @@ use std::time::Duration;
 use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
-use ::http::{HeaderMap, Request, Response, Uri, header};
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
+use ::http::{header, HeaderMap, Request, Response, Uri};
 use http_backend::{Backend, SERVER_NAME_HEADER};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
-use runtime::{InstancePre, store::StoreBuilder};
+use runtime::{store::StoreBuilder, InstancePre};
 use smol_str::SmolStr;
 use tracing::Instrument;
-use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::bindings::http::types::Scheme;
-use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
+use wasmtime_wasi_http::bindings::ProxyPre;
+use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -52,21 +52,23 @@ where
         // 1. `server_name` request header (if set and valid UTF-8)
         // 2. backend's configured hostname
         // 3. fallback to "localhost"
-        let backend_hostname: SmolStr = parts
+        let hostname: SmolStr = parts
             .headers
             .get(SERVER_NAME_HEADER)
             .and_then(|v| v.to_str().ok())
             .map(SmolStr::from)
-            .or_else(|| self.backend.hostname())
+            .or_else(|| {
+                self.backend
+                    .hostname()
+                    .map(|backend_hostname| match backend_hostname.find('.') {
+                        None => backend_hostname,
+                        Some(i) => {
+                            let (_, domain) = backend_hostname.split_at(i + 1);
+                            SmolStr::from(domain)
+                        }
+                    })
+            })
             .unwrap_or(LOCALHOST);
-
-        let hostname = match backend_hostname.find('.') {
-            None => backend_hostname.as_str(),
-            Some(i) => {
-                let (_, domain) = backend_hostname.split_at(i + 1);
-                domain
-            }
-        };
 
         // fix relative uri to absolute
         if parts.uri.scheme().is_none() {
@@ -108,7 +110,7 @@ where
             })
             .collect();
 
-        propagate_headers.insert(header::HOST, backend_hostname.parse()?);
+        propagate_headers.insert(header::HOST, hostname.parse()?);
 
         let backend_uri = http_backend.uri();
         let state = HttpState {
