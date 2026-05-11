@@ -1,8 +1,18 @@
+## [0.16.4] - 2026-05-11
+
+### 🚜 Refactor
+
+- Remove unused request IDs and streamline request handling
+- Improve header handling and tracing consistency
 ## [0.16.3] - 2026-05-11
 
 ### 🚜 Refactor
 
 - Switch to `ConnectionManager` for RedisStore
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.2] - 2026-05-06
 
 ### 🚀 Features
