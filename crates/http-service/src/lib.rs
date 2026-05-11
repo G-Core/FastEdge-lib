@@ -8,11 +8,11 @@ use wasmtime_wasi_nn::wit::WasiNnView;
 
 pub use crate::executor::ExecutorFactory;
 use crate::executor::HttpExecutor;
-use anyhow::{bail, Context, Error, Result};
+use anyhow::{Context, Error, Result, bail};
 use bytes::Bytes;
 use http::{
-    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL}, HeaderMap, HeaderName, HeaderValue,
-    StatusCode,
+    HeaderMap, HeaderName, HeaderValue, StatusCode,
+    header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL},
 };
 use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
@@ -22,7 +22,7 @@ use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
-    app::Status, service::Service, App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
+    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder, app::Status, service::Service,
 };
 use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
@@ -156,7 +156,7 @@ where
                                 let self_ = connection.clone();
                                 async move {
                                     self_
-                                        .handle_request( req)
+                                        .handle_request(req)
                                         .await
                                 }
                             });
@@ -272,6 +272,7 @@ where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
+        let traceparent = remote_traceparent(&request);
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
@@ -281,14 +282,13 @@ where
             Err(error) => {
                 #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
-                tracing::info!(cause=?error, "App name not provided");
+                tracing::info!(cause=?error, traceparent = %traceparent, "App name not provided");
                 return not_found();
             }
             Ok(app_name) => app_name,
         };
 
-        let traceparent = remote_traceparent(&request);
-        let span = tracing::info_span!("handle", app = %app_name, traceparent = %traceparent);
+        let span = tracing::info_span!("http", app = %app_name, traceparent = %traceparent);
         let _enter = span.enter();
 
         // lookup for application config and binary_id
@@ -484,11 +484,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
     (status_code, fail_reason, msg, internal_code)
 }
 
-fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr
-where
-    B: BodyExt + Send,
-    <B as Body>::Data: Send,
-{
+fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
@@ -670,8 +666,8 @@ pub(crate) mod signal {
 mod tests {
     use test_case::test_case;
 
-    use crate::app_name_from_request;
     use crate::AppName;
+    use crate::app_name_from_request;
     use bytes::Bytes;
     use claims::{assert_err, assert_ok};
     use http_backend::SERVER_NAME_HEADER;

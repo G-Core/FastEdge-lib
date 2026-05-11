@@ -4,19 +4,19 @@ use std::time::Duration;
 use crate::executor;
 use crate::executor::HttpExecutor;
 use crate::state::HttpState;
-use anyhow::{anyhow, bail, Context};
+use ::http::{HeaderMap, Request, Response, Uri, header};
+use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use ::http::{header, HeaderMap, Request, Response, Uri};
-use http_backend::Backend;
+use http_backend::{Backend, SERVER_NAME_HEADER};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
-use runtime::{store::StoreBuilder, InstancePre};
+use runtime::{InstancePre, store::StoreBuilder};
 use smol_str::SmolStr;
 use tracing::Instrument;
-use wasmtime_wasi_http::bindings::http::types::Scheme;
 use wasmtime_wasi_http::bindings::ProxyPre;
-use wasmtime_wasi_http::{body::HyperOutgoingBody, WasiHttpView};
+use wasmtime_wasi_http::bindings::http::types::Scheme;
+use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -47,7 +47,6 @@ where
         let (mut parts, body) = req.into_parts();
 
         const LOCALHOST: SmolStr = SmolStr::new_inline("localhost");
-        const SERVER_NAME: &'static str = "server_name";
 
         // Resolve backend hostname using the following precedence:
         // 1. `server_name` request header (if set and valid UTF-8)
@@ -55,7 +54,7 @@ where
         // 3. fallback to "localhost"
         let backend_hostname: SmolStr = parts
             .headers
-            .get(SERVER_NAME)
+            .get(SERVER_NAME_HEADER)
             .and_then(|v| v.to_str().ok())
             .map(SmolStr::from)
             .or_else(|| self.backend.hostname())
