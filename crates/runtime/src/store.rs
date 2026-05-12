@@ -316,8 +316,15 @@ impl StoreBuilder {
                 wasi,
                 wasi_nn,
                 store_limits: self.store_limits,
-                timeout: (self.max_duration + 1) * DEFAULT_EPOCH_TICK_INTERVAL
-                    + self.max_external_duration_ms,
+                // Saturating arithmetic: configuration values are `u64` and could, in
+                // pathological cases, overflow when combined. Wrapping would silently
+                // produce an unexpectedly tiny timeout in release builds, so cap at
+                // `u64::MAX` instead.
+                timeout: self
+                    .max_duration
+                    .saturating_add(1)
+                    .saturating_mul(DEFAULT_EPOCH_TICK_INTERVAL)
+                    .saturating_add(self.max_external_duration_ms),
                 table,
                 logger,
                 http: WasiHttpCtx::new(),
@@ -336,14 +343,31 @@ impl StoreBuilder {
         // `epoch_pause_ms` to extend it; if there is no credit, trap as before.
         inner.epoch_deadline_callback(move |_ctx| {
             let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
-            if credit_ms == 0 {
-                Err(anyhow::Error::new(wasmtime::Trap::Interrupt))
-            } else {
-                let credit_ticks = (credit_ms / DEFAULT_EPOCH_TICK_INTERVAL).max(1);
-                Ok(UpdateDeadline::Continue(credit_ticks))
+            match epoch_credit_ticks(credit_ms) {
+                None => Err(anyhow::Error::new(wasmtime::Trap::Interrupt)),
+                Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
             }
         });
         Ok(Store { inner })
+    }
+}
+
+/// Compute how many epoch ticks to refund given accumulated host-call
+/// credit (in ms).
+///
+/// Returns `None` when no credit has been deposited — the epoch deadline
+/// should fire as an interrupt. Otherwise returns the number of additional
+/// ticks to grant, rounded **up** so any sub-tick remainder still counts
+/// as a full tick. Without ceil-div, e.g. 15 ms of credit would only
+/// refund 1 tick (10 ms) and the next epoch deadline could still trap
+/// prematurely.
+fn epoch_credit_ticks(credit_ms: u64) -> Option<u64> {
+    if credit_ms == 0 {
+        None
+    } else {
+        // Ceil-div: `div_ceil` only returns 0 when the dividend is 0,
+        // which is short-circuited above, so this never returns `Some(0)`.
+        Some(credit_ms.div_ceil(DEFAULT_EPOCH_TICK_INTERVAL))
     }
 }
 
@@ -355,5 +379,179 @@ impl Debug for StoreBuilder {
             .field("max_duration", &self.max_duration)
             .field("store_limits", &self.store_limits)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::thread;
+    use std::time::Duration;
+    use wasmtime::{Config, Engine, Instance, Module, Store as WtStore, Trap};
+
+    // ── unit tests: epoch_credit_ticks helper ─────────────────────────────
+
+    #[test]
+    fn epoch_credit_ticks_zero_means_trap() {
+        // No host-call credit accumulated → callback must signal a trap.
+        assert_eq!(epoch_credit_ticks(0), None);
+    }
+
+    #[test]
+    fn epoch_credit_ticks_rounds_up() {
+        // 1 tick == DEFAULT_EPOCH_TICK_INTERVAL ms (10 ms).
+        // Any sub-tick remainder must round UP so the guest isn't under-refunded.
+        assert_eq!(epoch_credit_ticks(1), Some(1));
+        assert_eq!(epoch_credit_ticks(9), Some(1));
+        assert_eq!(epoch_credit_ticks(10), Some(1));
+        assert_eq!(epoch_credit_ticks(11), Some(2)); // <-- regression case
+        assert_eq!(epoch_credit_ticks(15), Some(2)); // <-- regression case
+        assert_eq!(epoch_credit_ticks(20), Some(2));
+        assert_eq!(epoch_credit_ticks(25), Some(3));
+        assert_eq!(epoch_credit_ticks(100), Some(10));
+    }
+
+    #[test]
+    fn epoch_credit_ticks_handles_u64_max() {
+        // Must not panic or overflow on extreme inputs.
+        assert_eq!(
+            epoch_credit_ticks(u64::MAX),
+            Some(u64::MAX.div_ceil(DEFAULT_EPOCH_TICK_INTERVAL)),
+        );
+    }
+
+    // ── integration test: end-to-end deadline extension ───────────────────
+    //
+    // These tests verify the same wiring used in production
+    // (`set_epoch_deadline` + `epoch_deadline_callback` consuming
+    // `epoch_pause_ms`) on a real wasmtime engine running a busy-loop guest.
+    //
+    // Without depositing credit, the deadline must fire → `Trap::Interrupt`.
+    // With credit deposited (simulating a host HTTP call that paused the
+    // epoch), the deadline must be extended and the guest must complete.
+
+    /// A guest with a bounded busy loop. Counts down a mutable global so
+    /// the loop body contains a backward branch (which is what triggers
+    /// wasmtime's epoch deadline check).
+    const SPIN_WAT: &str = r#"
+        (module
+            (global $i (mut i32) (i32.const 5000000))
+            (func (export "spin")
+                (loop $l
+                    (global.set $i (i32.sub (global.get $i) (i32.const 1)))
+                    (br_if $l (i32.gt_s (global.get $i) (i32.const 0))))))
+    "#;
+
+    fn make_engine() -> Engine {
+        let mut cfg = Config::new();
+        cfg.epoch_interruption(true);
+        Engine::new(&cfg).unwrap()
+    }
+
+    /// Install the same epoch-deadline callback used in production
+    /// (see `StoreBuilder::build_with_wasi`).
+    fn install_epoch_callback<T: 'static>(store: &mut WtStore<T>, epoch_pause_ms: Arc<AtomicU64>) {
+        store.epoch_deadline_callback(move |_ctx| {
+            let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
+            match epoch_credit_ticks(credit_ms) {
+                None => Err(anyhow::Error::new(Trap::Interrupt)),
+                Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
+            }
+        });
+    }
+
+    #[test]
+    fn busy_loop_without_credit_traps_with_interrupt() {
+        let engine = make_engine();
+        let module = Module::new(&engine, SPIN_WAT).unwrap();
+        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
+
+        let mut store = WtStore::new(&engine, ());
+        store.set_epoch_deadline(1); // very short budget: 1 tick
+        install_epoch_callback(&mut store, epoch_pause_ms.clone());
+
+        // Background ticker: bump the engine epoch until the test signals stop.
+        let stop = Arc::new(AtomicBool::new(false));
+        let ticker = {
+            let engine = engine.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    engine.increment_epoch();
+                    thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+
+        let instance = Instance::new(&mut store, &module, &[]).unwrap();
+        let spin = instance
+            .get_typed_func::<(), ()>(&mut store, "spin")
+            .unwrap();
+
+        let result = spin.call(&mut store, ());
+
+        stop.store(true, Ordering::Relaxed);
+        ticker.join().unwrap();
+
+        // The guest's busy loop must be cut short by the epoch deadline
+        // because `epoch_pause_ms` was never incremented.
+        let err = result.expect_err("guest must trap when no host-call credit is deposited");
+        let trap = err.root_cause().downcast_ref::<Trap>().copied();
+        assert_eq!(
+            trap,
+            Some(Trap::Interrupt),
+            "expected Trap::Interrupt, got: {err:?}"
+        );
+        // No leftover credit should remain in the pause counter — the
+        // callback must consume it on each fire.
+        assert_eq!(epoch_pause_ms.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn busy_loop_completes_when_credit_is_deposited() {
+        let engine = make_engine();
+        let module = Module::new(&engine, SPIN_WAT).unwrap();
+        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
+
+        let mut store = WtStore::new(&engine, ());
+        store.set_epoch_deadline(1); // very short budget: 1 tick
+        install_epoch_callback(&mut store, epoch_pause_ms.clone());
+
+        // Background ticker bumps the epoch AND deposits generous credit so
+        // every fired deadline is extended via `UpdateDeadline::Continue`.
+        // This is the production scenario where an outbound HTTP request
+        // ran for some time and the host-side timer deposited that elapsed
+        // time into `epoch_pause_ms` (see `Data::with_paused_epoch`).
+        let stop = Arc::new(AtomicBool::new(false));
+        let ticker = {
+            let engine = engine.clone();
+            let stop = stop.clone();
+            let credit = epoch_pause_ms.clone();
+            thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    // Deposit *before* incrementing the epoch so the
+                    // callback observes non-zero credit when it fires.
+                    credit.fetch_add(1_000_000, Ordering::Relaxed);
+                    engine.increment_epoch();
+                    thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+
+        let instance = Instance::new(&mut store, &module, &[]).unwrap();
+        let spin = instance
+            .get_typed_func::<(), ()>(&mut store, "spin")
+            .unwrap();
+
+        let result = spin.call(&mut store, ());
+
+        stop.store(true, Ordering::Relaxed);
+        ticker.join().unwrap();
+
+        // With epoch credit being continuously deposited, the deadline
+        // must always be extended — execution should reach the natural
+        // end of the bounded loop without trapping.
+        result.expect("guest must complete when epoch credit is deposited");
     }
 }

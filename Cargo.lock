@@ -2950,6 +2950,7 @@ dependencies = [
  "wasmtime-wasi-http",
  "wasmtime-wasi-io 36.0.7 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
  "wasmtime-wasi-nn",
+ "wat",
  "wit-component 0.246.2",
 ]
 
