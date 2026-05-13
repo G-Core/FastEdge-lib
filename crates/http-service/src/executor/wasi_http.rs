@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crate::executor;
@@ -88,8 +89,16 @@ where
         let body = body.boxed();
 
         let properties = executor::get_properties(&parts.headers);
-        let store_builder = self.store_builder.with_properties(properties);
+        // Shared counter so wasi-http outbound calls (handled by
+        // `WasiHttpView::send_request` in the runtime) refund epoch ticks
+        // via the Store's `epoch_deadline_callback`.
+        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
+        let store_builder = self
+            .store_builder
+            .with_properties(properties)
+            .epoch_pause_ms(epoch_pause_ms.clone());
         let mut http_backend = self.backend;
+        http_backend.set_epoch_pause_ms(epoch_pause_ms);
 
         http_backend
             .propagate_headers(parts.headers.clone())

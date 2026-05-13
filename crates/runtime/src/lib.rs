@@ -2,6 +2,8 @@ use crate::app::KvStoreOption;
 use crate::store::HasStats;
 use http_backend::stats::ExtStatsTimer;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use std::{fmt::Debug, ops::Deref};
 use utils::{Dictionary, Utils};
 use wasmtime_wasi::ResourceTable;
@@ -97,6 +99,11 @@ pub struct Data<T: 'static> {
     pub dictionary: Dictionary,
     pub utils: Utils,
     pub cache: cache::CacheImpl,
+    /// Milliseconds of host I/O that should not count against the epoch
+    /// deadline. The `epoch_deadline_callback` installed on the Store reads
+    /// and clears this counter, converting milliseconds into extra ticks to
+    /// extend the deadline.
+    pub epoch_pause_ms: Arc<AtomicU64>,
 }
 
 pub trait BackendRequest {
@@ -143,13 +150,16 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
         let request = Request::from_parts(head, body);
         // start external request stats timer
         let stats = self.inner.get_stats();
+        let epoch_pause_ms = self.epoch_pause_ms.clone();
 
         let handle = wasmtime_wasi::runtime::spawn(async move {
             let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until request is done
-            Ok(
+            let started = Instant::now();
+            let resp =
                 default_send_request_handler(request, OutgoingRequestConfig { use_tls, ..config })
-                    .await,
-            )
+                    .await;
+            epoch_pause_ms.fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            Ok(resp)
         });
         Ok(HostFutureIncomingResponse::pending(handle))
     }
