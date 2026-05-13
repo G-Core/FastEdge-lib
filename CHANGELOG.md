@@ -1,3 +1,19 @@
+## [0.16.6] - 2026-05-13
+
+### 🚀 Features
+
+- Add support for epoch-based deadline extensions for host I/O
+- Enhance epoch deadline handling with credit refunding logic
+
+### 🚜 Refactor
+
+- Improve hostname resolution and clean up imports
+- Simplify backend hostname resolution and header handling
+## [0.16.5] - 2026-05-11
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.4] - 2026-05-11
 
 ### 🚜 Refactor
