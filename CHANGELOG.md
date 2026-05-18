@@ -1,3 +1,8 @@
+## [0.16.7] - 2026-05-18
+
+### 🐛 Bug Fixes
+
+- Set backend hostname to localhost during build
 ## [0.16.6] - 2026-05-13
 
 ### 🚀 Features
@@ -9,6 +14,10 @@
 
 - Improve hostname resolution and clean up imports
 - Simplify backend hostname resolution and header handling
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.5] - 2026-05-11
 
 ### ⚙️ Miscellaneous Tasks
