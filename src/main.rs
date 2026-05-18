@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
                     .collect(),
             );
 
-            let backend = builder.build(backend_connector);
+            let backend = builder.hostname("localhost").build(backend_connector);
 
             let has_dotenv_flag = run.dotenv.is_some();
 
