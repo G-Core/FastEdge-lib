@@ -108,4 +108,18 @@ impl CacheBackend for MemoryCacheBackend {
             Ok(true)
         }
     }
+
+    async fn purge(&self) -> Result<u64, Error> {
+        let mut entries = self.entries.lock().await;
+        let ret = entries.len() as u64;
+        entries.clear();
+        Ok(ret)
+    }
+
+    async fn purge_prefix(&self, prefix: &str) -> Result<u64, Error> {
+        let mut entries = self.entries.lock().await;
+        let ret = entries.len() as u64;
+        entries.retain(|k, _| !k.starts_with(prefix));
+        Ok(ret - entries.len() as u64)
+    }
 }
