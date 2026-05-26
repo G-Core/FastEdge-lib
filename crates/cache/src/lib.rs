@@ -24,9 +24,19 @@ pub trait CacheBackend: Sync + Send {
     /// Set or update the expiry of `key` to `ttl-ms` milliseconds from now.
     async fn expire(&self, key: &str, ttl_ms: u64) -> Result<bool, Error>;
 
-    async fn purge(&self) -> Result<u64, Error>;
+    /// Remove all entries from the cache.
+    ///
+    /// Returns the number of entries removed.
+    async fn purge(&self) -> Result<u64, Error> {
+        Err(Error::AccessDenied)
+    }
 
-    async fn purge_prefix(&self, prefix: String) -> Result<u64, Error>;
+    /// Remove all cache entries whose keys start with `prefix`.
+    ///
+    /// Returns the number of entries removed.
+    async fn purge_prefix(&self, _prefix: &str) -> Result<u64, Error> {
+        Err(Error::AccessDenied)
+    }
 }
 
 /// Implementation of cache host functions
@@ -74,7 +84,7 @@ impl cache_sync::Host for CacheImpl {
         self.backend.purge().await
     }
     async fn purge_prefix(&mut self, prefix: String) -> Result<u64, Error> {
-        self.backend.purge_prefix(prefix).await
+        self.backend.purge_prefix(&prefix).await
     }
 }
 
@@ -104,14 +114,6 @@ impl CacheBackend for NoCacheBackend {
     }
 
     async fn expire(&self, _key: &str, _ttl_ms: u64) -> Result<bool, Error> {
-        Err(Error::AccessDenied)
-    }
-
-    async fn purge(&self) -> Result<u64, Error> {
-        Err(Error::AccessDenied)
-    }
-
-    async fn purge_prefix(&self, _prefix: String) -> Result<u64, Error> {
         Err(Error::AccessDenied)
     }
 }
@@ -205,14 +207,6 @@ mod tests {
             } else {
                 Ok(false)
             }
-        }
-
-        async fn purge(&self) -> Result<u64, Error> {
-            todo!()
-        }
-
-        async fn purge_prefix(&self, _prefix: String) -> Result<u64, Error> {
-            todo!()
         }
     }
 
