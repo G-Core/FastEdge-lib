@@ -1,8 +1,22 @@
+## [0.17.0] - 2026-05-26
+
+### 🚀 Features
+
+- Implement cache purge and purge_prefix methods
+- Implement default behavior for purge and purge_prefix methods
+
+### 🐛 Bug Fixes
+
+- Correct prefix matching logic in purge_prefix method
 ## [0.16.7] - 2026-05-18
 
 ### 🐛 Bug Fixes
 
 - Set backend hostname to localhost during build
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.6] - 2026-05-13
 
 ### 🚀 Features
