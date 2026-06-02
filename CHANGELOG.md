@@ -1,4 +1,4 @@
-## [0.17.0] - 2026-05-26
+## [0.17.0] - 2026-06-02
 
 ### 🚀 Features
 
@@ -8,6 +8,10 @@
 ### 🐛 Bug Fixes
 
 - Correct prefix matching logic in purge_prefix method
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.16.7] - 2026-05-18
 
 ### 🐛 Bug Fixes
