@@ -69,6 +69,7 @@ pub struct Backend<C> {
     /// deposits its elapsed wall-clock time (ms) here so the epoch
     /// deadline callback can refund those ticks to the guest.
     epoch_pause_ms: Arc<AtomicU64>,
+    cdn_real_host: Option<SmolStr>,
 }
 
 pub struct Builder {
@@ -118,6 +119,7 @@ impl Builder {
             ext_http_stats: None,
             hostname: self.hostname.clone(),
             epoch_pause_ms: Arc::new(AtomicU64::new(0)),
+            cdn_real_host: None,
         }
     }
 }
@@ -139,6 +141,14 @@ impl<C> Backend<C> {
 
     pub fn hostname(&self) -> Option<SmolStr> {
         self.hostname.clone()
+    }
+
+    pub fn set_cdn_real_host(&mut self, cdn_real_host: SmolStr) {
+        self.cdn_real_host = Some(cdn_real_host);
+    }
+
+    pub fn cdn_real_host(&self) -> Option<SmolStr> {
+        self.cdn_real_host.clone()
     }
 
     /// Set external request stats
@@ -251,6 +261,21 @@ impl<C> Backend<C> {
                     original_host
                 );
 
+                // When the outbound call targets the CDN "real host" (the host of the
+                // original end-user request, carried in the `X-Cdn-Real-Host` header) on a
+                // default port, the backend resource is the app itself. In that case route
+                // the request back to `localhost`, expose the real host via
+                // `Fastedge_Header_Hostname`, and ignore any `Host` header the app set.
+                let self_binding = self
+                    .cdn_real_host
+                    .as_ref()
+                    .zip(original_url.host())
+                    .is_some_and(|(cdn_real_host, url_host)| {
+                        let port_ok =
+                            matches!(original_url.port_u16(), None | Some(80) | Some(443));
+                        port_ok && cdn_real_host.eq_ignore_ascii_case(url_host)
+                    });
+
                 // filter headers
                 let mut headers = req
                     .headers
@@ -274,14 +299,25 @@ impl<C> Backend<C> {
                     })
                     .collect::<Vec<(String, String)>>();
 
-                headers.push(("fastedge-hostname".to_string(), original_host));
-                headers.push((
-                    "fastedge-scheme".to_string(),
-                    original_url.scheme_str().unwrap_or("http").to_string(),
-                ));
-                //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
-                if let Some(request_host_header) = request_host_header {
-                    headers.push(("Fastedge_Header_Hostname".to_string(), request_host_header));
+                if self_binding {
+                    // URL host is guaranteed present here (checked above).
+                    let url_host = original_url.host().unwrap_or_default().to_string();
+                    headers.push(("fastedge-hostname".to_string(), "localhost".to_string()));
+                    headers.push((
+                        "fastedge-scheme".to_string(),
+                        original_url.scheme_str().unwrap_or("http").to_string(),
+                    ));
+                    headers.push(("Fastedge_Header_Hostname".to_string(), url_host));
+                } else {
+                    headers.push(("fastedge-hostname".to_string(), original_host));
+                    headers.push((
+                        "fastedge-scheme".to_string(),
+                        original_url.scheme_str().unwrap_or("http").to_string(),
+                    ));
+                    //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
+                    if let Some(request_host_header) = request_host_header {
+                        headers.push(("Fastedge_Header_Hostname".to_string(), request_host_header));
+                    }
                 }
                 headers.extend(self.propagate_headers_vec());
 
@@ -707,6 +743,139 @@ mod tests {
         let req = Request {
             method: Method::Get,
             uri: "https://rust-lang.org".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let res = claims::assert_ok!(backend.send_request(req).await);
+        assert_eq!(http::StatusCode::OK, res.status);
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn cdn_real_host_self_binding() {
+        let mut builder = mock_http_connector::Connector::builder();
+        builder
+            .expect()
+            .times(1)
+            .with_method(http::Method::GET)
+            .with_uri("http://be.server/path")
+            .with_header("fastedge-hostname", "localhost")
+            .with_header("fastedge-scheme", "http")
+            .with_header("fastedge_header_hostname", "example.com")
+            .with_header("host", "be.server")
+            .with_header("header01", "01")
+            .returning("OK")
+            .unwrap();
+        let connector = builder.build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .build(connector);
+        backend.set_cdn_real_host("example.com".into());
+        let headers = HeaderMap::new();
+        claims::assert_ok!(backend.propagate_headers(headers));
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![("header01".to_string(), "01".to_string())],
+            body: None,
+        };
+        let res = claims::assert_ok!(backend.send_request(req).await);
+        assert_eq!(http::StatusCode::OK, res.status);
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn cdn_real_host_self_binding_ignores_app_host_header() {
+        let mut builder = mock_http_connector::Connector::builder();
+        builder
+            .expect()
+            .times(1)
+            .with_method(http::Method::GET)
+            .with_uri("http://be.server/path")
+            .with_header("fastedge-hostname", "localhost")
+            .with_header("fastedge-scheme", "https")
+            // app-provided Host header is ignored; the real host comes from the URL
+            .with_header("fastedge_header_hostname", "example.com")
+            .with_header("host", "be.server")
+            .returning("OK")
+            .unwrap();
+        let connector = builder.build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .build(connector);
+        backend.set_cdn_real_host("example.com".into());
+        let headers = HeaderMap::new();
+        claims::assert_ok!(backend.propagate_headers(headers));
+        let req = Request {
+            method: Method::Get,
+            uri: "https://example.com:443/path".to_string(),
+            headers: vec![("host".to_string(), "app-set-host.com".to_string())],
+            body: None,
+        };
+        let res = claims::assert_ok!(backend.send_request(req).await);
+        assert_eq!(http::StatusCode::OK, res.status);
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn cdn_real_host_non_default_port_skips_self_binding() {
+        let mut builder = mock_http_connector::Connector::builder();
+        builder
+            .expect()
+            .times(1)
+            .with_method(http::Method::GET)
+            .with_uri("http://be.server/path")
+            // non-default port => behaves like a normal external call
+            .with_header("fastedge-hostname", "example.com:8080")
+            .with_header("fastedge-scheme", "http")
+            .with_header("host", "be.server")
+            .returning("OK")
+            .unwrap();
+        let connector = builder.build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .build(connector);
+        backend.set_cdn_real_host("example.com".into());
+        let headers = HeaderMap::new();
+        claims::assert_ok!(backend.propagate_headers(headers));
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com:8080/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let res = claims::assert_ok!(backend.send_request(req).await);
+        assert_eq!(http::StatusCode::OK, res.status);
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn cdn_real_host_mismatch_skips_self_binding() {
+        let mut builder = mock_http_connector::Connector::builder();
+        builder
+            .expect()
+            .times(1)
+            .with_method(http::Method::GET)
+            .with_uri("http://be.server/path")
+            .with_header("fastedge-hostname", "example.com")
+            .with_header("fastedge-scheme", "http")
+            .with_header("host", "be.server")
+            .returning("OK")
+            .unwrap();
+        let connector = builder.build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .build(connector);
+        backend.set_cdn_real_host("other.com".into());
+        let headers = HeaderMap::new();
+        claims::assert_ok!(backend.propagate_headers(headers));
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
             headers: vec![],
             body: None,
         };

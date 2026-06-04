@@ -100,6 +100,14 @@ where
         let mut http_backend = self.backend;
         http_backend.set_epoch_pause_ms(epoch_pause_ms);
 
+        if let Some(cdn_real_host) = parts
+            .headers
+            .get(executor::X_CDN_REAL_HOST)
+            .and_then(|v| v.to_str().ok())
+        {
+            http_backend.set_cdn_real_host(cdn_real_host.into());
+        }
+
         http_backend
             .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;

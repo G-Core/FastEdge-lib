@@ -1,7 +1,7 @@
 use anyhow::Error;
 use http::request::Parts;
 use http::uri::Scheme;
-use http::{HeaderMap, HeaderName, Uri, header};
+use http::{HeaderMap, HeaderName, HeaderValue, Uri, header};
 use http_backend::Backend;
 use http_backend::is_public_host;
 use runtime::BackendRequest;
@@ -18,7 +18,15 @@ pub struct HttpState<C> {
     pub(super) stats: Arc<dyn StatsVisitor>,
 }
 
-const FASTEDGE_HEADER_HOSTNAME: &[u8] = b"Fastedge_Header_Hostname";
+// `HeaderName::from_static` is `const fn`, so the routing-header names can be
+// declared once at module scope and reused everywhere without re-parsing.
+const FASTEDGE_HOSTNAME: HeaderName = HeaderName::from_static("fastedge-hostname");
+const FASTEDGE_SCHEME: HeaderName = HeaderName::from_static("fastedge-scheme");
+// NOTE: `HeaderName::from_static` requires the input to be lowercase; the
+// previous code preserved the mixed-case `Fastedge_Header_Hostname` purely as
+// the display form, but `HeaderMap` lookups are case-insensitive so the
+// lowercase form is equivalent on the wire.
+const FASTEDGE_HEADER_HOSTNAME: HeaderName = HeaderName::from_static("fastedge_header_hostname");
 
 impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self, head), level = "debug", ret)]
@@ -64,13 +72,28 @@ impl<C> BackendRequest for HttpState<C> {
                     original_host
                 );
 
+                // When the outbound call targets the CDN "real host" (the host of the
+                // original end-user request, carried in the `X-Cdn-Real-Host` header) on a
+                // default port, the backend resource is the app itself. In that case route
+                // the request back to `localhost`, expose the real host via
+                // `Fastedge_Header_Hostname`, and ignore any `Host` header the app set.
+                let self_binding = self
+                    .http_backend
+                    .cdn_real_host()
+                    .zip(original_url.host())
+                    .is_some_and(|(cdn_real_host, url_host)| {
+                        let port_ok =
+                            matches!(original_url.port_u16(), None | Some(80) | Some(443));
+                        port_ok && cdn_real_host.eq_ignore_ascii_case(url_host)
+                    });
+
                 static FILTER_HEADERS: [HeaderName; 6] = [
                     header::HOST,
                     header::CONTENT_LENGTH,
                     header::TRANSFER_ENCODING,
                     header::UPGRADE,
-                    HeaderName::from_static("fastedge-hostname"),
-                    HeaderName::from_static("fastedge-scheme"),
+                    FASTEDGE_HOSTNAME,
+                    FASTEDGE_SCHEME,
                 ];
 
                 // filter headers
@@ -83,19 +106,28 @@ impl<C> BackendRequest for HttpState<C> {
                     })
                     .collect::<HeaderMap>();
 
-                headers.insert(
-                    HeaderName::from_static("fastedge-hostname"),
-                    original_host.parse()?,
-                );
-                headers.insert(
-                    HeaderName::from_static("fastedge-scheme"),
-                    original_url.scheme_str().unwrap_or("http").parse()?,
-                );
-                //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
-                if let Some(request_host_header) = request_host_header_value {
-                    let fastedge_header_hostname =
-                        HeaderName::from_bytes(FASTEDGE_HEADER_HOSTNAME)?;
-                    headers.insert(fastedge_header_hostname, request_host_header);
+                if self_binding {
+                    tracing::debug!(
+                        "found backend request original url host matches cdn real host, applying self-binding logic"
+                    );
+                    // URL host is guaranteed present here (checked above).
+                    let url_host = original_url.host().unwrap_or_default();
+                    headers.insert(FASTEDGE_HOSTNAME, HeaderValue::from_static("localhost"));
+                    headers.insert(
+                        FASTEDGE_SCHEME,
+                        original_url.scheme_str().unwrap_or("http").parse()?,
+                    );
+                    headers.insert(FASTEDGE_HEADER_HOSTNAME, url_host.parse()?);
+                } else {
+                    headers.insert(FASTEDGE_HOSTNAME, original_host.parse()?);
+                    headers.insert(
+                        FASTEDGE_SCHEME,
+                        original_url.scheme_str().unwrap_or("http").parse()?,
+                    );
+                    //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
+                    if let Some(request_host_header) = request_host_header_value {
+                        headers.insert(FASTEDGE_HEADER_HOSTNAME, request_host_header);
+                    }
                 }
 
                 headers.extend(self.propagate_headers.clone());
@@ -157,5 +189,137 @@ fn canonical_url(
 impl<T> HasStats for HttpState<T> {
     fn get_stats(&self) -> Arc<dyn StatsVisitor> {
         self.stats.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use http::Request;
+    use http_backend::stats::ExtRequestStats;
+    use http_backend::{BackendStrategy, FastEdgeConnector};
+    use key_value_store::ReadStats;
+    use runtime::util::stats::CdnPhase;
+    use std::time::Duration;
+    use utils::UserDiagStats;
+
+    #[derive(Clone)]
+    struct TestStats;
+    impl ReadStats for TestStats {
+        fn count_kv_read(&self, _value: i32) {}
+        fn count_kv_byod_read(&self, _value: i32) {}
+    }
+    impl UserDiagStats for TestStats {
+        fn set_user_diag(&self, _diag: &str) {}
+    }
+    impl ExtRequestStats for TestStats {
+        fn observe_ext(&self, _elapsed: Duration) {}
+    }
+    impl StatsVisitor for TestStats {
+        fn status_code(&self, _status_code: u16) {}
+        fn memory_used(&self, _memory_used: u64) {}
+        fn fail_reason(&self, _fail_reason: i32) {}
+        fn observe(&self, _elapsed: Duration) {}
+        fn get_time_elapsed(&self) -> u64 {
+            0
+        }
+        fn get_memory_used(&self) -> u64 {
+            0
+        }
+        fn cdn_phase(&self, _phase: CdnPhase) {}
+    }
+
+    fn make_state(cdn_real_host: Option<&str>) -> HttpState<FastEdgeConnector> {
+        let connector = FastEdgeConnector::new("http://be.server/".parse().unwrap());
+        let mut http_backend = Backend::<FastEdgeConnector>::builder(BackendStrategy::FastEdge)
+            .hostname("be.server")
+            .uri("http://be.server/".parse().unwrap())
+            .build(connector);
+        if let Some(cdn_real_host) = cdn_real_host {
+            http_backend.set_cdn_real_host(cdn_real_host.into());
+        }
+        let backend_uri = http_backend.uri();
+        HttpState {
+            http_backend,
+            uri: backend_uri,
+            propagate_headers: HeaderMap::new(),
+            propagate_header_names: vec![],
+            stats: Arc::new(TestStats),
+        }
+    }
+
+    fn parts(uri: &str, headers: &[(&str, &str)]) -> Parts {
+        let mut builder = Request::builder().uri(uri);
+        for (k, v) in headers {
+            builder = builder.header(*k, *v);
+        }
+        builder.body(()).unwrap().into_parts().0
+    }
+
+    fn header<'a>(parts: &'a Parts, name: &str) -> Option<&'a str> {
+        parts.headers.get(name).and_then(|v| v.to_str().ok())
+    }
+
+    #[test]
+    fn self_binding_rewrites_routing_headers() {
+        let mut state = make_state(Some("example.com"));
+        let out = state
+            .backend_request(parts("http://example.com/path", &[]))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-hostname"), Some("localhost"));
+        assert_eq!(header(&out, "fastedge-scheme"), Some("http"));
+        assert_eq!(
+            header(&out, "fastedge_header_hostname"),
+            Some("example.com")
+        );
+    }
+
+    #[test]
+    fn self_binding_ignores_app_host_header() {
+        let mut state = make_state(Some("example.com"));
+        let out = state
+            .backend_request(parts(
+                "https://example.com:443/path",
+                &[("host", "app-set-host.com")],
+            ))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-hostname"), Some("localhost"));
+        assert_eq!(header(&out, "fastedge-scheme"), Some("https"));
+        // real host comes from the URL, not the app-provided Host header
+        assert_eq!(
+            header(&out, "fastedge_header_hostname"),
+            Some("example.com")
+        );
+    }
+
+    #[test]
+    fn non_default_port_skips_self_binding() {
+        let mut state = make_state(Some("example.com"));
+        let out = state
+            .backend_request(parts("http://example.com:8080/path", &[]))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-hostname"), Some("example.com:8080"));
+        assert_eq!(header(&out, "fastedge_header_hostname"), None);
+    }
+
+    #[test]
+    fn mismatch_skips_self_binding() {
+        let mut state = make_state(Some("other.com"));
+        let out = state
+            .backend_request(parts("http://example.com/path", &[]))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-hostname"), Some("example.com"));
+        assert_eq!(header(&out, "fastedge_header_hostname"), None);
+    }
+
+    #[test]
+    fn no_cdn_real_host_keeps_default_behavior() {
+        let mut state = make_state(None);
+        let out = state
+            .backend_request(parts("http://example.com/path", &[("host", "app.com")]))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-hostname"), Some("example.com"));
+        // app Host header is surfaced via Fastedge_Header_Hostname in the default path
+        assert_eq!(header(&out, "fastedge_header_hostname"), Some("app.com"));
     }
 }
