@@ -34,6 +34,22 @@ type HeaderNameList = Vec<HeaderName>;
 
 pub const SERVER_NAME_HEADER: &str = "server_name";
 
+// Header names used by FastEdge routing — single source of truth so a typo
+// can't slip in at one of the several push/filter sites that reference them.
+const FASTEDGE_HOSTNAME: &str = "fastedge-hostname";
+const FASTEDGE_SCHEME: &str = "fastedge-scheme";
+const FASTEDGE_HEADER_HOSTNAME: &str = "Fastedge_Header_Hostname";
+const HOST_HEADER: &str = "host";
+const CONTENT_LENGTH_HEADER: &str = "content-length";
+const TRANSFER_ENCODING_HEADER: &str = "transfer-encoding";
+
+// Default scheme used when an outbound URL doesn't specify one.
+const DEFAULT_SCHEME: &str = "http";
+
+// Loopback hostname injected into `fastedge-hostname` when self-binding the
+// outbound call back to the app itself.
+const SELF_BINDING_HOST: &str = "127.0.0.1";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BackendStrategy {
     Direct,
@@ -284,11 +300,11 @@ impl<C> Backend<C> {
                     .filter(|(k, _)| {
                         !matches!(
                             k.as_str(),
-                            "host"
-                                | "content-length"
-                                | "transfer-encoding"
-                                | "fastedge-hostname"
-                                | "fastedge-scheme"
+                            HOST_HEADER
+                                | CONTENT_LENGTH_HEADER
+                                | TRANSFER_ENCODING_HEADER
+                                | FASTEDGE_HOSTNAME
+                                | FASTEDGE_SCHEME
                         )
                     })
                     .filter(|(k, _)| {
@@ -302,21 +318,27 @@ impl<C> Backend<C> {
                 if self_binding {
                     // URL host is guaranteed present here (checked above).
                     let url_host = original_url.host().unwrap_or_default().to_string();
-                    headers.push(("fastedge-hostname".to_string(), "localhost".to_string()));
+                    headers.push((FASTEDGE_HOSTNAME.to_string(), SELF_BINDING_HOST.to_string()));
                     headers.push((
-                        "fastedge-scheme".to_string(),
-                        original_url.scheme_str().unwrap_or("http").to_string(),
+                        FASTEDGE_SCHEME.to_string(),
+                        original_url
+                            .scheme_str()
+                            .unwrap_or(DEFAULT_SCHEME)
+                            .to_string(),
                     ));
-                    headers.push(("Fastedge_Header_Hostname".to_string(), url_host));
+                    headers.push((FASTEDGE_HEADER_HOSTNAME.to_string(), url_host));
                 } else {
-                    headers.push(("fastedge-hostname".to_string(), original_host));
+                    headers.push((FASTEDGE_HOSTNAME.to_string(), original_host));
                     headers.push((
-                        "fastedge-scheme".to_string(),
-                        original_url.scheme_str().unwrap_or("http").to_string(),
+                        FASTEDGE_SCHEME.to_string(),
+                        original_url
+                            .scheme_str()
+                            .unwrap_or(DEFAULT_SCHEME)
+                            .to_string(),
                     ));
                     //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
                     if let Some(request_host_header) = request_host_header {
-                        headers.push(("Fastedge_Header_Hostname".to_string(), request_host_header));
+                        headers.push((FASTEDGE_HEADER_HOSTNAME.to_string(), request_host_header));
                     }
                 }
                 headers.extend(self.propagate_headers_vec());
@@ -759,7 +781,7 @@ mod tests {
             .times(1)
             .with_method(http::Method::GET)
             .with_uri("http://be.server/path")
-            .with_header("fastedge-hostname", "localhost")
+            .with_header("fastedge-hostname", "127.0.0.1")
             .with_header("fastedge-scheme", "http")
             .with_header("fastedge_header_hostname", "example.com")
             .with_header("host", "be.server")
@@ -793,7 +815,7 @@ mod tests {
             .times(1)
             .with_method(http::Method::GET)
             .with_uri("http://be.server/path")
-            .with_header("fastedge-hostname", "localhost")
+            .with_header("fastedge-hostname", "127.0.0.1")
             .with_header("fastedge-scheme", "https")
             // app-provided Host header is ignored; the real host comes from the URL
             .with_header("fastedge_header_hostname", "example.com")

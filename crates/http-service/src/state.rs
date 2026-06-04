@@ -27,6 +27,7 @@ const FASTEDGE_SCHEME: HeaderName = HeaderName::from_static("fastedge-scheme");
 // the display form, but `HeaderMap` lookups are case-insensitive so the
 // lowercase form is equivalent on the wire.
 const FASTEDGE_HEADER_HOSTNAME: HeaderName = HeaderName::from_static("fastedge_header_hostname");
+const FASTEDGE_HOSTNAME_VALUE: HeaderValue = HeaderValue::from_static("127.0.0.1");
 
 impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self, head), level = "debug", ret)]
@@ -112,7 +113,7 @@ impl<C> BackendRequest for HttpState<C> {
                     );
                     // URL host is guaranteed present here (checked above).
                     let url_host = original_url.host().unwrap_or_default();
-                    headers.insert(FASTEDGE_HOSTNAME, HeaderValue::from_static("localhost"));
+                    headers.insert(FASTEDGE_HOSTNAME, FASTEDGE_HOSTNAME_VALUE);
                     headers.insert(
                         FASTEDGE_SCHEME,
                         original_url.scheme_str().unwrap_or("http").parse()?,
@@ -266,7 +267,7 @@ mod tests {
         let out = state
             .backend_request(parts("http://example.com/path", &[]))
             .unwrap();
-        assert_eq!(header(&out, "fastedge-hostname"), Some("localhost"));
+        assert_eq!(header(&out, "fastedge-hostname"), Some("127.0.0.1"));
         assert_eq!(header(&out, "fastedge-scheme"), Some("http"));
         assert_eq!(
             header(&out, "fastedge_header_hostname"),
@@ -283,7 +284,7 @@ mod tests {
                 &[("host", "app-set-host.com")],
             ))
             .unwrap();
-        assert_eq!(header(&out, "fastedge-hostname"), Some("localhost"));
+        assert_eq!(header(&out, "fastedge-hostname"), Some("127.0.0.1"));
         assert_eq!(header(&out, "fastedge-scheme"), Some("https"));
         // real host comes from the URL, not the app-provided Host header
         assert_eq!(
