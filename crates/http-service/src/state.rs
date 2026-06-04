@@ -88,13 +88,17 @@ impl<C> BackendRequest for HttpState<C> {
                         port_ok && cdn_real_host.eq_ignore_ascii_case(url_host)
                     });
 
-                static FILTER_HEADERS: [HeaderName; 6] = [
+                // `FASTEDGE_HEADER_HOSTNAME` is an internal routing header set by
+                // FastEdge below; strip any app-provided value so a guest can't spoof
+                // the "real host" seen by the backend.
+                static FILTER_HEADERS: [HeaderName; 7] = [
                     header::HOST,
                     header::CONTENT_LENGTH,
                     header::TRANSFER_ENCODING,
                     header::UPGRADE,
                     FASTEDGE_HOSTNAME,
                     FASTEDGE_SCHEME,
+                    FASTEDGE_HEADER_HOSTNAME,
                 ];
 
                 // filter headers
@@ -322,5 +326,36 @@ mod tests {
         assert_eq!(header(&out, "fastedge-hostname"), Some("example.com"));
         // app Host header is surfaced via Fastedge_Header_Hostname in the default path
         assert_eq!(header(&out, "fastedge_header_hostname"), Some("app.com"));
+    }
+
+    #[test]
+    fn app_provided_fastedge_header_hostname_is_stripped() {
+        // Without self-binding and without a Host header, FastEdge does not set
+        // its own `fastedge_header_hostname`. Any value the app supplied must
+        // still be filtered out so it cannot spoof the backend's real-host view.
+        let mut state = make_state(None);
+        let out = state
+            .backend_request(parts(
+                "http://example.com/path",
+                &[("fastedge_header_hostname", "evil.example.com")],
+            ))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge_header_hostname"), None);
+    }
+
+    #[test]
+    fn app_cannot_override_fastedge_header_hostname_in_self_binding() {
+        let mut state = make_state(Some("example.com"));
+        let out = state
+            .backend_request(parts(
+                "http://example.com/path",
+                &[("fastedge_header_hostname", "evil.example.com")],
+            ))
+            .unwrap();
+        // FastEdge's own value wins; the app-provided one is filtered first.
+        assert_eq!(
+            header(&out, "fastedge_header_hostname"),
+            Some("example.com")
+        );
     }
 }

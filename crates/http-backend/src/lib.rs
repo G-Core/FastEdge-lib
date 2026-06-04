@@ -38,7 +38,9 @@ pub const SERVER_NAME_HEADER: &str = "server_name";
 // can't slip in at one of the several push/filter sites that reference them.
 const FASTEDGE_HOSTNAME: &str = "fastedge-hostname";
 const FASTEDGE_SCHEME: &str = "fastedge-scheme";
-const FASTEDGE_HEADER_HOSTNAME: &str = "Fastedge_Header_Hostname";
+// Lowercase form so it matches the lowercased key used in the inbound-header
+// filter below; HTTP header names are case-insensitive on the wire.
+const FASTEDGE_HEADER_HOSTNAME: &str = "fastedge_header_hostname";
 const HOST_HEADER: &str = "host";
 const CONTENT_LENGTH_HEADER: &str = "content-length";
 const TRANSFER_ENCODING_HEADER: &str = "transfer-encoding";
@@ -305,6 +307,7 @@ impl<C> Backend<C> {
                                 | TRANSFER_ENCODING_HEADER
                                 | FASTEDGE_HOSTNAME
                                 | FASTEDGE_SCHEME
+                                | FASTEDGE_HEADER_HOSTNAME
                         )
                     })
                     .filter(|(k, _)| {
@@ -875,6 +878,45 @@ mod tests {
 
     #[tokio::test]
     #[tracing_test::traced_test]
+    async fn cdn_real_host_self_binding_strips_spoofed_header_hostname() {
+        // App tries to spoof the internal `fastedge_header_hostname` routing
+        // header. The filter must strip it; `with_header_once` asserts only the
+        // FastEdge-set value reaches the backend (no duplicate/leak).
+        let mut builder = mock_http_connector::Connector::builder();
+        builder
+            .expect()
+            .times(1)
+            .with_method(http::Method::GET)
+            .with_uri("http://be.server/path")
+            .with_header("fastedge-hostname", "127.0.0.1")
+            .with_header("fastedge-scheme", "http")
+            .with_header_once("fastedge_header_hostname", "example.com")
+            .with_header("host", "be.server")
+            .returning("OK")
+            .unwrap();
+        let connector = builder.build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .build(connector);
+        backend.set_cdn_real_host("example.com".into());
+        let headers = HeaderMap::new();
+        claims::assert_ok!(backend.propagate_headers(headers));
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![(
+                "fastedge_header_hostname".to_string(),
+                "evil.example.com".to_string(),
+            )],
+            body: None,
+        };
+        let res = claims::assert_ok!(backend.send_request(req).await);
+        assert_eq!(http::StatusCode::OK, res.status);
+    }
+
+    #[tokio::test]
+    #[tracing_test::traced_test]
     async fn cdn_real_host_mismatch_skips_self_binding() {
         let mut builder = mock_http_connector::Connector::builder();
         builder
@@ -936,6 +978,11 @@ mod tests {
                 ("Transfer-Encoding".to_string(), "unexpected".to_string()),
                 ("fastedge-hostname".to_string(), "unexpected".to_string()),
                 ("fastedge-scheme".to_string(), "unexpected".to_string()),
+                // App tries to spoof the internal real-host routing header.
+                (
+                    "fastedge_header_hostname".to_string(),
+                    "evil.example.com".to_string(),
+                ),
             ],
             body: None,
         };
