@@ -20,6 +20,7 @@ pub use wasi_http::WasiHttpExecutorImpl;
 pub(crate) static X_REAL_IP: &str = "x-real-ip";
 pub(crate) static TRACEPARENT: &str = "traceparent";
 pub(crate) static X_CDN_REQUESTOR: &str = "x-cdn-requestor";
+pub(crate) static X_CDN_REAL_HOST: &str = "x-cdn-real-host";
 
 #[async_trait]
 pub trait HttpExecutor {

@@ -90,6 +90,14 @@ where
         http_backend.set_ext_http_stats(stats.clone());
         http_backend.set_epoch_pause_ms(epoch_pause_ms);
 
+        if let Some(cdn_real_host) = parts
+            .headers
+            .get(executor::X_CDN_REAL_HOST)
+            .and_then(|v| v.to_str().ok())
+        {
+            http_backend.set_cdn_real_host(cdn_real_host.into());
+        }
+
         let propagate_header_names = http_backend.propagate_header_names();
         let backend_uri = http_backend.uri();
         let state = HttpState {
