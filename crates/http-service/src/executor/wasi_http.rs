@@ -165,6 +165,10 @@ where
                 .await?
                 {
                     tracing::warn!(cause=?e, "incoming handler");
+                    // log to application logger  error
+                    if let Some(ref logger) = store.data().logger {
+                        logger.write_msg(format!("Execution error: {}", e)).await;
+                    }
                     return Err(e);
                 };
 
@@ -181,7 +185,7 @@ where
                 stats.status_code(response.status().as_u16());
                 Ok(response)
             }
-            Ok(Err(e)) => Err(e.into()),
+            Ok(Err(error)) => Err(error.into()),
             Err(_) => {
                 let e = match task.await {
                     Ok(r) => {
