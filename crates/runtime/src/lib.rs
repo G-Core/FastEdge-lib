@@ -16,8 +16,8 @@ use http_backend::Backend;
 use limiter::ProxyLimiter;
 use wasmtime::component::Component;
 use wasmtime::{
-    Engine, InstanceAllocationStrategy, Module, OptLevel, PoolingAllocationConfig,
-    ProfilingStrategy, WasmBacktraceDetails,
+    Engine, InstanceAllocationStrategy, Module, PoolingAllocationConfig, ProfilingStrategy,
+    WasmBacktraceDetails,
 };
 use wit_component::ComponentEncoder;
 
@@ -194,13 +194,9 @@ impl<T> Data<T> {
     }
 }
 
-/// Global Engine configuration for `WasmEngineBuilder`.
+/// Global Engine configuration used to build a [`wasmtime::Engine`].
 pub struct WasmConfig {
     inner: wasmtime::Config,
-}
-
-pub struct WasmConfigBuilder {
-    max_execution_stacks: Option<u32>,
 }
 
 impl Deref for WasmConfig {
@@ -236,12 +232,26 @@ impl Default for WasmConfig {
     fn default() -> Self {
         let mut inner = wasmtime::Config::new();
         inner.debug_info(false); // Keep this disabled - wasmtime will hang if enabled
+
+        // Standalone, non-concurrent: spend compile time once to get the fastest
+        // generated code, since each module is compiled then executed hot.
+        inner.cranelift_opt_level(wasmtime::OptLevel::Speed);
+
+        // Debug build: keep full, symbolized guest backtraces. We are optimizing
+        // execution CPU, not trap-path cost, and this is the standalone debug
+        // runner — detailed backtraces are the whole point.
+        inner.wasm_backtrace(true);
         inner.wasm_backtrace_details(WasmBacktraceDetails::Enable);
+
         inner.async_support(true);
         inner.consume_fuel(false); // this is custom Gcore setting
         inner.profiler(ProfilingStrategy::None);
-        inner.epoch_interruption(true); // this is custom Gcore setting
+        inner.epoch_interruption(true); // required by store.rs timeout mechanism
         inner.wasm_component_model(true);
+
+        // Fast instantiation: map the initialized image copy-on-write instead of
+        // memcpy'ing it on every instantiation.
+        inner.memory_init_cow(true);
 
         const MB: usize = 1 << 20;
         let mut pooling_allocation_config = PoolingAllocationConfig::default();
@@ -264,84 +274,9 @@ impl Default for WasmConfig {
         // function can end up in the table
         pooling_allocation_config.table_elements(98765);
 
-        // Maximum number of slots in the pooling allocator to keep "warm", or those
-        // to keep around to possibly satisfy an affine allocation request or an
-        // instantiation of a module previously instantiated within the pool.
-        pooling_allocation_config.max_unused_warm_slots(10);
-
-        inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
-            pooling_allocation_config,
-        ));
-
-        WasmConfig { inner }
-    }
-}
-
-impl WasmConfig {
-    pub fn builder() -> WasmConfigBuilder {
-        WasmConfigBuilder {
-            max_execution_stacks: None,
-        }
-    }
-}
-
-impl WasmConfigBuilder {
-    pub fn max_execution_stacks(&mut self, max: u32) {
-        self.max_execution_stacks = Some(max);
-    }
-
-    pub fn build(self) -> WasmConfig {
-        let mut inner = wasmtime::Config::new();
-        inner.debug_info(false); // Keep this disabled - wasmtime will hang if enabled
-        inner.wasm_backtrace_details(WasmBacktraceDetails::Enable);
-        inner.async_support(true);
-        inner.consume_fuel(false); // this is custom Gcore setting
-        inner.profiler(ProfilingStrategy::None);
-        inner.epoch_interruption(true); // this is custom Gcore setting
-        inner.wasm_component_model(true);
-
-        // Performance: explicit opt level and make PC→wasm address map generation configurable.
-        // The address map improves trap/backtrace diagnostics, but increases compiled artifact
-        // size and per-instantiation overhead. Keep the current production behavior by default
-        // in release builds, enable it by default in debug builds, and allow explicit override
-        // for investigations via WASM_GENERATE_ADDRESS_MAP=true/false.
-        inner.cranelift_opt_level(OptLevel::Speed);
-        let generate_address_map = std::env::var("WASM_GENERATE_ADDRESS_MAP")
-            .ok()
-            .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
-                "1" | "true" | "yes" | "on" => Some(true),
-                "0" | "false" | "no" | "off" => Some(false),
-                _ => None,
-            })
-            .unwrap_or(cfg!(debug_assertions));
-        inner.generate_address_map(generate_address_map);
-
-        const MB: usize = 1 << 20;
-        let mut pooling_allocation_config = PoolingAllocationConfig::default();
-
-        if let Some(total) = self.max_execution_stacks {
-            pooling_allocation_config.total_stacks(total);
-            pooling_allocation_config.total_memories(total);
-            pooling_allocation_config.total_tables(total);
-            pooling_allocation_config.total_component_instances(total);
-            pooling_allocation_config.total_gc_heaps(total);
-            pooling_allocation_config.total_core_instances(total);
-        }
-
-        pooling_allocation_config.max_core_instance_size(MB);
-        pooling_allocation_config.max_tables_per_module(10);
-        pooling_allocation_config.max_memories_per_module(10);
-        pooling_allocation_config.table_elements(98765);
-        pooling_allocation_config.max_unused_warm_slots(10);
-
-        // Performance: keep pages warm between instantiations (Linux only).
-        // Avoids madvise(MADV_DONTNEED) syscalls when a pooled slot is reused, replacing them
-        // with a cheaper memset up to the threshold — reducing per-request deallocation latency.
-        pooling_allocation_config.linear_memory_keep_resident(2 * MB);
-        pooling_allocation_config.table_keep_resident(512 * 1024);
-
-        // Performance: batch decommit operations to amortize syscall overhead.
-        pooling_allocation_config.decommit_batch_size(16);
+        // No concurrency: at most one instance is ever live, so don't keep extra
+        // slots warm (was 10, tuned for a multi-tenant server).
+        pooling_allocation_config.max_unused_warm_slots(1);
 
         inner.allocation_strategy(InstanceAllocationStrategy::Pooling(
             pooling_allocation_config,
