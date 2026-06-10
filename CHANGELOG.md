@@ -1,3 +1,9 @@
+## [0.18.0] - 2026-06-10
+
+### 🚀 Features
+
+- Enhance error logging in WASI HTTP handler
+- Improve WasmConfig initialization for performance and memory efficiency
 ## [0.17.1] - 2026-06-04
 
 ### 🚀 Features
@@ -5,6 +11,10 @@
 - Add support for CDN real host self-binding in backend requests
 - Update FastEdge header handling for self-binding requests
 - Update fastedge_header_hostname to lowercase and add test for spoofed header handling
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.17.0] - 2026-06-02
 
 ### 🚀 Features
