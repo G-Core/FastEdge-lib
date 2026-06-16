@@ -3,12 +3,12 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crate::executor;
-use crate::executor::HttpExecutor;
+use crate::executor::{HttpExecutor, X_CDN_REAL_HOST};
 use crate::state::HttpState;
 use ::http::{HeaderMap, Request, Response, Uri, header};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use http_backend::{Backend, SERVER_NAME_HEADER};
+use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
@@ -52,13 +52,14 @@ where
             .hostname()
             .context("backend hostname must be set")?;
         let backend_host_header = backend_hostname.parse().context("invalid hostname")?;
-        // Resolve backend hostname using the following precedence:
-        // 1. `server_name` request header (if set and valid UTF-8)
-        // 2. backend's configured hostname
-        // 3. fallback to "localhost"
+        // Resolve the authority for URI normalization with the following precedence:
+        // 1. `x-cdn-real-host` request header (if set and valid UTF-8)
+        // 2. backend's configured hostname, stripped to its parent domain
+        //    (e.g. `app.example.com` -> `example.com`)
+        // 3. backend's configured hostname as-is if it contains no dot
         let hostname: SmolStr = parts
             .headers
-            .get(SERVER_NAME_HEADER)
+            .get(X_CDN_REAL_HOST)
             .and_then(|v| v.to_str().ok())
             .map(SmolStr::from)
             .unwrap_or_else(|| match backend_hostname.find('.') {
@@ -69,7 +70,11 @@ where
                 }
             });
 
-        // fix relative uri to absolute
+        // Promote a relative request URI (origin-form from hyper, e.g. `/foo`)
+        // to an absolute URI so the wasi-http `incoming-request` resource
+        // exposes a valid scheme + authority to the guest. `Uri::from_parts`
+        // also requires authority once a scheme is set, so both fields must be
+        // populated together.
         if parts.uri.scheme().is_none() {
             let mut uparts = parts.uri.clone().into_parts();
             uparts.scheme = Some(::http::uri::Scheme::HTTP);

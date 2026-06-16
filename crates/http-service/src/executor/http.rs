@@ -1,15 +1,16 @@
 use crate::executor;
-use crate::executor::HttpExecutor;
+use crate::executor::{HttpExecutor, X_CDN_REAL_HOST};
 use crate::state::HttpState;
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use http::{Method, Request, Response, StatusCode};
+use http::{Method, Request, Response, StatusCode, Uri};
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use reactor::gcore::fastedge;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
+use smol_str::SmolStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -40,8 +41,33 @@ where
         // Start timing for stats
         let stats_timer = StatsTimer::new(stats.clone());
 
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
         let method = to_fastedge_http_method(&parts.method)?;
+
+        // Resolve the authority for URI normalization from the
+        // `x-cdn-real-host` request header (if set and valid UTF-8).
+        // If absent, the request URI is left untouched below.
+        let hostname = parts
+            .headers
+            .get(X_CDN_REAL_HOST)
+            .and_then(|v| v.to_str().ok())
+            .map(SmolStr::from);
+
+        // Promote a relative request URI (origin-form from hyper, e.g. `/foo`)
+        // to an absolute URI so guests observe a full `scheme://authority/path`
+        // in `request.uri`. Mirrors the wasi-http executor, but only fires when
+        // `x-cdn-real-host` gives us an authority to graft on — otherwise we
+        // leave the URI as-is rather than fabricate one.
+        if parts.uri.scheme().is_none() {
+            if let Some(hostname) = hostname {
+                let mut uparts = parts.uri.clone().into_parts();
+                uparts.scheme = Some(::http::uri::Scheme::HTTP);
+                if uparts.authority.is_none() {
+                    uparts.authority = hostname.parse().ok();
+                }
+                parts.uri = Uri::from_parts(uparts)?;
+            }
+        }
 
         let headers = parts
             .headers
