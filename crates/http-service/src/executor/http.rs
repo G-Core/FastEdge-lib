@@ -10,7 +10,6 @@ use hyper::body::Body;
 use reactor::gcore::fastedge;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
-use smol_str::SmolStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -44,30 +43,12 @@ where
         let (mut parts, body) = req.into_parts();
         let method = to_fastedge_http_method(&parts.method)?;
 
-        // Resolve the authority for URI normalization from the
-        // `x-cdn-real-host` request header (if set and valid UTF-8).
-        // If absent, the request URI is left untouched below.
-        let hostname = parts
-            .headers
-            .get(X_CDN_REAL_HOST)
-            .and_then(|v| v.to_str().ok())
-            .map(SmolStr::from);
-
         // Promote a relative request URI (origin-form from hyper, e.g. `/foo`)
-        // to an absolute URI so guests observe a full `scheme://authority/path`
-        // in `request.uri`. Mirrors the wasi-http executor, but only fires when
-        // `x-cdn-real-host` gives us an authority to graft on — otherwise we
-        // leave the URI as-is rather than fabricate one.
-        if parts.uri.scheme().is_none() {
-            if let Some(hostname) = hostname {
-                let mut uparts = parts.uri.clone().into_parts();
-                uparts.scheme = Some(::http::uri::Scheme::HTTP);
-                if uparts.authority.is_none() {
-                    uparts.authority = hostname.parse().ok();
-                }
-                parts.uri = Uri::from_parts(uparts)?;
-            }
-        }
+        // to an absolute URI when the `x-cdn-real-host` header is present, so
+        // guests observe a full `scheme://authority/path` in `request.uri`.
+        // Mirrors the wasi-http executor, but only fires when we have an
+        // authority to graft on — otherwise the URI is left as-is.
+        normalize_request_uri(&mut parts.uri, &parts.headers)?;
 
         let headers = parts
             .headers
@@ -213,6 +194,33 @@ fn to_fastedge_http_method(method: &Method) -> anyhow::Result<fastedge::http::Me
     })
 }
 
+/// Promote a relative request URI to an absolute URI by grafting on the
+/// authority advertised in the `x-cdn-real-host` header.
+///
+/// The URI is left untouched when:
+/// * it already has a scheme (i.e. is already absolute), or
+/// * `x-cdn-real-host` is missing or not valid UTF-8.
+///
+/// When rewritten, the scheme is forced to `http` and the authority comes from
+/// the header — unless the URI already carries an authority, in which case the
+/// existing one is preserved.
+fn normalize_request_uri(uri: &mut Uri, headers: &::http::HeaderMap) -> anyhow::Result<()> {
+    if uri.scheme().is_some() {
+        return Ok(());
+    }
+    let Some(hostname) = headers.get(X_CDN_REAL_HOST).and_then(|v| v.to_str().ok()) else {
+        return Ok(());
+    };
+
+    let mut uparts = uri.clone().into_parts();
+    uparts.scheme = Some(::http::uri::Scheme::HTTP);
+    if uparts.authority.is_none() {
+        uparts.authority = hostname.parse().ok();
+    }
+    *uri = Uri::from_parts(uparts)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +232,7 @@ mod tests {
     };
     use bytes::Bytes;
     use claims::*;
+    use http::HeaderMap;
     use http_backend::stats::ExtRequestStats;
     use http_backend::{Backend, BackendStrategy, FastEdgeConnector, SERVER_NAME_HEADER};
     use http_body_util::Empty;
@@ -920,5 +929,84 @@ mod tests {
         let res = assert_ok!(http_service.handle_request(req).await);
         assert_eq!(StatusCode::NOT_FOUND, res.status());
         assert_eq!(0, res.headers().len());
+    }
+
+    // ── normalize_request_uri ────────────────────────────────────────────
+
+    fn headers_with_real_host(host: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(X_CDN_REAL_HOST, host.parse().unwrap());
+        h
+    }
+
+    /// Origin-form URI + `x-cdn-real-host` → absolute URI with `http` scheme
+    /// and the header value as authority.
+    #[test]
+    fn normalize_relative_uri_with_real_host_header() {
+        let mut uri: Uri = assert_ok!("/foo?bar=1".parse());
+        let headers = headers_with_real_host("app.example.com");
+
+        assert_ok!(normalize_request_uri(&mut uri, &headers));
+
+        assert_eq!(uri.scheme_str(), Some("http"));
+        assert_eq!(uri.host(), Some("app.example.com"));
+        assert_eq!(uri.path(), "/foo");
+        assert_eq!(uri.query(), Some("bar=1"));
+    }
+
+    /// No `x-cdn-real-host` → URI is left untouched (relative).
+    #[test]
+    fn normalize_relative_uri_without_real_host_header_is_noop() {
+        let mut uri: Uri = assert_ok!("/foo".parse());
+        let original = uri.clone();
+        let headers = HeaderMap::new();
+
+        assert_ok!(normalize_request_uri(&mut uri, &headers));
+
+        assert_eq!(uri, original);
+        assert_eq!(uri.scheme(), None);
+    }
+
+    /// Already-absolute URI is never rewritten, even when the header is set.
+    #[test]
+    fn normalize_absolute_uri_is_noop() {
+        let mut uri: Uri = assert_ok!("https://upstream.example.com/path".parse());
+        let original = uri.clone();
+        let headers = headers_with_real_host("override.example.com");
+
+        assert_ok!(normalize_request_uri(&mut uri, &headers));
+
+        assert_eq!(uri, original);
+        assert_eq!(uri.scheme_str(), Some("https"));
+        assert_eq!(uri.host(), Some("upstream.example.com"));
+    }
+
+    /// Non-UTF-8 header value is silently ignored: behaves like a missing header.
+    #[test]
+    fn normalize_with_non_utf8_real_host_header_is_noop() {
+        let mut uri: Uri = assert_ok!("/foo".parse());
+        let original = uri.clone();
+        let mut headers = HeaderMap::new();
+        // Bytes that are valid HeaderValue but not valid UTF-8.
+        headers.insert(
+            X_CDN_REAL_HOST,
+            ::http::HeaderValue::from_bytes(&[0xff, 0xfe]).unwrap(),
+        );
+
+        assert_ok!(normalize_request_uri(&mut uri, &headers));
+
+        assert_eq!(uri, original);
+    }
+
+    /// Invalid authority in the header → URI cannot be rebuilt; helper errors.
+    #[test]
+    fn normalize_with_invalid_authority_errors() {
+        let mut uri: Uri = assert_ok!("/foo".parse());
+        // Spaces are not legal in an authority; this triggers the
+        // `Uri::from_parts` path with `authority = None` and an HTTP scheme,
+        // which is itself invalid.
+        let headers = headers_with_real_host("not a valid host");
+
+        assert_err!(normalize_request_uri(&mut uri, &headers));
     }
 }
