@@ -3,12 +3,12 @@ use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 
 use crate::executor;
-use crate::executor::HttpExecutor;
+use crate::executor::{HttpExecutor, X_CDN_REAL_HOST};
 use crate::state::HttpState;
 use ::http::{HeaderMap, Request, Response, Uri, header};
 use anyhow::{Context, anyhow, bail};
 use async_trait::async_trait;
-use http_backend::{Backend, SERVER_NAME_HEADER};
+use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Body;
 use runtime::util::stats::{StatsTimer, StatsVisitor};
@@ -52,24 +52,13 @@ where
             .hostname()
             .context("backend hostname must be set")?;
         let backend_host_header = backend_hostname.parse().context("invalid hostname")?;
-        // Resolve backend hostname using the following precedence:
-        // 1. `server_name` request header (if set and valid UTF-8)
-        // 2. backend's configured hostname
-        // 3. fallback to "localhost"
-        let hostname: SmolStr = parts
-            .headers
-            .get(SERVER_NAME_HEADER)
-            .and_then(|v| v.to_str().ok())
-            .map(SmolStr::from)
-            .unwrap_or_else(|| match backend_hostname.find('.') {
-                None => backend_hostname,
-                Some(i) => {
-                    let (_, domain) = backend_hostname.split_at(i + 1);
-                    SmolStr::from(domain)
-                }
-            });
+        let hostname = resolve_authority(&parts.headers, backend_hostname);
 
-        // fix relative uri to absolute
+        // Promote a relative request URI (origin-form from hyper, e.g. `/foo`)
+        // to an absolute URI so the wasi-http `incoming-request` resource
+        // exposes a valid scheme + authority to the guest. `Uri::from_parts`
+        // also requires authority once a scheme is set, so both fields must be
+        // populated together.
         if parts.uri.scheme().is_none() {
             let mut uparts = parts.uri.clone().into_parts();
             uparts.scheme = Some(::http::uri::Scheme::HTTP);
@@ -102,7 +91,7 @@ where
 
         if let Some(cdn_real_host) = parts
             .headers
-            .get(executor::X_CDN_REAL_HOST)
+            .get(X_CDN_REAL_HOST)
             .and_then(|v| v.to_str().ok())
         {
             http_backend.set_cdn_real_host(cdn_real_host.into());
@@ -213,5 +202,82 @@ where
             store_builder,
             backend,
         }
+    }
+}
+
+/// Resolve the authority used to absolutize the incoming request URI.
+///
+/// Precedence:
+/// 1. `x-cdn-real-host` request header (if set and valid UTF-8).
+/// 2. The backend's configured hostname stripped to its parent domain
+///    (e.g. `app.example.com` -> `example.com`).
+/// 3. The backend's configured hostname as-is when it contains no dot.
+fn resolve_authority(headers: &HeaderMap, backend_hostname: SmolStr) -> SmolStr {
+    headers
+        .get(X_CDN_REAL_HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(SmolStr::from)
+        .unwrap_or_else(|| match backend_hostname.find('.') {
+            None => backend_hostname,
+            Some(i) => {
+                let (_, domain) = backend_hostname.split_at(i + 1);
+                SmolStr::from(domain)
+            }
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ::http::HeaderValue;
+
+    fn headers_with_real_host(host: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(X_CDN_REAL_HOST, host.parse().unwrap());
+        h
+    }
+
+    /// `x-cdn-real-host` wins over the backend hostname.
+    #[test]
+    fn resolve_authority_prefers_real_host_header() {
+        let headers = headers_with_real_host("override.test.com");
+        let authority = resolve_authority(&headers, SmolStr::from("backend.example.com"));
+        assert_eq!(authority, "override.test.com");
+    }
+
+    /// Without the header, the backend hostname is stripped to its parent domain.
+    #[test]
+    fn resolve_authority_falls_back_to_parent_domain() {
+        let headers = HeaderMap::new();
+        let authority = resolve_authority(&headers, SmolStr::from("app.example.com"));
+        assert_eq!(authority, "example.com");
+    }
+
+    /// Multi-level subdomains: only the leftmost label is removed.
+    #[test]
+    fn resolve_authority_strips_only_leftmost_label() {
+        let headers = HeaderMap::new();
+        let authority = resolve_authority(&headers, SmolStr::from("a.b.c.example.com"));
+        assert_eq!(authority, "b.c.example.com");
+    }
+
+    /// Single-label hostnames have no dot, so they're returned unchanged.
+    #[test]
+    fn resolve_authority_keeps_single_label_host() {
+        let headers = HeaderMap::new();
+        let authority = resolve_authority(&headers, SmolStr::from("localhost"));
+        assert_eq!(authority, "localhost");
+    }
+
+    /// Non-UTF-8 header value is silently ignored: behaves like a missing header.
+    #[test]
+    fn resolve_authority_ignores_non_utf8_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            X_CDN_REAL_HOST,
+            HeaderValue::from_bytes(&[0xff, 0xfe]).unwrap(),
+        );
+        let authority = resolve_authority(&headers, SmolStr::from("backend.example.com"));
+        assert_eq!(authority, "example.com");
     }
 }
