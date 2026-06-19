@@ -42,6 +42,8 @@ pub trait StatsVisitor: ReadStats + UserDiagStats + ExtRequestStats + Send + Syn
     fn get_time_elapsed(&self) -> u64;
     /// Get memory used in bytes
     fn get_memory_used(&self) -> u64;
+    /// Get the last registered HTTP status code (0 if none registered yet)
+    fn get_status_code(&self) -> u16;
     /// Register cdn phase
     fn cdn_phase(&self, phase: CdnPhase);
 }
@@ -180,6 +182,10 @@ mod tests {
 
         fn get_memory_used(&self) -> u64 {
             self.memory_used.load(Ordering::Relaxed)
+        }
+
+        fn get_status_code(&self) -> u16 {
+            self.status_code.load(Ordering::Relaxed)
         }
 
         fn cdn_phase(&self, phase: CdnPhase) {

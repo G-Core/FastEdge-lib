@@ -15,6 +15,7 @@ use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{body::Body, server::conn::http1, service::service_fn};
 use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
+use runtime::util::access_log::{Outcome, RequestLog, Service as LogService};
 #[cfg(feature = "metrics")]
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
@@ -260,16 +261,87 @@ where
     T::Executor: HttpExecutor + Send + Sync,
     S: StatsVisitor + Send + 'static,
 {
-    /// handle HTTP request.
+    /// Handle an HTTP request, emitting exactly one access-log record.
+    ///
+    /// This wraps [`Self::handle_request_inner`] in a [`RequestLog`] guard so
+    /// that every request — including early rejects (unknown app, disabled,
+    /// rate-limited, context errors) — produces one record on the return path.
+    /// `traceparent` is resolved once here and shared with the inner handler so
+    /// the record and the response/span agree (the nanoid fallback would
+    /// otherwise differ).
     async fn handle_request<B>(
         &self,
-        mut request: hyper::Request<B>,
+        request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
         let traceparent = remote_traceparent(&request);
+        let mut log = RequestLog::begin(
+            self.context.access_log(),
+            LogService::Http,
+            traceparent.clone(),
+        );
+        if log.is_enabled() {
+            let uri = request.uri();
+            let host = uri
+                .host()
+                .map(ToSmolStr::to_smolstr)
+                .or_else(|| {
+                    request
+                        .headers()
+                        .get(hyper::header::HOST)
+                        .and_then(|v| v.to_str().ok())
+                        .map(ToSmolStr::to_smolstr)
+                })
+                .unwrap_or_default();
+            let client_ip = request
+                .headers()
+                .get("x-real-ip")
+                .or_else(|| request.headers().get("x-forwarded-for"))
+                .and_then(|v| v.to_str().ok())
+                .map(ToSmolStr::to_smolstr)
+                .unwrap_or_default();
+            log.set_request(
+                request.method().as_str(),
+                host,
+                uri.path().to_smolstr(),
+                uri.scheme_str().unwrap_or("http"),
+                client_ip,
+            );
+        }
+
+        let result = self
+            .handle_request_inner(request, traceparent, &mut log)
+            .await;
+
+        if let Ok(ref response) = result {
+            let status = response.status().as_u16();
+            let internal_code = response
+                .headers()
+                .get(X_CDN_INTERNAL_STATUS)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(0);
+            log.set_status(status);
+            log.set_internal_code(internal_code);
+            log.set_outcome(outcome_from(status, internal_code));
+        }
+        result
+    }
+
+    /// handle HTTP request.
+    async fn handle_request_inner<B>(
+        &self,
+        mut request: hyper::Request<B>,
+        traceparent: SmolStr,
+        log: &mut RequestLog,
+    ) -> Result<hyper::Response<HyperOutgoingBody>>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
@@ -336,6 +408,8 @@ where
 
             Some((app_name, cfg)) => (app_name, cfg),
         };
+
+        log.set_app(cfg.app_id, app_name.clone(), cfg.client_id);
 
         // get cached execute context for this application
         let executor = match self
@@ -479,6 +553,30 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             )
         };
     (status_code, fail_reason, msg, internal_code)
+}
+
+/// Derive the access-log [`Outcome`] from the response status and the
+/// `X-CDN-Internal-Status` code. `internal_code` (when set) is authoritative
+/// for the execution failure modes; otherwise the HTTP status distinguishes the
+/// early-reject cases. Note: disabled apps reject with 404, so they are not
+/// distinguished from a genuinely unknown app here.
+fn outcome_from(status: u16, internal_code: u16) -> Outcome {
+    match internal_code {
+        INTERNAL_STATUS_CONTEXT_ERROR => Outcome::ContextError,
+        INTERNAL_STATUS_EXECUTE_ERROR => Outcome::ExecuteError,
+        INTERNAL_STATUS_APP_EXIT_ERROR => Outcome::AppError,
+        INTERNAL_STATUS_WASM_TRAP_OTHER => Outcome::Trap,
+        INTERNAL_STATUS_TIMEOUT_INTERRUPT
+        | INTERNAL_STATUS_TIMEOUT_ELAPSED
+        | INTERNAL_STATUS_TIMEOUT_DEADLINE => Outcome::Timeout,
+        INTERNAL_STATUS_OUT_OF_MEMORY => Outcome::Oom,
+        _ => match status {
+            429 => Outcome::RateLimited,
+            406 => Outcome::Disabled,
+            404 => Outcome::UnknownApp,
+            _ => Outcome::Ok,
+        },
+    }
 }
 
 fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr {

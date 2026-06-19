@@ -231,6 +231,9 @@ mod tests {
         fn get_memory_used(&self) -> u64 {
             0
         }
+        fn get_status_code(&self) -> u16 {
+            0
+        }
         fn cdn_phase(&self, _phase: CdnPhase) {}
     }
 

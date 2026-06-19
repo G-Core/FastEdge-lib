@@ -286,6 +286,10 @@ mod tests {
             0
         }
 
+        fn get_status_code(&self) -> u16 {
+            0
+        }
+
         fn cdn_phase(&self, _phase: CdnPhase) {}
     }
 

@@ -396,6 +396,13 @@ pub trait ContextT {
         app: &SmolStr,
         cfg: &App,
     ) -> Arc<dyn StatsVisitor>;
+
+    /// Sink for access/error log records, or `None` when access logging is
+    /// disabled. Defaulted so embedders that don't emit an access log need not
+    /// implement it. See [`crate::util::access_log`].
+    fn access_log(&self) -> Option<Arc<dyn crate::util::access_log::AccessLogSink>> {
+        None
+    }
 }
 
 pub trait ExecutorCache {
