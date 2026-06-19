@@ -4396,7 +4396,6 @@ dependencies = [
 [[package]]
 name = "wasmtime-wasi-http"
 version = "36.0.7"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0#67de3b777448d4f99850e7b3848238ef387032c6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4412,7 +4411,7 @@ dependencies = [
  "tracing",
  "wasmtime",
  "wasmtime-wasi",
- "wasmtime-wasi-io 36.0.7 (git+https://github.com/G-Core/wasmtime.git?branch=release-36.0.0)",
+ "wasmtime-wasi-io 36.0.7",
  "webpki-roots 0.26.11",
 ]
 

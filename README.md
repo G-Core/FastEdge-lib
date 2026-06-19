@@ -11,9 +11,27 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-## Pull submodules
+## WIT subtree sync (optional)
 
-Run `git submodule update --init --recursive -f`
+`crates/reactor/wit/` is vendored in this repository via git subtree (no submodule init needed).
+
+One-time remote setup:
+
+```bash
+git remote add fastedge-wit https://github.com/G-Core/FastEdge-wit.git
+```
+
+Pull latest upstream WIT:
+
+```bash
+git subtree pull --prefix=crates/reactor/wit fastedge-wit main --squash
+```
+
+Push local WIT changes upstream:
+
+```bash
+git subtree push --prefix=crates/reactor/wit fastedge-wit main
+```
 
 ## Building
 

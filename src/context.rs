@@ -221,5 +221,9 @@ impl StatsVisitor for StatsStub {
         self.memory_used.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    fn get_status_code(&self) -> u16 {
+        todo!()
+    }
+
     fn cdn_phase(&self, _phase: CdnPhase) {}
 }
