@@ -1,3 +1,0 @@
-[submodule "crates/reactor/wit"]
-	path = crates/reactor/wit
-	url = https://github.com/G-Core/FastEdge-wit.git
