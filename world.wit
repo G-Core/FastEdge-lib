@@ -1,0 +1,13 @@
+package gcore:fastedge;
+
+world reactor {
+    import http;
+    import http-client;
+    import dictionary;
+    import secret;
+    import key-value;
+    import utils;
+    import cache-sync;
+
+    export http-handler;
+}
