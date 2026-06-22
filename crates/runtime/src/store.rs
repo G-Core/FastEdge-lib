@@ -218,7 +218,7 @@ impl StoreBuilder {
         }
     }
 
-    /// Enable/disable pausing the epoch timeout while performing external HTTP.
+    /// Enable/disable excluding external HTTP wait time from the epoch deadline (refund ticks based on elapsed wall-clock time).
     pub fn epoch_exclude_http_wait(self, enabled: bool) -> Self {
         Self {
             epoch_exclude_http_wait: enabled,
