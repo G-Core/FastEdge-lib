@@ -104,6 +104,8 @@ pub struct Data<T: 'static> {
     /// and clears this counter, converting milliseconds into extra ticks to
     /// extend the deadline.
     pub epoch_pause_ms: Arc<AtomicU64>,
+    /// Whether elapsed time of external HTTP should refund epoch ticks.
+    pub pause_epoch_timeout_for_external_http: bool,
 }
 
 pub trait BackendRequest {
@@ -151,6 +153,7 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
         // start external request stats timer
         let stats = self.inner.get_stats();
         let epoch_pause_ms = self.epoch_pause_ms.clone();
+        let epoch_exclude_http_wait = self.pause_epoch_timeout_for_external_http;
 
         let handle = wasmtime_wasi::runtime::spawn(async move {
             let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until request is done
@@ -158,7 +161,9 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
             let resp =
                 default_send_request_handler(request, OutgoingRequestConfig { use_tls, ..config })
                     .await;
-            epoch_pause_ms.fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            if epoch_exclude_http_wait {
+                epoch_pause_ms.fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+            }
             Ok(resp)
         });
         Ok(HostFutureIncomingResponse::pending(handle))

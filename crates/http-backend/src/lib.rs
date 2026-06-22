@@ -87,6 +87,7 @@ pub struct Backend<C> {
     /// deposits its elapsed wall-clock time (ms) here so the epoch
     /// deadline callback can refund those ticks to the guest.
     epoch_pause_ms: Arc<AtomicU64>,
+    epoch_exclude_http_wait: bool,
     cdn_real_host: Option<SmolStr>,
 }
 
@@ -137,6 +138,7 @@ impl Builder {
             ext_http_stats: None,
             hostname: self.hostname.clone(),
             epoch_pause_ms: Arc::new(AtomicU64::new(0)),
+            epoch_exclude_http_wait: false,
             cdn_real_host: None,
         }
     }
@@ -178,6 +180,10 @@ impl<C> Backend<C> {
     /// time can be excluded from the guest's execution-time budget.
     pub fn set_epoch_pause_ms(&mut self, counter: Arc<AtomicU64>) {
         self.epoch_pause_ms = counter;
+    }
+
+    pub fn epoch_exclude_http_wait(&mut self, enabled: bool) {
+        self.epoch_exclude_http_wait = enabled;
     }
 
     pub fn propagate_header_names(&self) -> HeaderNameList {
@@ -442,8 +448,10 @@ where
             })
         }
         .await;
-        self.epoch_pause_ms
-            .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        if self.epoch_exclude_http_wait {
+            self.epoch_pause_ms
+                .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+        }
         result
     }
 }
