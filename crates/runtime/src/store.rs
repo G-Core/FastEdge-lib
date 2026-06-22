@@ -101,6 +101,7 @@ pub struct StoreBuilder {
     dictionary: Dictionary,
     cache_backend: Option<Arc<dyn cache::CacheBackend>>,
     epoch_pause_ms: Option<Arc<AtomicU64>>,
+    epoch_exclude_http_wait: bool,
     max_external_duration_ms: u64,
 }
 
@@ -121,6 +122,7 @@ impl StoreBuilder {
             dictionary: Default::default(),
             cache_backend: None,
             epoch_pause_ms: None,
+            epoch_exclude_http_wait: false,
             max_external_duration_ms: DEFAULT_MAX_EXTERNAL_DURATION_MS,
         }
     }
@@ -212,6 +214,14 @@ impl StoreBuilder {
     pub fn epoch_pause_ms(self, counter: Arc<AtomicU64>) -> Self {
         Self {
             epoch_pause_ms: Some(counter),
+            ..self
+        }
+    }
+
+    /// Enable/disable excluding external HTTP wait time from the epoch deadline (refund ticks based on elapsed wall-clock time).
+    pub fn epoch_exclude_http_wait(self, enabled: bool) -> Self {
+        Self {
+            epoch_exclude_http_wait: enabled,
             ..self
         }
     }
@@ -334,6 +344,7 @@ impl StoreBuilder {
                 utils,
                 cache: cache_impl,
                 epoch_pause_ms: epoch_pause_ms.clone(),
+                pause_epoch_timeout_for_external_http: self.epoch_exclude_http_wait,
             },
         );
         inner.limiter(|state| &mut state.store_limits);

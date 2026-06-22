@@ -21,6 +21,7 @@ pub struct HttpExecutorImpl<C: 'static> {
     instance_pre: InstancePre<HttpState<C>>,
     store_builder: StoreBuilder,
     backend: Backend<C>,
+    epoch_exclude_http_wait: bool,
 }
 
 #[async_trait]
@@ -81,13 +82,18 @@ where
 
         let properties = executor::get_properties(&parts.headers);
 
-        // Shared counter so external HTTP time in `http_backend.send_request`
-        // refunds epoch ticks via the Store's `epoch_deadline_callback`.
-        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
-        let store_builder = self
+        let mut store_builder = self
             .store_builder
             .with_properties(properties)
-            .epoch_pause_ms(epoch_pause_ms.clone());
+            .epoch_exclude_http_wait(self.epoch_exclude_http_wait);
+        let epoch_pause_ms = self
+            .epoch_exclude_http_wait
+            .then(|| Arc::new(AtomicU64::new(0)));
+        if let Some(counter) = epoch_pause_ms.clone() {
+            // Shared counter so external HTTP time in `http_backend.send_request`
+            // refunds epoch ticks via the Store's `epoch_deadline_callback`.
+            store_builder = store_builder.epoch_pause_ms(counter);
+        }
         let mut http_backend = self.backend;
 
         http_backend
@@ -95,11 +101,14 @@ where
             .context("propagate headers")?;
 
         http_backend.set_ext_http_stats(stats.clone());
-        http_backend.set_epoch_pause_ms(epoch_pause_ms);
+        http_backend.epoch_exclude_http_wait(self.epoch_exclude_http_wait);
+        if let Some(counter) = epoch_pause_ms {
+            http_backend.set_epoch_pause_ms(counter);
+        }
 
         if let Some(cdn_real_host) = parts
             .headers
-            .get(executor::X_CDN_REAL_HOST)
+            .get(X_CDN_REAL_HOST)
             .and_then(|v| v.to_str().ok())
         {
             http_backend.set_cdn_real_host(cdn_real_host.into());
@@ -172,11 +181,13 @@ where
         instance_pre: InstancePre<HttpState<C>>,
         store_builder: StoreBuilder,
         backend: Backend<C>,
+        epoch_exclude_http_wait: bool,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
+            epoch_exclude_http_wait,
         }
     }
 }
@@ -408,6 +419,7 @@ mod tests {
                 instance_pre,
                 store_builder,
                 self.backend(),
+                false,
             ))
         }
     }
