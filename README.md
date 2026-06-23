@@ -11,9 +11,15 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 ```
 
-## Pull submodules
+## WIT subtree
 
-Run `git submodule update --init --recursive -f`
+`crates/reactor/wit/` is vendored directly in this repository, so cloning the repo is enough to build.
+
+To refresh the WIT definitions from the upstream `FastEdge-wit` repository, run:
+
+```bash
+git subtree pull --prefix=crates/reactor/wit https://github.com/G-Core/FastEdge-wit.git main --squash
+```
 
 ## Building
 
