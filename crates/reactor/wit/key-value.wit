@@ -23,7 +23,7 @@ interface key-value {
     /// (including elements with score equal to min or max). The elements are considered to be ordered from low to high
     /// scores.
     ///
-    /// Returns empty `Vec` if the key does not exist or if no elements have scores between min and max.
+    /// Returns an empty list if the key does not exist or if no elements have scores between min and max.
     zrange-by-score: func(key: string, min: f64, max: f64) -> result<list<tuple<value, f64>>, error>;
 
     /// Interface to scan through a sorted set by key
