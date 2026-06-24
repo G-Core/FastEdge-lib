@@ -25,7 +25,7 @@ cargo run --bin fastedge-run -- http --port 8080 --wasm ./my_app.wasm
 
 ## Repository setup gotchas
 
-- **WIT is a git submodule.** `crates/reactor/wit/` is the `FastEdge-wit` repo. After clone or branch switches that touch it, run `git submodule update --init --recursive -f`. Without this, `crates/reactor` (and everything that depends on it) fails to build because `bindgen!` can't find the `.wit` files.
+- **WIT is vendored via git subtree.** `crates/reactor/wit/` contains the `FastEdge-wit` sources directly, so no `git submodule update` step is required after clone or branch switches. To sync it with upstream, run `git subtree pull --prefix=crates/reactor/wit https://github.com/G-Core/FastEdge-wit.git main --squash`.
 - **Custom Wasmtime fork.** All `wasmtime-*` deps point at `github.com/G-Core/wasmtime.git#release-36.0.0`. `.cargo/config.toml` contains a commented-out `[patch]` block that redirects those to a local sibling `../wasmtime` checkout — uncomment when developing against a local Wasmtime tree.
 - **Wasm components vs core modules.** `componentize_if_necessary` (in `crates/runtime/src/lib.rs`) auto-wraps core modules using the bundled Preview1 adapter (`crates/runtime/src/adapters/wasi_snapshot_preview1.reactor.wasm`). Don't replace that adapter casually — it's pinned to the Wasmtime fork.
 

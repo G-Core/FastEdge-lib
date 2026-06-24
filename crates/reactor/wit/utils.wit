@@ -1,0 +1,4 @@
+interface utils {
+  /// Set a user diagnostic context name to be associated with the current request (and included in call statistics).
+  set-user-diag: func(name: string);
+}
