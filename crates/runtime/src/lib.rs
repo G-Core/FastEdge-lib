@@ -178,6 +178,12 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
         if name.eq(&header::HOST) {
             return false;
         }
+        // Block all headers with the reserved `fastedge` prefix — these are
+        // internal routing headers that guest modules must not set.
+        let name_str = name.as_str();
+        if name_str.starts_with("fastedge-") || name_str.starts_with("fastedge_") {
+            return true;
+        }
         // Fall back to wasmtime's default forbidden-header policy.
         wasmtime_wasi_http::types::DEFAULT_FORBIDDEN_HEADERS.contains(name)
     }

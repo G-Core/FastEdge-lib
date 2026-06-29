@@ -44,6 +44,7 @@ const FASTEDGE_HEADER_HOSTNAME: &str = "fastedge_header_hostname";
 const HOST_HEADER: &str = "host";
 const CONTENT_LENGTH_HEADER: &str = "content-length";
 const TRANSFER_ENCODING_HEADER: &str = "transfer-encoding";
+const FASTEDGE_APP_ID: &str = "fastedge-app-id";
 
 // Default scheme used when an outbound URL doesn't specify one.
 const DEFAULT_SCHEME: &str = "http";
@@ -89,6 +90,7 @@ pub struct Backend<C> {
     epoch_pause_ms: Arc<AtomicU64>,
     epoch_exclude_http_wait: bool,
     cdn_real_host: Option<SmolStr>,
+    app_id: Option<u64>,
 }
 
 pub struct Builder {
@@ -140,6 +142,7 @@ impl Builder {
             epoch_pause_ms: Arc::new(AtomicU64::new(0)),
             epoch_exclude_http_wait: false,
             cdn_real_host: None,
+            app_id: None,
         }
     }
 }
@@ -169,6 +172,14 @@ impl<C> Backend<C> {
 
     pub fn cdn_real_host(&self) -> Option<SmolStr> {
         self.cdn_real_host.clone()
+    }
+
+    pub fn set_app_id(&mut self, app_id: u64) {
+        self.app_id = Some(app_id);
+    }
+
+    pub fn app_id(&self) -> Option<u64> {
+        self.app_id
     }
 
     /// Set external request stats
@@ -285,6 +296,14 @@ impl<C> Backend<C> {
                     original_host
                 );
 
+                if let Some(ref backend) = self.hostname {
+                    anyhow::ensure!(
+                        !is_backend_host(&original_host, backend.as_str()),
+                        "direct access to backend resource is not allowed: {}",
+                        original_host
+                    );
+                }
+
                 // When the outbound call targets the CDN "real host" (the host of the
                 // original end-user request, carried in the `X-Cdn-Real-Host` header) on a
                 // default port, the backend resource is the app itself. In that case route
@@ -308,14 +327,12 @@ impl<C> Backend<C> {
                     .filter(|(k, _)| {
                         !matches!(
                             k.as_str(),
-                            HOST_HEADER
-                                | CONTENT_LENGTH_HEADER
-                                | TRANSFER_ENCODING_HEADER
-                                | FASTEDGE_HOSTNAME
-                                | FASTEDGE_SCHEME
-                                | FASTEDGE_HEADER_HOSTNAME
+                            HOST_HEADER | CONTENT_LENGTH_HEADER | TRANSFER_ENCODING_HEADER
                         )
                     })
+                    // Block all internal headers with the `fastedge` prefix so
+                    // guest modules cannot spoof routing/internal metadata.
+                    .filter(|(k, _)| !is_fastedge_internal_header(k))
                     .filter(|(k, _)| {
                         !self
                             .propagate_header_names
@@ -351,6 +368,12 @@ impl<C> Backend<C> {
                     }
                 }
                 headers.extend(self.propagate_headers_vec());
+
+                // Inject the application identifier so the backend can
+                // correlate the request with the originating FastEdge app.
+                if let Some(app_id) = self.app_id {
+                    headers.push((FASTEDGE_APP_ID.to_string(), app_id.to_string()));
+                }
 
                 let host = canonical_host_name(&headers, &original_url)?;
                 let url = canonical_url(&original_url, &host, self.uri.path())?;
@@ -587,6 +610,17 @@ impl hyper_util::client::legacy::connect::Connection for Connection {
     }
 }
 
+/// Returns `true` if the header name uses the reserved `fastedge` prefix
+/// (either `fastedge-` or `fastedge_`). These headers are internal routing
+/// metadata and must not be set by guest modules.
+pub fn is_fastedge_internal_header(name: &str) -> bool {
+    matches!(
+        name.get(0..9),
+        Some(prefix)
+            if prefix.eq_ignore_ascii_case("fastedge-") || prefix.eq_ignore_ascii_case("fastedge_")
+    )
+}
+
 fn extract_host(addr: &str) -> &str {
     if addr.starts_with('[') {
         // IPv6 with port: [::1]:8080
@@ -607,6 +641,14 @@ pub fn is_public_host(host: &str) -> bool {
         Ok(ip) => !is_private_ip(&ip),
         Err(_) => true, // Not an IP address, assume it's a hostname
     }
+}
+
+/// Returns `true` if the given `target_host` resolves to the same authority as
+/// the backend resource URI. This is used to prevent guest modules from making
+/// direct outbound requests to the internal backend, bypassing FastEdge routing.
+pub fn is_backend_host(target_host: &str, backend_uri: &str) -> bool {
+    let target = extract_host(target_host).to_lowercase();
+    target == backend_uri
 }
 
 fn is_private_ip(ip: &IpAddr) -> bool {
@@ -1450,5 +1492,162 @@ mod tests {
         };
         let result = backend.make_request(req);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_is_backend_host() {
+        let backend_uri = "be.server";
+
+        // Exact match
+        assert!(is_backend_host("be.server", backend_uri));
+        // Case-insensitive match
+        assert!(is_backend_host("BE.SERVER", backend_uri));
+        // With port (host extraction strips port)
+        assert!(is_backend_host("be.server:9090", backend_uri));
+        // Different host
+        assert!(!is_backend_host("example.com", backend_uri));
+        // Empty URI has no authority
+        assert!(!is_backend_host("be.server", ""));
+    }
+
+    #[test]
+    fn test_make_request_rejects_backend_host() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .uri("http://be.server/".parse().unwrap())
+                .build(connector);
+        let headers = HeaderMap::new();
+        backend.propagate_headers(headers).unwrap();
+
+        let req = Request {
+            method: Method::Get,
+            uri: "http://be.server/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("direct access to backend resource is not allowed")
+        );
+    }
+
+    #[test]
+    fn test_is_fastedge_internal_header() {
+        // Headers with fastedge- prefix are internal
+        assert!(is_fastedge_internal_header("fastedge-hostname"));
+        assert!(is_fastedge_internal_header("fastedge-scheme"));
+        assert!(is_fastedge_internal_header("fastedge-custom"));
+        // Headers with fastedge_ prefix are internal
+        assert!(is_fastedge_internal_header("fastedge_header_hostname"));
+        assert!(is_fastedge_internal_header("fastedge_anything"));
+        // Case-insensitive
+        assert!(is_fastedge_internal_header("FastEdge-Secret"));
+        assert!(is_fastedge_internal_header("FASTEDGE_DATA"));
+        // Non-fastedge headers are allowed
+        assert!(!is_fastedge_internal_header("x-custom-header"));
+        assert!(!is_fastedge_internal_header("content-type"));
+        assert!(!is_fastedge_internal_header("host"));
+    }
+
+    #[test]
+    fn test_make_request_strips_fastedge_prefixed_headers() {
+        let mut builder = mock_http_connector::Connector::builder();
+        builder
+            .expect()
+            .times(1)
+            .with_method(http::Method::GET)
+            .with_uri("http://be.server/path")
+            .with_header("fastedge-hostname", "example.com")
+            .with_header("fastedge-scheme", "http")
+            .with_header("host", "be.server")
+            .with_header("x-allowed", "yes")
+            .returning("OK")
+            .unwrap();
+        let connector = builder.build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .build(connector);
+        let headers = HeaderMap::new();
+        backend.propagate_headers(headers).unwrap();
+
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![
+                ("fastedge_evil".to_string(), "should-be-removed".to_string()),
+                (
+                    "fastedge-spoof".to_string(),
+                    "should-be-removed".to_string(),
+                ),
+                ("x-allowed".to_string(), "yes".to_string()),
+            ],
+            body: None,
+        };
+        // The request should succeed — internal headers are silently stripped,
+        // and the connector mock only expects "x-allowed" from app headers.
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+        let built = result.unwrap();
+        // Verify fastedge-prefixed app headers are not present
+        assert!(built.headers().get("fastedge_evil").is_none());
+        assert!(built.headers().get("fastedge-spoof").is_none());
+        // Verify allowed header is present
+        assert_eq!(
+            built.headers().get("x-allowed").unwrap().to_str().unwrap(),
+            "yes"
+        );
+    }
+
+    #[test]
+    fn test_make_request_includes_fastedge_app_id() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .build(connector);
+        backend.set_app_id(12345);
+
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+        let built = result.unwrap();
+        assert_eq!(
+            built
+                .headers()
+                .get("fastedge-app-id")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "12345"
+        );
+    }
+
+    #[test]
+    fn test_make_request_no_fastedge_app_id_when_unset() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+            .build(connector);
+
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let result = backend.make_request(req);
+        assert!(result.is_ok());
+        let built = result.unwrap();
+        assert!(built.headers().get("fastedge-app-id").is_none());
     }
 }

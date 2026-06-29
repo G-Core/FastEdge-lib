@@ -140,6 +140,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
                 store_builder,
                 self.backend(),
                 false,
+                app.app_id,
             )))
         } else {
             Ok(RunExecutor::Http(HttpExecutorImpl::new(
@@ -147,6 +148,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
                 store_builder,
                 self.backend(),
                 false,
+                app.app_id,
             )))
         }
     }
