@@ -1,9 +1,26 @@
+## [0.19.0] - 2026-06-30
+
+### 🚀 Features
+
+- Normalize request URI and resolve hostname using x-cdn-real-host header
+- Refactor URI normalization to use dedicated function for clarity and maintainability
+- Add support for pausing epoch timeout during external HTTP requests
+
+### ⚙️ Miscellaneous Tasks
+
+- Promote reactor wit from submodule to subtree
+- Upgrade actions/checkout from v4 to v7 in CI configuration files
+- Upgrade actions/checkout from v5 to v7 in CI configuration
 ## [0.18.0] - 2026-06-10
 
 ### 🚀 Features
 
 - Enhance error logging in WASI HTTP handler
 - Improve WasmConfig initialization for performance and memory efficiency
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.17.1] - 2026-06-04
 
 ### 🚀 Features
