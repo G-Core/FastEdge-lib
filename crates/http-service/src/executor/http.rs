@@ -22,6 +22,7 @@ pub struct HttpExecutorImpl<C: 'static> {
     store_builder: StoreBuilder,
     backend: Backend<C>,
     epoch_exclude_http_wait: bool,
+    app_id: u64,
 }
 
 #[async_trait]
@@ -96,6 +97,7 @@ where
         }
         let mut http_backend = self.backend;
 
+        http_backend.set_app_id(self.app_id);
         http_backend
             .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;
@@ -182,12 +184,14 @@ where
         store_builder: StoreBuilder,
         backend: Backend<C>,
         epoch_exclude_http_wait: bool,
+        app_id: u64,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
             epoch_exclude_http_wait,
+            app_id,
         }
     }
 }
@@ -420,6 +424,7 @@ mod tests {
                 store_builder,
                 self.backend(),
                 false,
+                cfg.app_id,
             ))
         }
     }

@@ -26,6 +26,7 @@ pub struct WasiHttpExecutorImpl<C: 'static> {
     store_builder: StoreBuilder,
     backend: Backend<C>,
     epoch_exclude_http_wait: bool,
+    app_id: u64,
 }
 
 #[async_trait]
@@ -92,6 +93,7 @@ where
             store_builder = store_builder.epoch_pause_ms(counter);
         }
         let mut http_backend = self.backend;
+        http_backend.set_app_id(self.app_id);
         http_backend.epoch_exclude_http_wait(self.epoch_exclude_http_wait);
         if let Some(counter) = epoch_pause_ms {
             http_backend.set_epoch_pause_ms(counter);
@@ -205,12 +207,14 @@ where
         store_builder: StoreBuilder,
         backend: Backend<C>,
         epoch_exclude_http_wait: bool,
+        app_id: u64,
     ) -> Self {
         Self {
             instance_pre,
             store_builder,
             backend,
             epoch_exclude_http_wait,
+            app_id,
         }
     }
 }

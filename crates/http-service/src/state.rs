@@ -3,7 +3,7 @@ use http::request::Parts;
 use http::uri::Scheme;
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, header};
 use http_backend::Backend;
-use http_backend::is_public_host;
+use http_backend::{is_backend_host, is_fastedge_internal_header, is_public_host};
 use runtime::BackendRequest;
 use runtime::store::HasStats;
 use runtime::util::stats::StatsVisitor;
@@ -28,6 +28,7 @@ const FASTEDGE_SCHEME: HeaderName = HeaderName::from_static("fastedge-scheme");
 // lowercase form is equivalent on the wire.
 const FASTEDGE_HEADER_HOSTNAME: HeaderName = HeaderName::from_static("fastedge_header_hostname");
 const FASTEDGE_HOSTNAME_VALUE: HeaderValue = HeaderValue::from_static("127.0.0.1");
+const FASTEDGE_APP_ID: HeaderName = HeaderName::from_static("fastedge-app-id");
 
 impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self, head), level = "debug", ret)]
@@ -73,6 +74,19 @@ impl<C> BackendRequest for HttpState<C> {
                     original_host
                 );
 
+                if let Some(ref hostname) = self.http_backend.hostname() {
+                    tracing::debug!(
+                        "backend request original url: {:?}, original host: {}",
+                        hostname,
+                        original_host
+                    );
+                    anyhow::ensure!(
+                        !is_backend_host(&original_host, hostname.as_str()),
+                        "direct access to backend resource is not allowed: {}",
+                        original_host
+                    );
+                }
+
                 // When the outbound call targets the CDN "real host" (the host of the
                 // original end-user request, carried in the `X-Cdn-Real-Host` header) on a
                 // default port, the backend resource is the app itself. In that case route
@@ -88,17 +102,13 @@ impl<C> BackendRequest for HttpState<C> {
                         port_ok && cdn_real_host.eq_ignore_ascii_case(url_host)
                     });
 
-                // `FASTEDGE_HEADER_HOSTNAME` is an internal routing header set by
-                // FastEdge below; strip any app-provided value so a guest can't spoof
-                // the "real host" seen by the backend.
-                static FILTER_HEADERS: [HeaderName; 7] = [
+                // Strip internal routing headers and all headers with the
+                // reserved `fastedge` prefix so guests cannot spoof internal metadata.
+                static FILTER_HEADERS: [HeaderName; 4] = [
                     header::HOST,
                     header::CONTENT_LENGTH,
                     header::TRANSFER_ENCODING,
                     header::UPGRADE,
-                    FASTEDGE_HOSTNAME,
-                    FASTEDGE_SCHEME,
-                    FASTEDGE_HEADER_HOSTNAME,
                 ];
 
                 // filter headers
@@ -107,7 +117,9 @@ impl<C> BackendRequest for HttpState<C> {
                     .into_iter()
                     .filter_map(|(k, v)| k.map(|k| (k, v)))
                     .filter(|(k, _)| {
-                        !FILTER_HEADERS.contains(k) && !self.propagate_header_names.contains(k)
+                        !FILTER_HEADERS.contains(k)
+                            && !self.propagate_header_names.contains(k)
+                            && !is_fastedge_internal_header(k.as_str())
                     })
                     .collect::<HeaderMap>();
 
@@ -136,6 +148,12 @@ impl<C> BackendRequest for HttpState<C> {
                 }
 
                 headers.extend(self.propagate_headers.clone());
+
+                // Inject the application identifier so the backend can
+                // correlate the request with the originating FastEdge app.
+                if let Some(app_id) = self.http_backend.app_id() {
+                    headers.insert(FASTEDGE_APP_ID, app_id.to_string().parse()?);
+                }
 
                 let authority = self
                     .http_backend
@@ -357,5 +375,69 @@ mod tests {
             header(&out, "fastedge_header_hostname"),
             Some("example.com")
         );
+    }
+
+    #[test]
+    fn direct_access_to_backend_host_is_rejected() {
+        let mut state = make_state(None);
+        let result = state.backend_request(parts("http://be.server/path", &[]));
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("direct access to backend resource is not allowed"),
+            "unexpected error: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn fastedge_prefixed_headers_are_stripped() {
+        let mut state = make_state(None);
+        let out = state
+            .backend_request(parts(
+                "http://example.com/path",
+                &[
+                    ("fastedge_custom_header", "should-be-removed"),
+                    ("fastedge-secret", "should-be-removed"),
+                    ("x-custom-header", "should-remain"),
+                ],
+            ))
+            .unwrap();
+        // All fastedge-prefixed headers from the guest are stripped
+        assert_eq!(header(&out, "fastedge_custom_header"), None);
+        assert_eq!(header(&out, "fastedge-secret"), None);
+        // Non-fastedge headers pass through
+        assert_eq!(header(&out, "x-custom-header"), Some("should-remain"));
+    }
+
+    #[test]
+    fn fastedge_app_id_is_injected_when_set() {
+        let connector = FastEdgeConnector::new("http://be.server/".parse().unwrap());
+        let mut http_backend = Backend::<FastEdgeConnector>::builder(BackendStrategy::FastEdge)
+            .hostname("be.server")
+            .uri("http://be.server/".parse().unwrap())
+            .build(connector);
+        http_backend.set_app_id(42);
+        let backend_uri = http_backend.uri();
+        let mut state = HttpState {
+            http_backend,
+            uri: backend_uri,
+            propagate_headers: HeaderMap::new(),
+            propagate_header_names: vec![],
+            stats: Arc::new(TestStats),
+        };
+        let out = state
+            .backend_request(parts("http://example.com/path", &[]))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-app-id"), Some("42"));
+    }
+
+    #[test]
+    fn fastedge_app_id_not_present_when_unset() {
+        let mut state = make_state(None);
+        let out = state
+            .backend_request(parts("http://example.com/path", &[]))
+            .unwrap();
+        assert_eq!(header(&out, "fastedge-app-id"), None);
     }
 }
