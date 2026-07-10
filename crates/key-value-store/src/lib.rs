@@ -145,7 +145,7 @@ impl key_value::Host for StoreImpl {}
 
 impl StoreImpl {
     /// Open a store by name. Return the store ID.
-    #[instrument(skip(self), level = "trace", ret, err)]
+    #[instrument(skip(self), level = "trace", ret)]
     pub async fn open(&mut self, name: &str) -> Result<u32, Error> {
         if let Some(param) = self
             .allowed_stores
@@ -160,7 +160,7 @@ impl StoreImpl {
     }
 
     /// Get a value from a store by key.
-    #[instrument(skip(self), level = "trace", ret, err)]
+    #[instrument(skip(self), level = "trace", ret)]
     pub async fn get(&self, store: u32, key: &str) -> Result<Option<Value>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
@@ -169,7 +169,7 @@ impl StoreImpl {
     }
 
     /// Get a values from a store by key.
-    #[instrument(skip(self), level = "trace", ret, err)]
+    #[instrument(skip(self), level = "trace", ret)]
     pub async fn zrange_by_score(
         &self,
         store: u32,
@@ -183,7 +183,7 @@ impl StoreImpl {
         store.zrange_by_score(key, min, max).await
     }
 
-    #[instrument(skip(self), level = "trace", ret, err)]
+    #[instrument(skip(self), level = "trace", ret)]
     pub async fn scan(&mut self, store: u32, pattern: &str) -> Result<Vec<String>, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);
@@ -191,7 +191,7 @@ impl StoreImpl {
         store.scan(pattern).await
     }
 
-    #[instrument(skip(self), level = "trace", ret, err)]
+    #[instrument(skip(self), level = "trace", ret)]
     pub async fn zscan(
         &mut self,
         store: u32,
@@ -205,7 +205,7 @@ impl StoreImpl {
     }
 
     /// Get a value from a store by key.
-    #[instrument(skip(self), level = "trace", ret, err)]
+    #[instrument(skip(self), level = "trace", ret)]
     pub async fn bf_exists(&self, store: u32, key: &str, item: &str) -> Result<bool, Error> {
         let Some(store) = self.stores.get(store as usize) else {
             return Err(Error::NoSuchStore);

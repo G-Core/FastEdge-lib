@@ -16,11 +16,11 @@ impl RedisStore {
     /// follow-up calls land on the freshly re-established connection.
     pub async fn open(params: &str) -> Result<Self, Error> {
         let client = ::redis::Client::open(params).map_err(|error| {
-            tracing::warn!(error=?error, "redis open");
+            tracing::warn!(error = ?error, "kv-store: redis open");
             Error::InternalError
         })?;
         let conn = ConnectionManager::new(client).await.map_err(|error| {
-            tracing::warn!(error=?error, "redis open");
+            tracing::warn!(error = ?error, "kv-store: redis open");
             Error::InternalError
         })?;
         Ok(Self { inner: conn })
@@ -31,7 +31,7 @@ impl RedisStore {
 impl Store for RedisStore {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error> {
         self.inner.clone().get(key).await.map_err(|error| {
-            tracing::warn!(cause=?error, "redis get");
+            tracing::warn!(cause = ?error, key, "kv-store: redis get");
             Error::InternalError
         })
     }
@@ -47,7 +47,7 @@ impl Store for RedisStore {
             .zrangebyscore_withscores(key, min, max)
             .await
             .map_err(|error| {
-                tracing::warn!(cause=?error, "redis zrangebyscore");
+                tracing::warn!(cause = ?error, key, min, max, "kv-store: redis zrangebyscore");
                 Error::InternalError
             })
     }
@@ -55,12 +55,15 @@ impl Store for RedisStore {
     async fn scan(&self, pattern: &str) -> Result<Vec<String>, Error> {
         let mut conn = self.inner.clone();
         let mut it = conn.scan_match(pattern).await.map_err(|error| {
-            tracing::warn!(cause=?error, "redis scan_match");
+            tracing::warn!(cause = ?error, pattern, "kv-store: redis scan_match");
             Error::InternalError
         })?;
         let mut ret = vec![];
         while let Some(element) = it.next_item().await {
-            ret.push(element.map_err(|error| Error::Other(error.to_string()))?);
+            ret.push(element.map_err(|error| {
+                tracing::warn!(cause = ?error, pattern, "kv-store: redis scan_match: item");
+                Error::Other(error.to_string())
+            })?);
         }
         Ok(ret)
     }
@@ -69,12 +72,15 @@ impl Store for RedisStore {
         let mut conn = self.inner.clone();
         let mut it: AsyncIter<(Value, f64)> =
             conn.zscan_match(key, pattern).await.map_err(|error| {
-                tracing::warn!(cause=?error, "redis zscan_match");
+                tracing::warn!(cause = ?error, key, pattern, "kv-store: redis zscan_match");
                 Error::InternalError
             })?;
         let mut ret = vec![];
         while let Some(element) = it.next_item().await {
-            ret.push(element.map_err(|error| Error::Other(error.to_string()))?);
+            ret.push(element.map_err(|error| {
+                tracing::warn!(cause = ?error, key, pattern, "kv-store: redis zscan_match: item");
+                Error::Other(error.to_string())
+            })?);
         }
         Ok(ret)
     }
@@ -86,7 +92,7 @@ impl Store for RedisStore {
             .query_async(&mut self.inner.clone())
             .await
             .map_err(|error| {
-                tracing::warn!(cause=?error, "redis bf_exists");
+                tracing::warn!(cause = ?error, key, item, "kv-store: redis bf_exists");
                 Error::InternalError
             })
     }
