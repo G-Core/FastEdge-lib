@@ -1,7 +1,27 @@
 use crate::Store;
 use reactor::gcore::fastedge::key_value::{Error, Value};
-use redis::aio::ConnectionManager;
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use redis::{AsyncCommands, AsyncIter};
+use std::time::Duration;
+
+/// Fail-fast timeouts for the KV-store Redis connection. Redis sits on the
+/// request hot path, so a slow/unreachable Redis must surface as a quick error
+/// rather than parking the calling task: a stalled dependency with no bound
+/// lets in-flight requests pile up until the node collapses. Set explicitly so
+/// a redis-crate bump can't silently change them.
+const REDIS_RESPONSE_TIMEOUT: Duration = Duration::from_millis(100);
+const REDIS_CONNECTION_TIMEOUT: Duration = Duration::from_millis(100);
+const REDIS_NUMBER_OF_RETRIES: usize = 2;
+const REDIS_MAX_RECONNECT_DELAY: Duration = Duration::from_millis(100);
+
+/// Build the fail-fast connection-manager config for KV-store Redis connections.
+fn connection_manager_config() -> ConnectionManagerConfig {
+    ConnectionManagerConfig::new()
+        .set_response_timeout(Some(REDIS_RESPONSE_TIMEOUT))
+        .set_connection_timeout(Some(REDIS_CONNECTION_TIMEOUT))
+        .set_number_of_retries(REDIS_NUMBER_OF_RETRIES)
+        .set_max_delay(REDIS_MAX_RECONNECT_DELAY)
+}
 
 #[derive(Clone)]
 pub struct RedisStore {
@@ -19,10 +39,12 @@ impl RedisStore {
             tracing::warn!(error = ?error, "kv-store: redis open");
             Error::InternalError
         })?;
-        let conn = ConnectionManager::new(client).await.map_err(|error| {
-            tracing::warn!(error = ?error, "kv-store: redis open");
-            Error::InternalError
-        })?;
+        let conn = ConnectionManager::new_with_config(client, connection_manager_config())
+            .await
+            .map_err(|error| {
+                tracing::warn!(error = ?error, "kv-store: redis open");
+                Error::InternalError
+            })?;
         Ok(Self { inner: conn })
     }
 }

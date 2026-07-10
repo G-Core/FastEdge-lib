@@ -46,6 +46,9 @@ pub fn metrics(result: AppResult, label: &[&str], duration: Option<u64>, memory_
             AppResult::TIMEOUT => values.push("timeout"),
             AppResult::OOM => values.push("oom"),
             AppResult::OTHER => values.push("other"),
+            AppResult::OVERLOADED => values.push("overloaded"),
+            AppResult::RATE_LIMITED => values.push("ratelimited"),
+            AppResult::DISABLED => values.push("disabled"),
             _ => {}
         };
 
