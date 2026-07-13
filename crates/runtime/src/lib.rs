@@ -60,6 +60,15 @@ pub enum AppResult {
     TIMEOUT,
     OOM,
     OTHER,
+    /// Request shed by admission control (server overloaded).
+    #[cfg(feature = "metrics")]
+    OVERLOADED,
+    /// Request rejected because the app is rate limited.
+    #[cfg(feature = "metrics")]
+    RATE_LIMITED,
+    /// Request rejected because the app is disabled or in draft.
+    #[cfg(feature = "metrics")]
+    DISABLED,
 }
 
 pub type InstancePre<T> = wasmtime::component::InstancePre<Data<T>>;
