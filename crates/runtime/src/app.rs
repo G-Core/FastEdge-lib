@@ -52,7 +52,7 @@ pub struct KvStoreOption {
 
 impl KvStoreOption {
     fn default_cache_size() -> u64 {
-        1000
+        25000
     }
 
     fn default_cache_ttl() -> u64 {
@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(kv.param, "");
         assert_eq!(kv.name, "store");
         assert_eq!(kv.prefix, "pre");
-        assert_eq!(kv.cache_size, 1000);
+        assert_eq!(kv.cache_size, 25000);
         assert_eq!(kv.cache_ttl, 60);
     }
 
