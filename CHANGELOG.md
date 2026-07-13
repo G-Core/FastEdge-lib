@@ -1,3 +1,13 @@
+## [0.20.0] - 2026-07-13
+
+### 🚀 Features
+
+- Add fail-fast Redis connection management with configurable timeouts and extend error metrics
+- Increase default cache size to improve performance under high load
+
+### 🚜 Refactor
+
+- Improve Redis error tracing with detailed context and adjust instrumentation annotations
 ## [0.19.0] - 2026-06-30
 
 ### 🚀 Features
@@ -11,6 +21,7 @@
 - Promote reactor wit from submodule to subtree
 - Upgrade actions/checkout from v4 to v7 in CI configuration files
 - Upgrade actions/checkout from v5 to v7 in CI configuration
+- Release
 ## [0.18.0] - 2026-06-10
 
 ### 🚀 Features
