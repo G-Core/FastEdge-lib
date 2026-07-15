@@ -131,7 +131,6 @@ where
             http_backend,
             uri: backend_uri,
             propagate_headers,
-            propagate_header_names,
             stats: stats.clone(),
         };
 

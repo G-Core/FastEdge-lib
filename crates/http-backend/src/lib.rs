@@ -44,6 +44,7 @@ const FASTEDGE_HEADER_HOSTNAME: &str = "fastedge_header_hostname";
 const HOST_HEADER: &str = "host";
 const CONTENT_LENGTH_HEADER: &str = "content-length";
 const TRANSFER_ENCODING_HEADER: &str = "transfer-encoding";
+const CDN_LOOP_HEADER: &str = "cdn-loop";
 const FASTEDGE_APP_ID: &str = "fastedge-app-id";
 
 // Default scheme used when an outbound URL doesn't specify one.
@@ -236,7 +237,14 @@ impl<C> Backend<C> {
         let builder = match self.strategy {
             BackendStrategy::Direct => {
                 let mut headers = req.headers.into_iter().collect::<Vec<(String, String)>>();
-                headers.extend(self.propagate_headers_vec());
+                for (k, v) in self.propagate_headers_vec() {
+                    if !headers
+                        .iter()
+                        .any(|(existing, _)| existing.eq_ignore_ascii_case(&k))
+                    {
+                        headers.push((k, v));
+                    }
+                }
                 // CLI has to set Host header from URL, if it is not set already by the request
                 if !headers
                     .iter()
@@ -327,18 +335,15 @@ impl<C> Backend<C> {
                     .filter(|(k, _)| {
                         !matches!(
                             k.as_str(),
-                            HOST_HEADER | CONTENT_LENGTH_HEADER | TRANSFER_ENCODING_HEADER
+                            HOST_HEADER
+                                | CONTENT_LENGTH_HEADER
+                                | TRANSFER_ENCODING_HEADER
+                                | CDN_LOOP_HEADER
                         )
                     })
                     // Block all internal headers with the `fastedge` prefix so
                     // guest modules cannot spoof routing/internal metadata.
                     .filter(|(k, _)| !is_fastedge_internal_header(k))
-                    .filter(|(k, _)| {
-                        !self
-                            .propagate_header_names
-                            .iter()
-                            .any(|name| name.eq(k.as_str()))
-                    })
                     .collect::<Vec<(String, String)>>();
 
                 if self_binding {
@@ -367,7 +372,14 @@ impl<C> Backend<C> {
                         headers.push((FASTEDGE_HEADER_HOSTNAME.to_string(), request_host_header));
                     }
                 }
-                headers.extend(self.propagate_headers_vec());
+                for (k, v) in self.propagate_headers_vec() {
+                    if !headers
+                        .iter()
+                        .any(|(existing, _)| existing.eq_ignore_ascii_case(&k))
+                    {
+                        headers.push((k, v));
+                    }
+                }
 
                 // Inject the application identifier so the backend can
                 // correlate the request with the originating FastEdge app.
@@ -1079,6 +1091,66 @@ mod tests {
         assert_eq!(http::StatusCode::OK, res.status);
     }
 
+    #[test]
+    fn make_request_keeps_app_content_type_over_propagated_one() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .propagate_headers_names(vec!["content-type".parse().unwrap()])
+                .build(connector);
+
+        let mut incoming_headers = HeaderMap::new();
+        incoming_headers.insert("content-type", "from-original".parse().unwrap());
+        backend.propagate_headers(incoming_headers).unwrap();
+
+        let req = Request {
+            method: Method::Post,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![("content-type".to_string(), "from-app".to_string())],
+            body: None,
+        };
+
+        let out = backend.make_request(req).unwrap();
+        assert_eq!(
+            out.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("from-app")
+        );
+        assert_eq!(out.headers().get_all("content-type").iter().count(), 1);
+    }
+
+    #[test]
+    fn make_request_uses_propagated_content_type_when_app_does_not_set_it() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let mut backend =
+            Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+                .hostname("be.server")
+                .propagate_headers_names(vec!["content-type".parse().unwrap()])
+                .build(connector);
+
+        let mut incoming_headers = HeaderMap::new();
+        incoming_headers.insert("content-type", "from-original".parse().unwrap());
+        backend.propagate_headers(incoming_headers).unwrap();
+
+        let req = Request {
+            method: Method::Post,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![],
+            body: None,
+        };
+
+        let out = backend.make_request(req).unwrap();
+        assert_eq!(
+            out.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok()),
+            Some("from-original")
+        );
+        assert_eq!(out.headers().get_all("content-type").iter().count(), 1);
+    }
+
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn backend_path() {
@@ -1334,6 +1406,34 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("private host not allowed")
+        );
+    }
+
+    #[test]
+    fn test_make_request_filters_cdn_loop_header() {
+        let connector = mock_http_connector::Connector::builder().build();
+        let backend = Backend::<mock_http_connector::Connector>::builder(BackendStrategy::FastEdge)
+            .hostname("be.server")
+            .build(connector);
+
+        let req = Request {
+            method: Method::Get,
+            uri: "http://example.com/path".to_string(),
+            headers: vec![
+                ("cdn-loop".to_string(), "guest-value".to_string()),
+                ("x-custom".to_string(), "keep-me".to_string()),
+            ],
+            body: None,
+        };
+
+        let result = backend
+            .make_request(req)
+            .expect("request should be built successfully");
+
+        assert!(result.headers().get("cdn-loop").is_none());
+        assert_eq!(
+            result.headers().get("x-custom").and_then(|v| v.to_str().ok()),
+            Some("keep-me")
         );
     }
 
