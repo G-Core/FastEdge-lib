@@ -79,7 +79,6 @@ pub struct SecretOption {
 pub enum Log {
     #[default]
     None,
-    #[cfg(feature = "victoria_log")]
     Victoria,
 }
 
@@ -268,14 +267,12 @@ mod tests {
     }
 
 
-    #[cfg(feature = "victoria_log")]
     #[test]
     fn test_log_deserialize_victoria_logs() {
         let log: Log = assert_ok!(serde_json::from_str("\"victoria\""));
         assert_eq!(log, Log::Victoria);
     }
 
-    #[cfg(feature = "victoria_log")]
     #[test]
     fn deserialize_app_with_victoria_log() {
         let json = json!({

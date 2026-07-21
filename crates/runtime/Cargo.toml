@@ -6,8 +6,6 @@ publish.workspace = true
 authors.workspace = true
 
 [features]
-default = ["victoria_log"]
-victoria_log = []
 metrics = ["prometheus", "lazy_static"]
 
 [dependencies]

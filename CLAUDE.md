@@ -71,7 +71,7 @@ Every Wasmtime `Store` holds a `Data<T>` (in `crates/runtime/src/lib.rs`). It bu
 
 ## Crate features worth knowing
 
-- `runtime`: `victoria_log` (default on); `metrics` opts into Prometheus + lazy_static and propagates through `http-service/metrics`.
+- `runtime`: `metrics` opts into Prometheus + lazy_static and propagates through `http-service/metrics`.
 - `key-value-store`: `redis` enables the Redis-backed implementation. `runtime` already turns this on; if you depend on `key-value-store` from elsewhere, opt in explicitly.
 - `cache`: no features yet — backend choice is at runtime via the `Arc<dyn CacheBackend>` injected into `Data<T>`.
 
