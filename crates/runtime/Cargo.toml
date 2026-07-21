@@ -6,8 +6,7 @@ publish.workspace = true
 authors.workspace = true
 
 [features]
-default = ["kafka_log", "victoria_log"]
-kafka_log = []
+default = ["victoria_log"]
 victoria_log = []
 metrics = ["prometheus", "lazy_static"]
 
@@ -24,12 +23,12 @@ wasmtime-environ = { workspace = true }
 wasmtime-wasi-io = { workspace = true }
 smol_str = { workspace = true }
 moka = { workspace = true }
-http = {workspace = true}
+http = { workspace = true }
 wit-component = "0.246.2"
 tracing = { workspace = true }
 bytesize = { workspace = true }
 http-backend = { path = "../http-backend" }
-key-value-store = { path = "../key-value-store" , features = ["redis"]}
+key-value-store = { path = "../key-value-store", features = ["redis"] }
 cache = { path = "../cache" }
 utils = { path = "../utils" }
 secret = { path = "../secret" }
