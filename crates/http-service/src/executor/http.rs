@@ -126,7 +126,18 @@ where
 
         let mut store = store_builder.build(state)?;
 
-        let instance = self.instance_pre.instantiate_async(&mut store).await?;
+        let instance = match self.instance_pre.instantiate_async(&mut store).await {
+            Ok(instance) => instance,
+            Err(error) => {
+                // A denied memory growth during instantiation (e.g. the module's
+                // declared minimum memory exceeds `mem_limit`) is recorded by the
+                // limiter; classify it as out-of-memory instead of a generic error.
+                if store.is_oom() {
+                    return Err(runtime::store::OutOfMemory(error).into());
+                }
+                return Err(error);
+            }
+        };
         let http_handler =
             instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
         let process = instance

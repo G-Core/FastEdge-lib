@@ -63,6 +63,37 @@ impl<T> Store<T> {
     pub fn memory_used(&self) -> usize {
         self.inner.data().store_limits.allocated
     }
+
+    /// Returns `true` if a memory growth request was denied because the
+    /// desired size exceeded the configured limit (out-of-memory). Notably
+    /// covers instantiation failures where a module's declared minimum memory
+    /// already exceeds the limit.
+    pub fn is_oom(&self) -> bool {
+        self.inner.data().store_limits.oom
+    }
+}
+
+/// Error indicating a wasm operation failed because it required more memory
+/// than the app's configured limit. Surfaced as a typed error (rather than the
+/// opaque wasmtime message) so callers can classify the failure as
+/// out-of-memory. The originating wasmtime error is preserved as the source.
+///
+/// Covers the instantiation-time case where a module's declared minimum memory
+/// already exceeds the limit (wasmtime reports "memory minimum size of N pages
+/// exceeds memory limits").
+#[derive(Debug)]
+pub struct OutOfMemory(pub anyhow::Error);
+
+impl std::fmt::Display for OutOfMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "out of memory: {}", self.0)
+    }
+}
+
+impl std::error::Error for OutOfMemory {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
 }
 
 impl<T> Deref for Store<T> {

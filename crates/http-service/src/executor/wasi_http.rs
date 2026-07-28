@@ -148,7 +148,18 @@ where
             .context("new response outparam")?;
         let proxy_pre = ProxyPre::new(instance_pre)?;
 
-        let proxy = proxy_pre.instantiate_async(&mut store).await?;
+        let proxy = match proxy_pre.instantiate_async(&mut store).await {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                // A denied memory growth during instantiation (e.g. the module's
+                // declared minimum memory exceeds `mem_limit`) is recorded by the
+                // limiter; classify it as out-of-memory instead of a generic error.
+                if store.is_oom() {
+                    return Err(runtime::store::OutOfMemory(error).into());
+                }
+                return Err(error);
+            }
+        };
 
         let task_stats = stats.clone();
         let task = tokio::task::spawn(

@@ -404,8 +404,19 @@ where
 
 fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
     let root_cause = error.root_cause();
-    let (status_code, fail_reason, msg, internal_code) =
-        if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+    // `OutOfMemory` wraps the underlying wasmtime error as its source, so it
+    // sits above `root_cause`; scan the whole chain for it.
+    let is_oom = error.chain().any(|e| e.is::<runtime::store::OutOfMemory>());
+    let (status_code, fail_reason, msg, internal_code) = if is_oom {
+        (
+            FASTEDGE_OUT_OF_MEMORY,
+            AppResult::OOM,
+            Full::new(Bytes::from("fastedge: Out of memory"))
+                .map_err(|never| match never {})
+                .boxed(),
+            INTERNAL_STATUS_OUT_OF_MEMORY,
+        )
+    } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
             if exit.0 == 0 {
                 (
                     StatusCode::OK.as_u16(),
