@@ -651,8 +651,36 @@ pub fn is_public_host(host: &str) -> bool {
     // Try to parse as IP address
     match host.parse::<IpAddr>() {
         Ok(ip) => !is_private_ip(&ip),
-        Err(_) => true, // Not an IP address, assume it's a hostname
+        // Not an IP literal: reject hostnames that are guaranteed to resolve to
+        // a loopback/internal address. Arbitrary hostnames still need to be
+        // re-validated against their resolved IP at connection time (see
+        // `is_private_ip`) to fully close the SSRF vector (CWE-918).
+        Err(_) => !is_private_hostname(host),
     }
+}
+
+/// Returns `true` for hostnames that must never be treated as public because
+/// they are defined to resolve to loopback/internal addresses.
+///
+/// `localhost` (and any `*.localhost` subdomain) is reserved by RFC 6761 and
+/// always maps to a loopback address, so it is rejected regardless of the
+/// resolver. A trailing root-label dot (`localhost.`) is normalized away.
+///
+/// Well-known cloud metadata hostnames are also rejected here as
+/// defense-in-depth against SSRF (CWE-918): they resolve to link-local
+/// metadata endpoints that can hand out instance credentials. This is a
+/// best-effort denylist — it does not replace validating the *resolved* IP at
+/// connection time, which is required to stop arbitrary hostnames and DNS
+/// rebinding. (Most clouds — AWS/Azure/Oracle/DigitalOcean — address the
+/// metadata service by the `169.254.169.254` IP directly, which is already
+/// blocked as link-local; GCP additionally exposes it by name.)
+fn is_private_hostname(host: &str) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        // GCP metadata server (and its bare alias).
+        || host == "metadata.google.internal"
+        || host == "metadata"
 }
 
 /// Returns `true` if the given `target_host` resolves to the same authority as
@@ -670,19 +698,31 @@ fn is_private_ip(ip: &IpAddr) -> bool {
     }
 }
 
-/// Check if an IPv4 address is private
-/// This is a a copu of std::net::Ipv4Addr::is_global with inverted logic and some additions
+/// Check if an IPv4 address is private / not globally-reachable.
+///
+/// This mirrors the (unstable) `std::net::Ipv4Addr::is_global` with inverted
+/// logic, implemented with explicit octet checks so it does not depend on
+/// unstable std APIs. Every non-globally-routable range is treated as private
+/// to prevent guest outbound SSRF (CWE-918).
 fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
-    ip.octets()[0] == 0 // "This network"
-        || ip.is_private()
-        || ip.is_loopback()
-        || ip.is_link_local()
-        || (
-        ip.octets()[0] == 192 && ip.octets()[1] == 0 && ip.octets()[2] == 0
-            && ip.octets()[3] != 9 && ip.octets()[3] != 10
-    )
-        || ip.is_documentation()
-        || ip.is_broadcast()
+    let [a, b, c, d] = ip.octets();
+    a == 0 // "This network" (0.0.0.0/8, RFC 1122)
+        || ip.is_private() // 10/8, 172.16/12, 192.168/16 (RFC 1918)
+        || ip.is_loopback() // 127.0.0.0/8 (RFC 1122)
+        || ip.is_link_local() // 169.254.0.0/16 (RFC 3927)
+        // Shared address space / CGNAT (RFC 6598): 100.64.0.0/10
+        || (a == 100 && (b & 0xC0) == 0x40)
+        // IETF protocol assignments (RFC 6890): 192.0.0.0/24, except the two
+        // globally-reachable PCP anycast addresses 192.0.0.9 and 192.0.0.10.
+        || (a == 192 && b == 0 && c == 0 && d != 9 && d != 10)
+        // 6to4 relay anycast (RFC 3068 / RFC 7526): 192.88.99.0/24
+        || (a == 192 && b == 88 && c == 99)
+        // Benchmarking (RFC 2544): 198.18.0.0/15
+        || (a == 198 && (b & 0xFE) == 18)
+        || ip.is_documentation() // 192.0.2/24, 198.51.100/24, 203.0.113/24 (RFC 5737)
+        || ip.is_broadcast() // 255.255.255.255 (RFC 919)
+        // Reserved for future use (RFC 1112): 240.0.0.0/4 (broadcast already covered above)
+        || (a & 0xF0) == 240
 }
 
 /// Check if an IPv6 address is private
@@ -1256,6 +1296,32 @@ mod tests {
         assert!(!is_public_host("192.0.2.1"));
         assert!(!is_public_host("198.51.100.1"));
         assert!(!is_public_host("203.0.113.1"));
+
+        // Shared address space / CGNAT (RFC 6598): 100.64.0.0/10
+        assert!(!is_public_host("100.64.0.0"));
+        assert!(!is_public_host("100.100.100.200"));
+        assert!(!is_public_host("100.127.255.255:8080"));
+
+        // Benchmarking (RFC 2544): 198.18.0.0/15
+        assert!(!is_public_host("198.18.0.1"));
+        assert!(!is_public_host("198.19.255.255:80"));
+
+        // 6to4 relay anycast (RFC 3068): 192.88.99.0/24
+        assert!(!is_public_host("192.88.99.1"));
+
+        // Reserved for future use (RFC 1112): 240.0.0.0/4
+        assert!(!is_public_host("240.0.0.1"));
+        assert!(!is_public_host("250.1.2.3:9000"));
+    }
+
+    #[test]
+    fn test_is_public_host_cgnat_boundaries_are_public() {
+        // Addresses just outside 100.64.0.0/10 remain public.
+        assert!(is_public_host("100.63.255.255"));
+        assert!(is_public_host("100.128.0.0"));
+        // Just outside 198.18.0.0/15.
+        assert!(is_public_host("198.17.255.255"));
+        assert!(is_public_host("198.20.0.0"));
     }
 
     #[test]
@@ -1310,7 +1376,19 @@ mod tests {
         assert!(is_public_host("www.example.com"));
         assert!(is_public_host("api.example.com:443"));
         assert!(is_public_host("subdomain.example.co.uk"));
-        assert!(is_public_host("localhost")); // hostname, not IP
+        // `localhost` is reserved (RFC 6761) and always loopback → not public.
+        assert!(!is_public_host("localhost"));
+        assert!(!is_public_host("localhost:8080"));
+        assert!(!is_public_host("LOCALHOST"));
+        assert!(!is_public_host("localhost."));
+        assert!(!is_public_host("foo.localhost"));
+        assert!(!is_public_host("foo.localhost:3000"));
+        // Well-known cloud metadata hostnames → not public.
+        assert!(!is_public_host("metadata.google.internal"));
+        assert!(!is_public_host("metadata.google.internal:80"));
+        assert!(!is_public_host("Metadata.Google.Internal"));
+        assert!(!is_public_host("metadata.google.internal."));
+        assert!(!is_public_host("metadata"));
     }
 
     #[test]
