@@ -1510,7 +1510,10 @@ mod tests {
 
         assert!(result.headers().get("cdn-loop").is_none());
         assert_eq!(
-            result.headers().get("x-custom").and_then(|v| v.to_str().ok()),
+            result
+                .headers()
+                .get("x-custom")
+                .and_then(|v| v.to_str().ok()),
             Some("keep-me")
         );
     }

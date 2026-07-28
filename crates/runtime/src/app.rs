@@ -266,7 +266,6 @@ mod tests {
         assert_eq!(w.log, Log::None);
     }
 
-
     #[test]
     fn test_log_deserialize_victoria_logs() {
         let log: Log = assert_ok!(serde_json::from_str("\"victoria\""));
