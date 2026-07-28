@@ -52,6 +52,7 @@ pub const DEFAULT_EPOCH_TICK_INTERVAL: u64 = 10;
 
 const PREVIEW1_ADAPTER: &[u8] = include_bytes!("adapters/wasi_snapshot_preview1.reactor.wasm");
 
+#[allow(non_camel_case_types)]
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum AppResult {
     SUCCESS,

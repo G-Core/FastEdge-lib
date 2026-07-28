@@ -79,9 +79,6 @@ pub struct SecretOption {
 pub enum Log {
     #[default]
     None,
-    #[cfg(feature = "kafka_log")]
-    Kafka,
-    #[cfg(feature = "victoria_log")]
     Victoria,
 }
 
@@ -269,21 +266,12 @@ mod tests {
         assert_eq!(w.log, Log::None);
     }
 
-    #[cfg(feature = "kafka_log")]
-    #[test]
-    fn test_log_deserialize_kafka() {
-        let log: Log = assert_ok!(serde_json::from_str("\"kafka\""));
-        assert_eq!(log, Log::Kafka);
-    }
-
-    #[cfg(feature = "victoria_log")]
     #[test]
     fn test_log_deserialize_victoria_logs() {
         let log: Log = assert_ok!(serde_json::from_str("\"victoria\""));
         assert_eq!(log, Log::Victoria);
     }
 
-    #[cfg(feature = "victoria_log")]
     #[test]
     fn deserialize_app_with_victoria_log() {
         let json = json!({

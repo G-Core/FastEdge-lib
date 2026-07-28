@@ -116,13 +116,11 @@ where
             http_backend.set_cdn_real_host(cdn_real_host.into());
         }
 
-        let propagate_header_names = http_backend.propagate_header_names();
         let backend_uri = http_backend.uri();
         let state = HttpState {
             http_backend,
             uri: backend_uri,
             propagate_headers: parts.headers,
-            propagate_header_names,
             stats: stats.clone(),
         };
 

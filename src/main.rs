@@ -251,7 +251,7 @@ fn append_headers(geo: bool, headers: &mut HashMap<SmolStr, SmolStr>) {
         headers.insert("pop-reg".to_smolstr(), "lu".to_smolstr());
         headers.insert("pop-city".to_smolstr(), "luxembourg".to_smolstr());
         headers.insert("pop-continent".to_smolstr(), "eu".to_smolstr());
-        headers.insert("pop-country-code".to_smolstr(), "au".to_smolstr());
+        headers.insert("pop-country-code".to_smolstr(), "lu".to_smolstr());
         headers.insert("pop-country-name".to_smolstr(), "luxembourg".to_smolstr());
     }
 }

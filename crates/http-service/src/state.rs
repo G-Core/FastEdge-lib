@@ -14,7 +14,6 @@ pub struct HttpState<C> {
     pub(super) http_backend: Backend<C>,
     pub(super) uri: Uri,
     pub(super) propagate_headers: HeaderMap,
-    pub(super) propagate_header_names: Vec<HeaderName>,
     pub(super) stats: Arc<dyn StatsVisitor>,
 }
 
@@ -29,6 +28,7 @@ const FASTEDGE_SCHEME: HeaderName = HeaderName::from_static("fastedge-scheme");
 const FASTEDGE_HEADER_HOSTNAME: HeaderName = HeaderName::from_static("fastedge_header_hostname");
 const FASTEDGE_HOSTNAME_VALUE: HeaderValue = HeaderValue::from_static("127.0.0.1");
 const FASTEDGE_APP_ID: HeaderName = HeaderName::from_static("fastedge-app-id");
+const CDN_LOOP: HeaderName = HeaderName::from_static("cdn-loop");
 
 impl<C> BackendRequest for HttpState<C> {
     #[instrument(skip(self, head), level = "debug", ret)]
@@ -104,11 +104,12 @@ impl<C> BackendRequest for HttpState<C> {
 
                 // Strip internal routing headers and all headers with the
                 // reserved `fastedge` prefix so guests cannot spoof internal metadata.
-                static FILTER_HEADERS: [HeaderName; 4] = [
+                static FILTER_HEADERS: [HeaderName; 5] = [
                     header::HOST,
                     header::CONTENT_LENGTH,
                     header::TRANSFER_ENCODING,
                     header::UPGRADE,
+                    CDN_LOOP,
                 ];
 
                 // filter headers
@@ -117,9 +118,7 @@ impl<C> BackendRequest for HttpState<C> {
                     .into_iter()
                     .filter_map(|(k, v)| k.map(|k| (k, v)))
                     .filter(|(k, _)| {
-                        !FILTER_HEADERS.contains(k)
-                            && !self.propagate_header_names.contains(k)
-                            && !is_fastedge_internal_header(k.as_str())
+                        !FILTER_HEADERS.contains(k) && !is_fastedge_internal_header(k.as_str())
                     })
                     .collect::<HeaderMap>();
 
@@ -141,13 +140,19 @@ impl<C> BackendRequest for HttpState<C> {
                         FASTEDGE_SCHEME,
                         original_url.scheme_str().unwrap_or("http").parse()?,
                     );
-                    //When HTTP app sets Host header, Fastegde needs to set Fastedge_Header_Hostname header for BE.
+                    //When HTTP app sets Host header, Fastedge needs to set Fastedge_Header_Hostname header for BE.
                     if let Some(request_host_header) = request_host_header_value {
                         headers.insert(FASTEDGE_HEADER_HOSTNAME, request_host_header);
                     }
                 }
 
-                headers.extend(self.propagate_headers.clone());
+                // Propagate fallback headers from the original request only
+                // when the app did not already set the same header.
+                for (name, value) in self.propagate_headers.iter() {
+                    if !headers.contains_key(name) {
+                        headers.insert(name.clone(), value.clone());
+                    }
+                }
 
                 // Inject the application identifier so the backend can
                 // correlate the request with the originating FastEdge app.
@@ -266,7 +271,6 @@ mod tests {
             http_backend,
             uri: backend_uri,
             propagate_headers: HeaderMap::new(),
-            propagate_header_names: vec![],
             stats: Arc::new(TestStats),
         }
     }
@@ -423,7 +427,6 @@ mod tests {
             http_backend,
             uri: backend_uri,
             propagate_headers: HeaderMap::new(),
-            propagate_header_names: vec![],
             stats: Arc::new(TestStats),
         };
         let out = state
@@ -439,5 +442,36 @@ mod tests {
             .backend_request(parts("http://example.com/path", &[]))
             .unwrap();
         assert_eq!(header(&out, "fastedge-app-id"), None);
+    }
+
+    #[test]
+    fn propagated_content_type_is_fallback_only() {
+        let mut state = make_state(None);
+        state
+            .propagate_headers
+            .insert(header::CONTENT_TYPE, "from-original".parse().unwrap());
+
+        let out = state
+            .backend_request(parts(
+                "http://example.com/path",
+                &[("content-type", "from-app")],
+            ))
+            .unwrap();
+
+        assert_eq!(header(&out, "content-type"), Some("from-app"));
+    }
+
+    #[test]
+    fn propagated_content_type_is_used_when_app_does_not_set_it() {
+        let mut state = make_state(None);
+        state
+            .propagate_headers
+            .insert(header::CONTENT_TYPE, "from-original".parse().unwrap());
+
+        let out = state
+            .backend_request(parts("http://example.com/path", &[]))
+            .unwrap();
+
+        assert_eq!(header(&out, "content-type"), Some("from-original"));
     }
 }
