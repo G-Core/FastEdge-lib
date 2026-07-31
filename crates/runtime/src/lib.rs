@@ -1,6 +1,7 @@
 use crate::app::KvStoreOption;
 use crate::store::HasStats;
 use http_backend::stats::ExtStatsTimer;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -432,7 +433,7 @@ pub trait ContextT {
     fn new_stats_row(
         &self,
         request_id: &SmolStr,
-        app: &SmolStr,
+        caller_ip: Ipv4Addr,
         cfg: &App,
     ) -> Arc<dyn StatsVisitor>;
 }
