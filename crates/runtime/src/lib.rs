@@ -22,6 +22,7 @@ use wasmtime::{
 use wit_component::ComponentEncoder;
 
 pub mod app;
+pub mod instances;
 mod limiter;
 pub mod logger;
 mod registry;
@@ -116,6 +117,9 @@ pub struct Data<T: 'static> {
     pub epoch_pause_ms: Arc<AtomicU64>,
     /// Whether elapsed time of external HTTP should refund epoch ticks.
     pub pause_epoch_timeout_for_external_http: bool,
+    /// Counts this instance in `fastedge_wasm_instances_live` for as long as the store —
+    /// and therefore its pooling-allocator slots — is alive. Held only for its `Drop`.
+    _live_instance: crate::instances::LiveInstanceGuard,
 }
 
 pub trait BackendRequest {
