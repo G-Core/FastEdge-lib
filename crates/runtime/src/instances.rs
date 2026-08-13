@@ -28,18 +28,20 @@ mod imp {
         )
         .unwrap();
 
-        /// High-water mark since process start. A plain gauge is sampled at the scrape
+        /// Peak since the previous scrape. A plain gauge is sampled at the scrape
         /// interval and will miss the sub-second concurrency spikes that a stalled backend
         /// produces — exactly the peaks the pool has to be sized for. This one cannot.
         static ref WASM_INSTANCES_PEAK: IntGauge = register_int_gauge!(
             "fastedge_wasm_instances_peak",
-            "Highest number of concurrently live WASM instances observed since process start"
+            "Highest number of concurrently live WASM instances observed since the \
+             previous scrape (resets on scrape)"
         )
         .unwrap();
     }
 
-    /// Mirror of the peak, kept separately so the high-water mark can be updated with an
-    /// atomic `fetch_max` — `IntGauge` only offers `set`, which cannot express "raise to".
+    /// Running max since the previous scrape, kept separately so the peak can be updated
+    /// with an atomic `fetch_max` — `IntGauge` only offers `set`, which cannot express
+    /// "raise to" — and drained with `swap(0)` by [`flush_peak`] on scrape.
     static PEAK: AtomicI64 = AtomicI64::new(0);
 
     pub(super) fn acquire() {
@@ -47,11 +49,7 @@ mod imp {
         // Reading back after `inc` may observe another thread's concurrent increment. That
         // is still a level that genuinely occurred, so it is a valid sample for the peak.
         let live = WASM_INSTANCES_LIVE.get();
-        if PEAK.fetch_max(live, Ordering::Relaxed) < live {
-            // Publish the resolved maximum rather than `live`: if two threads race here,
-            // both write the same (largest) value instead of the smaller one winning.
-            WASM_INSTANCES_PEAK.set(PEAK.load(Ordering::Relaxed));
-        }
+        PEAK.fetch_max(live, Ordering::Relaxed);
     }
 
     pub(super) fn release() {
@@ -63,9 +61,18 @@ mod imp {
         WASM_INSTANCES_LIVE.get()
     }
 
-    /// High-water mark since process start. Test/diagnostic accessor.
+    /// Peak since the previous [`flush_peak`]. Test/diagnostic accessor.
     pub fn peak() -> i64 {
         PEAK.load(Ordering::Relaxed)
+    }
+
+    /// Export and reset the peak gauge; call on each Prometheus scrape. Never reports
+    /// less than the currently live count, so a long-running steady load can't read as 0.
+    pub fn flush_peak() {
+        let peak = PEAK
+            .swap(0, Ordering::Relaxed)
+            .max(WASM_INSTANCES_LIVE.get());
+        WASM_INSTANCES_PEAK.set(peak);
     }
 }
 
@@ -73,10 +80,12 @@ mod imp {
 mod imp {
     pub(super) fn acquire() {}
     pub(super) fn release() {}
+    pub fn flush_peak() {}
 }
 
 #[cfg(feature = "metrics")]
 pub use imp::{live, peak};
+pub use imp::flush_peak;
 
 /// RAII counter for one live WASM instance.
 ///
