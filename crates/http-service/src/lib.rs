@@ -285,120 +285,124 @@ where
             Ok(app_name) => app_name,
         };
 
-        let span = tracing::info_span!("http", app = %app_name, traceparent = %traceparent);
-        let _enter = span.enter();
+        let span = tracing::error_span!("http", app = %app_name, traceparent = %traceparent);
 
-        // lookup for application config and binary_id
-        tracing::debug!("Processing request URL: {}", request.uri());
-        let lookup = match app_name {
-            AppName::Id(id) => self.context.lookup_by_id(id).instrument(span.clone()).await,
-            AppName::Name(name) => self
+        // Instrument the whole request body with the span. Using `span.enter()`
+        // here would be unsound: the returned guard is thread-local and does not
+        // re-enter the span after `.await` points, so synchronous log events in
+        // this body (e.g. the `execute` warning) could lose the span context when
+        // the task resumes on a different worker thread. Wrapping the body in an
+        // instrumented future re-enters the span on every poll.
+        async move {
+            // lookup for application config and binary_id
+            tracing::debug!("Processing request URL: {}", request.uri());
+            let lookup = match app_name {
+                AppName::Id(id) => self.context.lookup_by_id(id).await,
+                AppName::Name(name) => self
+                    .context
+                    .lookup_by_name(&name)
+                    .await
+                    .map(|cfg| (name, cfg)),
+            };
+
+            let (app_name, cfg) = match lookup {
+                None => {
+                    #[cfg(feature = "metrics")]
+                    metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
+                    tracing::info!("Request for unknown application on URL: {}", request.uri());
+                    return not_found();
+                }
+                Some((app_name, cfg))
+                    if cfg.status == Status::Draft || cfg.status == Status::Disabled =>
+                {
+                    tracing::info!(
+                        "Request for disabled application '{}' on URL: {}",
+                        app_name,
+                        request.uri()
+                    );
+                    return not_found();
+                }
+                Some((app_name, cfg)) if cfg.status == Status::RateLimited => {
+                    tracing::info!(
+                        "Request for rate limited application '{}' on URL: {}",
+                        app_name,
+                        request.uri()
+                    );
+                    return too_many_requests();
+                }
+                Some((app_name, cfg)) if cfg.status == Status::Suspended => {
+                    tracing::info!(
+                        "Request for suspended application '{}' on URL: {}",
+                        app_name,
+                        request.uri()
+                    );
+                    return not_acceptable();
+                }
+
+                Some((app_name, cfg)) => (app_name, cfg),
+            };
+
+            // get cached execute context for this application
+            let executor = match self
                 .context
-                .lookup_by_name(&name)
-                .instrument(span.clone())
-                .await
-                .map(|cfg| (name, cfg)),
-        };
-
-        let (app_name, cfg) = match lookup {
-            None => {
-                #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
-                tracing::info!("Request for unknown application on URL: {}", request.uri());
-                return not_found();
-            }
-            Some((app_name, cfg))
-                if cfg.status == Status::Draft || cfg.status == Status::Disabled =>
+                .get_executor(app_name.clone(), &cfg, &self.engine)
             {
-                tracing::info!(
-                    "Request for disabled application '{}' on URL: {}",
-                    app_name,
-                    request.uri()
-                );
-                return not_found();
-            }
-            Some((app_name, cfg)) if cfg.status == Status::RateLimited => {
-                tracing::info!(
-                    "Request for rate limited application '{}' on URL: {}",
-                    app_name,
-                    request.uri()
-                );
-                return too_many_requests();
-            }
-            Some((app_name, cfg)) if cfg.status == Status::Suspended => {
-                tracing::info!(
-                    "Request for suspended application '{}' on URL: {}",
-                    app_name,
-                    request.uri()
-                );
-                return not_acceptable();
-            }
+                Ok(executor) => executor,
+                Err(error) => {
+                    #[cfg(feature = "metrics")]
+                    metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
+                    tracing::warn!(cause=?error, app=%app_name,
+                        "failure on getting context"
+                    );
+                    return internal_fastedge_error("context error", INTERNAL_STATUS_CONTEXT_ERROR);
+                }
+            };
 
-            Some((app_name, cfg)) => (app_name, cfg),
-        };
+            let stats = self.context.new_stats_row(&traceparent, &app_name, &cfg);
 
-        // get cached execute context for this application
-        let executor = match self
-            .context
-            .get_executor(app_name.clone(), &cfg, &self.engine)
-        {
-            Ok(executor) => executor,
-            Err(error) => {
-                #[cfg(feature = "metrics")]
-                metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
-                tracing::warn!(cause=?error, app=%app_name,
-                    "failure on getting context"
-                );
-                return internal_fastedge_error("context error", INTERNAL_STATUS_CONTEXT_ERROR);
-            }
-        };
+            let response = match executor.execute(request, stats.clone()).await {
+                Ok(mut response) => {
+                    #[cfg(feature = "metrics")]
+                    metrics::metrics(
+                        AppResult::SUCCESS,
+                        &["http"],
+                        Some(stats.get_time_elapsed()),
+                        Some(stats.get_memory_used()),
+                    );
 
-        let stats = self.context.new_stats_row(&traceparent, &app_name, &cfg);
+                    response.headers_mut().extend(app_res_headers(cfg));
+                    response
+                }
+                Err(error) => {
+                    tracing::warn!(cause=?error, "execute");
+                    let (status_code, fail_reason, msg, internal_code) = map_err(error);
+                    stats.status_code(status_code);
+                    stats.fail_reason(fail_reason as i32);
+                    tracing::debug!(?fail_reason, ?traceparent, "stats");
 
-        let response = match executor
-            .execute(request, stats.clone())
-            .instrument(span.clone())
-            .await
-        {
-            Ok(mut response) => {
-                #[cfg(feature = "metrics")]
-                metrics::metrics(
-                    AppResult::SUCCESS,
-                    &["http"],
-                    Some(stats.get_time_elapsed()),
-                    Some(stats.get_memory_used()),
-                );
+                    #[cfg(feature = "metrics")]
+                    metrics::metrics(
+                        fail_reason,
+                        HTTP_LABEL,
+                        Some(stats.get_time_elapsed()),
+                        None,
+                    );
 
-                response.headers_mut().extend(app_res_headers(cfg));
-                response
-            }
-            Err(error) => {
-                tracing::warn!(cause=?error, "execute");
-                let (status_code, fail_reason, msg, internal_code) = map_err(error);
-                stats.status_code(status_code);
-                stats.fail_reason(fail_reason as i32);
-                tracing::debug!(?fail_reason, ?traceparent, "stats");
+                    let builder = hyper::Response::builder()
+                        .status(status_code)
+                        .header(X_CDN_INTERNAL_STATUS, internal_code);
+                    let res_headers = app_res_headers(cfg);
+                    let builder = res_headers
+                        .iter()
+                        .fold(builder, |builder, (k, v)| builder.header(k, v));
 
-                #[cfg(feature = "metrics")]
-                metrics::metrics(
-                    fail_reason,
-                    HTTP_LABEL,
-                    Some(stats.get_time_elapsed()),
-                    None,
-                );
-
-                let builder = hyper::Response::builder()
-                    .status(status_code)
-                    .header(X_CDN_INTERNAL_STATUS, internal_code);
-                let res_headers = app_res_headers(cfg);
-                let builder = res_headers
-                    .iter()
-                    .fold(builder, |builder, (k, v)| builder.header(k, v));
-
-                builder.body(msg)?
-            }
-        };
-        Ok(response)
+                    builder.body(msg)?
+                }
+            };
+            Ok(response)
+        }
+        .instrument(span)
+        .await
     }
 }
 
