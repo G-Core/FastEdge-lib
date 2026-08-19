@@ -402,6 +402,38 @@ where
     }
 }
 
+/// Classify an execution error into an [`AppResult`] fail reason.
+///
+/// Kept consistent with the fail-reason mapping in [`map_err`]. Used to record
+/// failures that surface *after* the response headers were already sent (e.g. an
+/// epoch-interrupt timeout during body streaming). Without this, such a request
+/// is accounted in stats as a successful `200`, because `execute` returns `Ok`
+/// as soon as the guest sets the response, before the trap occurs.
+pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
+    let root_cause = error.root_cause();
+    if error.chain().any(|e| e.is::<runtime::store::OutOfMemory>()) {
+        AppResult::OOM
+    } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+        if exit.0 == 0 {
+            AppResult::SUCCESS
+        } else {
+            AppResult::OTHER
+        }
+    } else if let Some(trap) = root_cause.downcast_ref::<wasmtime::Trap>() {
+        match trap {
+            wasmtime::Trap::Interrupt => AppResult::TIMEOUT,
+            wasmtime::Trap::UnreachableCodeReached => AppResult::OOM,
+            _ => AppResult::OTHER,
+        }
+    } else if root_cause.downcast_ref::<Elapsed>().is_some() {
+        AppResult::TIMEOUT
+    } else if root_cause.to_string().ends_with("deadline has elapsed") {
+        AppResult::TIMEOUT
+    } else {
+        AppResult::OTHER
+    }
+}
+
 fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
     let root_cause = error.root_cause();
     // `OutOfMemory` wraps the underlying wasmtime error as its source, so it

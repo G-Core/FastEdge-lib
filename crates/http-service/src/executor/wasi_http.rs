@@ -165,15 +165,28 @@ where
         let task = tokio::task::spawn(
             async move {
                 let duration = Duration::from_millis(store.data().timeout);
-                if let Err(e) = tokio::time::timeout(
+                let exec_result = match tokio::time::timeout(
                     duration,
                     proxy
                         .wasi_http_incoming_handler()
                         .call_handle(&mut store, req, out),
                 )
-                .await?
+                .await
                 {
+                    Ok(inner) => inner,
+                    // tokio timeout elapsed (outer deadline hit).
+                    Err(elapsed) => Err(elapsed.into()),
+                };
+                if let Err(e) = exec_result {
                     tracing::warn!(cause=?e, "incoming handler");
+                    // Record the failure reason on the shared stats. The response
+                    // headers may already have been flushed (the guest called
+                    // `response-outparam::set` before trapping mid-body), in which
+                    // case `receiver.await` already returned `Ok` and the request
+                    // would otherwise be accounted in stats as a successful `200`.
+                    // Setting `fail_reason` makes the stats row reflect the actual
+                    // failure. See `crate::fail_reason_of`.
+                    task_stats.fail_reason(crate::fail_reason_of(&e) as i32);
                     // log to application logger  error
                     if let Some(ref logger) = store.data().logger {
                         logger.write_msg(format!("Execution error: {}", e)).await;
