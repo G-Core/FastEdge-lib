@@ -285,7 +285,7 @@ where
             Ok(app_name) => app_name,
         };
 
-        let span = tracing::info_span!("http", app = %app_name, traceparent = %traceparent);
+        let span = tracing::error_span!("http", app = %app_name, traceparent = %traceparent);
         let _enter = span.enter();
 
         // lookup for application config and binary_id
