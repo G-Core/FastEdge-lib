@@ -433,6 +433,7 @@ pub trait ContextT {
     fn new_stats_row(
         &self,
         request_id: &SmolStr,
+        app: &SmolStr,
         caller_ip: Ipv4Addr,
         cfg: &App,
     ) -> Arc<dyn StatsVisitor>;

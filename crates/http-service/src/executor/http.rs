@@ -353,6 +353,7 @@ mod tests {
         fn new_stats_row(
             &self,
             _request_id: &SmolStr,
+            _app: &SmolStr,
             _caller_ip: std::net::Ipv4Addr,
             _cfg: &App,
         ) -> Arc<dyn StatsVisitor> {

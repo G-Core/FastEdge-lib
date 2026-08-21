@@ -365,7 +365,9 @@ where
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<std::net::Ipv4Addr>().ok())
             .unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
-        let stats = self.context.new_stats_row(&traceparent, caller_ip, &cfg);
+        let stats = self
+            .context
+            .new_stats_row(&traceparent, &app_name, caller_ip, &cfg);
 
             let response = match executor.execute(request, stats.clone()).await {
                 Ok(mut response) => {
