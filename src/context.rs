@@ -103,7 +103,7 @@ impl ContextT for Context {
 impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
     type Executor = RunExecutor;
 
-    fn get_executor(
+    async fn get_executor(
         &self,
         name: SmolStr,
         app: &App,
@@ -155,7 +155,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
 }
 
 impl ExecutorCache for Context {
-    fn remove(&self, _name: &str) {
+    async fn remove(&self, _name: &str) {
         unreachable!()
     }
 

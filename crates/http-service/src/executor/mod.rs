@@ -36,12 +36,16 @@ pub trait HttpExecutor {
 
 pub trait ExecutorFactory<C> {
     type Executor;
+    /// Get (or build and cache) the executor for an app. Async so that a cache
+    /// miss can offload the blocking load + instantiate work to the blocking
+    /// pool instead of stalling the calling worker (or migrating its run
+    /// queue, as `block_in_place` does).
     fn get_executor(
         &self,
         name: SmolStr,
         app: &App,
         engine: &WasmEngine<C>,
-    ) -> Result<Self::Executor>;
+    ) -> impl std::future::Future<Output = Result<Self::Executor>> + Send;
 }
 
 pub(crate) fn get_properties(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {

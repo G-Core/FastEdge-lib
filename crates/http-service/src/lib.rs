@@ -346,6 +346,7 @@ where
             let executor = match self
                 .context
                 .get_executor(app_name.clone(), &cfg, &self.engine)
+                .await
             {
                 Ok(executor) => executor,
                 Err(error) => {
@@ -453,78 +454,78 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             INTERNAL_STATUS_OUT_OF_MEMORY,
         )
     } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
-            if exit.0 == 0 {
-                (
-                    StatusCode::OK.as_u16(),
-                    AppResult::SUCCESS,
-                    Empty::new().map_err(|never| match never {}).boxed(),
-                    0,
-                )
-            } else {
-                (
-                    FASTEDGE_EXECUTION_PANIC,
-                    AppResult::OTHER,
-                    Full::new(Bytes::from("fastedge: App failed"))
-                        .map_err(|never| match never {})
-                        .boxed(),
-                    INTERNAL_STATUS_APP_EXIT_ERROR,
-                )
-            }
-        } else if let Some(trap) = root_cause.downcast_ref::<wasmtime::Trap>() {
-            match trap {
-                wasmtime::Trap::Interrupt => (
-                    FASTEDGE_EXECUTION_TIMEOUT,
-                    AppResult::TIMEOUT,
-                    Full::new(Bytes::from("fastedge: Execution timeout"))
-                        .map_err(|never| match never {})
-                        .boxed(),
-                    INTERNAL_STATUS_TIMEOUT_INTERRUPT,
-                ),
-                wasmtime::Trap::UnreachableCodeReached => (
-                    FASTEDGE_OUT_OF_MEMORY,
-                    AppResult::OOM,
-                    Full::new(Bytes::from("fastedge: Out of memory"))
-                        .map_err(|never| match never {})
-                        .boxed(),
-                    INTERNAL_STATUS_OUT_OF_MEMORY,
-                ),
-                _ => (
-                    FASTEDGE_EXECUTION_PANIC,
-                    AppResult::OTHER,
-                    Full::new(Bytes::from("fastedge: App failed"))
-                        .map_err(|never| match never {})
-                        .boxed(),
-                    INTERNAL_STATUS_WASM_TRAP_OTHER,
-                ),
-            }
-        } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
+        if exit.0 == 0 {
             (
-                FASTEDGE_EXECUTION_TIMEOUT,
-                AppResult::TIMEOUT,
-                Full::new(Bytes::from("fastedge: Execution timeout"))
-                    .map_err(|never| match never {})
-                    .boxed(),
-                INTERNAL_STATUS_TIMEOUT_ELAPSED,
-            )
-        } else if root_cause.to_string().ends_with("deadline has elapsed") {
-            (
-                FASTEDGE_EXECUTION_TIMEOUT,
-                AppResult::TIMEOUT,
-                Full::new(Bytes::from("fastedge: Execution timeout"))
-                    .map_err(|never| match never {})
-                    .boxed(),
-                INTERNAL_STATUS_TIMEOUT_DEADLINE,
+                StatusCode::OK.as_u16(),
+                AppResult::SUCCESS,
+                Empty::new().map_err(|never| match never {}).boxed(),
+                0,
             )
         } else {
             (
-                FASTEDGE_INTERNAL_ERROR,
+                FASTEDGE_EXECUTION_PANIC,
                 AppResult::OTHER,
-                Full::new(Bytes::from("fastedge: Execute error"))
+                Full::new(Bytes::from("fastedge: App failed"))
                     .map_err(|never| match never {})
                     .boxed(),
-                INTERNAL_STATUS_EXECUTE_ERROR,
+                INTERNAL_STATUS_APP_EXIT_ERROR,
             )
-        };
+        }
+    } else if let Some(trap) = root_cause.downcast_ref::<wasmtime::Trap>() {
+        match trap {
+            wasmtime::Trap::Interrupt => (
+                FASTEDGE_EXECUTION_TIMEOUT,
+                AppResult::TIMEOUT,
+                Full::new(Bytes::from("fastedge: Execution timeout"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+                INTERNAL_STATUS_TIMEOUT_INTERRUPT,
+            ),
+            wasmtime::Trap::UnreachableCodeReached => (
+                FASTEDGE_OUT_OF_MEMORY,
+                AppResult::OOM,
+                Full::new(Bytes::from("fastedge: Out of memory"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+                INTERNAL_STATUS_OUT_OF_MEMORY,
+            ),
+            _ => (
+                FASTEDGE_EXECUTION_PANIC,
+                AppResult::OTHER,
+                Full::new(Bytes::from("fastedge: App failed"))
+                    .map_err(|never| match never {})
+                    .boxed(),
+                INTERNAL_STATUS_WASM_TRAP_OTHER,
+            ),
+        }
+    } else if let Some(_elapsed) = root_cause.downcast_ref::<Elapsed>() {
+        (
+            FASTEDGE_EXECUTION_TIMEOUT,
+            AppResult::TIMEOUT,
+            Full::new(Bytes::from("fastedge: Execution timeout"))
+                .map_err(|never| match never {})
+                .boxed(),
+            INTERNAL_STATUS_TIMEOUT_ELAPSED,
+        )
+    } else if root_cause.to_string().ends_with("deadline has elapsed") {
+        (
+            FASTEDGE_EXECUTION_TIMEOUT,
+            AppResult::TIMEOUT,
+            Full::new(Bytes::from("fastedge: Execution timeout"))
+                .map_err(|never| match never {})
+                .boxed(),
+            INTERNAL_STATUS_TIMEOUT_DEADLINE,
+        )
+    } else {
+        (
+            FASTEDGE_INTERNAL_ERROR,
+            AppResult::OTHER,
+            Full::new(Bytes::from("fastedge: Execute error"))
+                .map_err(|never| match never {})
+                .boxed(),
+            INTERNAL_STATUS_EXECUTE_ERROR,
+        )
+    };
     (status_code, fail_reason, msg, internal_code)
 }
 
