@@ -144,6 +144,8 @@ mod tests {
         fn count_kv_byod_read(&self, value: i32) {
             self.byod_reads.fetch_add(value, Ordering::Relaxed);
         }
+
+        fn count_kv_read_cached(&self) {}
     }
 
     impl UserDiagStats for MockStatsVisitor {

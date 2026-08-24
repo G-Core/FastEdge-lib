@@ -616,6 +616,7 @@ mod tests {
         impl ReadStats for NoStats {
             fn count_kv_read(&self, _: i32) {}
             fn count_kv_byod_read(&self, _: i32) {}
+            fn count_kv_read_cached(&self) {}
         }
         impl UserDiagStats for NoStats {
             fn set_user_diag(&self, _: &str) {}

@@ -13,9 +13,27 @@ pub use key_value::{Error, Value};
 #[cfg(feature = "redis")]
 pub use redis_impl::RedisStore;
 
+/// Outcome of a [`Store::get_tracked`] call: the value plus where it came from.
+pub struct GetOutcome {
+    pub value: Option<Value>,
+    /// `true` when the value was served from an in-process cache instead of
+    /// the backing store.
+    pub from_cache: bool,
+}
+
 #[async_trait::async_trait]
 pub trait Store: Sync + Send {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error>;
+
+    /// Like [`Store::get`], but also reports whether the value was served from
+    /// an in-process cache. Layers that do not cache inherit this default,
+    /// which delegates to [`Store::get`] and reports a backing-store read.
+    async fn get_tracked(&self, key: &str) -> Result<GetOutcome, Error> {
+        Ok(GetOutcome {
+            value: self.get(key).await?,
+            from_cache: false,
+        })
+    }
 
     async fn zrange_by_score(
         &self,
@@ -47,6 +65,10 @@ pub trait ReadStats: Sync + Send {
     fn count_kv_read(&self, value: i32);
     /// Increment key-value read count and size for BYOD
     fn count_kv_byod_read(&self, value: i32);
+    /// Increment the count of reads served from the in-process cache. Counted
+    /// in addition to [`ReadStats::count_kv_read`] /
+    /// [`ReadStats::count_kv_byod_read`], so it is a subset of the total reads.
+    fn count_kv_read_cached(&self);
 }
 
 #[derive(Clone)]
@@ -367,6 +389,8 @@ mod tests {
             self.byod_reads
                 .fetch_add(value, std::sync::atomic::Ordering::Relaxed);
         }
+
+        fn count_kv_read_cached(&self) {}
     }
 
     // Mock implementation of StoreManager
