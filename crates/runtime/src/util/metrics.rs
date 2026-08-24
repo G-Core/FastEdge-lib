@@ -14,7 +14,8 @@ lazy_static! {
     .unwrap();
     static ref ERROR_COUNT: IntCounterVec = register_int_counter_vec!(
         "fastedge_error_total_count",
-        "Number of failed app calls.",
+        "Total number of failed app calls, by executor and failure reason \
+         (counter; the non-conventional *_count suffix is kept for backwards compatibility).",
         &["executor", "reason"]
     )
     .unwrap();
@@ -30,7 +31,10 @@ lazy_static! {
     .unwrap();
     static ref MEMORY_USAGE: IntCounterVec = register_int_counter_vec!(
         "fastedge_wasm_memory_used",
-        "WASM Memory usage",
+        "Cumulative WASM linear-memory bytes consumed by app calls (counter, NOT a \
+         current-usage gauge; the name is kept for backwards compatibility). \
+         rate() = memory-zeroing throughput; divide by rate(fastedge_call_count) \
+         for average memory per request.",
         &["executor"]
     )
     .unwrap();
