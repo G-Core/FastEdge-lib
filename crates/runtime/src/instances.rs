@@ -83,9 +83,9 @@ mod imp {
     pub fn flush_peak() {}
 }
 
+pub use imp::flush_peak;
 #[cfg(feature = "metrics")]
 pub use imp::{live, peak};
-pub use imp::flush_peak;
 
 /// RAII counter for one live WASM instance.
 ///
