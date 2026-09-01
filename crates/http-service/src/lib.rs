@@ -430,9 +430,9 @@ pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
             wasmtime::Trap::UnreachableCodeReached => AppResult::OOM,
             _ => AppResult::OTHER,
         }
-    } else if root_cause.downcast_ref::<Elapsed>().is_some() {
-        AppResult::TIMEOUT
-    } else if root_cause.to_string().ends_with("deadline has elapsed") {
+    } else if root_cause.downcast_ref::<Elapsed>().is_some()
+        || root_cause.to_string().ends_with("deadline has elapsed")
+    {
         AppResult::TIMEOUT
     } else {
         AppResult::OTHER
