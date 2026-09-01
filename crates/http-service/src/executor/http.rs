@@ -354,6 +354,7 @@ mod tests {
             &self,
             _request_id: &SmolStr,
             _app: &SmolStr,
+            _caller_ip: std::net::Ipv4Addr,
             _cfg: &App,
         ) -> Arc<dyn StatsVisitor> {
             Arc::new(TestStats)
