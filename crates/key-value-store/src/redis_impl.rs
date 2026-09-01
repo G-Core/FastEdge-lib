@@ -2,6 +2,8 @@ use crate::Store;
 use reactor::gcore::fastedge::key_value::{Error, Value};
 use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use redis::{AsyncCommands, AsyncIter};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// Fail-fast timeouts for the KV-store Redis connection. Redis sits on the
@@ -25,34 +27,58 @@ fn connection_manager_config() -> ConnectionManagerConfig {
 
 #[derive(Clone)]
 pub struct RedisStore {
-    inner: ConnectionManager,
+    /// Pool of multiplexed connections. Each `ConnectionManager` owns its own
+    /// socket and background driver task, so spreading commands across the pool
+    /// round-robin keeps a burst from serializing behind a single connection
+    /// (which would push tail latency past the response timeout). Wrapped in
+    /// `Arc` so cloning a `RedisStore` shares the same pool and cursor.
+    conns: Arc<Vec<ConnectionManager>>,
+    next: Arc<AtomicUsize>,
 }
 
 impl RedisStore {
-    /// Open a store backed by `ConnectionManager`, which holds a multiplexed
-    /// connection and transparently reconnects with exponential backoff when
-    /// the underlying socket dies (e.g. broken pipe on Redis restart). The
-    /// command that hits the dead socket still surfaces as an error, but
-    /// follow-up calls land on the freshly re-established connection.
-    pub async fn open(params: &str) -> Result<Self, Error> {
+    /// Open a store backed by a pool of `ConnectionManager`s. Each connection
+    /// holds a multiplexed connection and transparently reconnects with
+    /// exponential backoff when the underlying socket dies (e.g. broken pipe on
+    /// Redis restart). The command that hits the dead socket still surfaces as
+    /// an error, but follow-up calls land on a freshly re-established
+    /// connection. `pool_size` is clamped to at least 1.
+    pub async fn open(params: &str, pool_size: usize) -> Result<Self, Error> {
+        let pool_size = pool_size.max(1);
         let client = ::redis::Client::open(params).map_err(|error| {
             tracing::warn!(error = ?error, "kv-store: redis open");
             Error::InternalError
         })?;
-        let conn = ConnectionManager::new_with_config(client, connection_manager_config())
-            .await
-            .map_err(|error| {
-                tracing::warn!(error = ?error, "kv-store: redis open");
-                Error::InternalError
-            })?;
-        Ok(Self { inner: conn })
+        let mut conns = Vec::with_capacity(pool_size);
+        for _ in 0..pool_size {
+            let conn =
+                ConnectionManager::new_with_config(client.clone(), connection_manager_config())
+                    .await
+                    .map_err(|error| {
+                        tracing::warn!(error = ?error, "kv-store: redis open");
+                        Error::InternalError
+                    })?;
+            conns.push(conn);
+        }
+        Ok(Self {
+            conns: Arc::new(conns),
+            next: Arc::new(AtomicUsize::new(0)),
+        })
+    }
+
+    /// Pick the next connection from the pool (round-robin). Clones are cheap:
+    /// `ConnectionManager` is internally reference-counted and shares its
+    /// socket, so this just hands back another handle to a pooled connection.
+    fn conn(&self) -> ConnectionManager {
+        let idx = self.next.fetch_add(1, Ordering::Relaxed) % self.conns.len();
+        self.conns[idx].clone()
     }
 }
 
 #[async_trait::async_trait]
 impl Store for RedisStore {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error> {
-        self.inner.clone().get(key).await.map_err(|error| {
+        self.conn().get(key).await.map_err(|error| {
             tracing::warn!(cause = ?error, key, "kv-store: redis get");
             Error::InternalError
         })
@@ -64,8 +90,7 @@ impl Store for RedisStore {
         min: f64,
         max: f64,
     ) -> Result<Vec<(Value, f64)>, Error> {
-        self.inner
-            .clone()
+        self.conn()
             .zrangebyscore_withscores(key, min, max)
             .await
             .map_err(|error| {
@@ -75,7 +100,7 @@ impl Store for RedisStore {
     }
 
     async fn scan(&self, pattern: &str) -> Result<Vec<String>, Error> {
-        let mut conn = self.inner.clone();
+        let mut conn = self.conn();
         let mut it = conn.scan_match(pattern).await.map_err(|error| {
             tracing::warn!(cause = ?error, pattern, "kv-store: redis scan_match");
             Error::InternalError
@@ -91,7 +116,7 @@ impl Store for RedisStore {
     }
 
     async fn zscan(&self, key: &str, pattern: &str) -> Result<Vec<(Value, f64)>, Error> {
-        let mut conn = self.inner.clone();
+        let mut conn = self.conn();
         let mut it: AsyncIter<(Value, f64)> =
             conn.zscan_match(key, pattern).await.map_err(|error| {
                 tracing::warn!(cause = ?error, key, pattern, "kv-store: redis zscan_match");
@@ -111,7 +136,7 @@ impl Store for RedisStore {
         redis::cmd("BF.EXISTS")
             .arg(key)
             .arg(item)
-            .query_async(&mut self.inner.clone())
+            .query_async(&mut self.conn())
             .await
             .map_err(|error| {
                 tracing::warn!(cause = ?error, key, item, "kv-store: redis bf_exists");

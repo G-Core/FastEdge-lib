@@ -22,6 +22,7 @@ use wasmtime::{
 use wit_component::ComponentEncoder;
 
 pub mod app;
+pub mod instances;
 mod limiter;
 pub mod logger;
 mod registry;
@@ -116,6 +117,9 @@ pub struct Data<T: 'static> {
     pub epoch_pause_ms: Arc<AtomicU64>,
     /// Whether elapsed time of external HTTP should refund epoch ticks.
     pub pause_epoch_timeout_for_external_http: bool,
+    /// Counts this instance in `fastedge_wasm_instances_live` for as long as the store —
+    /// and therefore its pooling-allocator slots — is alive. Held only for its `Drop`.
+    _live_instance: crate::instances::LiveInstanceGuard,
 }
 
 pub trait BackendRequest {
@@ -320,6 +324,20 @@ pub struct WasmEngine<T: 'static> {
     module_linker: ModuleLinker<T>,
 }
 
+// Manual impl: `derive(Clone)` would incorrectly require `T: Clone`, but the
+// engine and linkers are internally reference-counted and clone cheaply for
+// any `T`. Needed so executor factories can move an engine handle into
+// `spawn_blocking` closures.
+impl<T> Clone for WasmEngine<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            component_linker: self.component_linker.clone(),
+            module_linker: self.module_linker.clone(),
+        }
+    }
+}
+
 /// A builder interface for configuring a new [`WasmEngine`].
 ///
 /// A new [`WasmEngineBuilder`] can be obtained with [`WasmEngine::builder`].
@@ -420,7 +438,11 @@ pub trait ContextT {
 }
 
 pub trait ExecutorCache {
-    fn remove(&self, name: &str);
+    /// Invalidate the cached executor for a single app.
+    fn remove(&self, name: &str) -> impl std::future::Future<Output = ()> + Send;
+    /// Invalidate all cached executors. Prefer per-app [`ExecutorCache::remove`]:
+    /// a full flush forces a cold start (load + instantiate) for every active
+    /// app on the next request, causing a latency burst.
     fn remove_all(&self);
 }
 

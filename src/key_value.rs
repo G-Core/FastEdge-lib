@@ -17,7 +17,7 @@ impl StoreManager for CliStoreManager {
         let Some(opts) = self.stores.iter().find(|store| store.param == param) else {
             return Err(Error::NoSuchStore);
         };
-        let store = RedisStore::open(&opts.param).await?;
+        let store = RedisStore::open(&opts.param, 1).await?;
         Ok(Arc::new(store))
     }
 }

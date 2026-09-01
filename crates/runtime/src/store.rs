@@ -63,6 +63,37 @@ impl<T> Store<T> {
     pub fn memory_used(&self) -> usize {
         self.inner.data().store_limits.allocated
     }
+
+    /// Returns `true` if a memory growth request was denied because the
+    /// desired size exceeded the configured limit (out-of-memory). Notably
+    /// covers instantiation failures where a module's declared minimum memory
+    /// already exceeds the limit.
+    pub fn is_oom(&self) -> bool {
+        self.inner.data().store_limits.oom
+    }
+}
+
+/// Error indicating a wasm operation failed because it required more memory
+/// than the app's configured limit. Surfaced as a typed error (rather than the
+/// opaque wasmtime message) so callers can classify the failure as
+/// out-of-memory. The originating wasmtime error is preserved as the source.
+///
+/// Covers the instantiation-time case where a module's declared minimum memory
+/// already exceeds the limit (wasmtime reports "memory minimum size of N pages
+/// exceeds memory limits").
+#[derive(Debug)]
+pub struct OutOfMemory(pub anyhow::Error);
+
+impl std::fmt::Display for OutOfMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "out of memory: {}", self.0)
+    }
+}
+
+impl std::error::Error for OutOfMemory {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref())
+    }
 }
 
 impl<T> Deref for Store<T> {
@@ -345,6 +376,7 @@ impl StoreBuilder {
                 cache: cache_impl,
                 epoch_pause_ms: epoch_pause_ms.clone(),
                 pause_epoch_timeout_for_external_http: self.epoch_exclude_http_wait,
+                _live_instance: crate::instances::LiveInstanceGuard::new(),
             },
         );
         inner.limiter(|state| &mut state.store_limits);
@@ -564,5 +596,88 @@ mod tests {
         // must always be extended — execution should reach the natural
         // end of the bounded loop without trapping.
         result.expect("guest must complete when epoch credit is deposited");
+    }
+
+    // ── live-instance accounting ──────────────────────────────────────────
+
+    /// No-op stats sink; `StoreBuilder::build` only needs `HasStats` to wire the
+    /// key-value store and utils host state.
+    #[cfg(feature = "metrics")]
+    struct NoStats;
+
+    #[cfg(feature = "metrics")]
+    mod no_stats_impls {
+        use super::NoStats;
+        use crate::util::stats::{CdnPhase, ReadStats, StatsVisitor};
+        use http_backend::stats::ExtRequestStats;
+        use std::time::Duration;
+        use utils::UserDiagStats;
+
+        impl ReadStats for NoStats {
+            fn count_kv_read(&self, _: i32) {}
+            fn count_kv_byod_read(&self, _: i32) {}
+        }
+        impl UserDiagStats for NoStats {
+            fn set_user_diag(&self, _: &str) {}
+        }
+        impl ExtRequestStats for NoStats {
+            fn observe_ext(&self, _: Duration) {}
+        }
+        impl StatsVisitor for NoStats {
+            fn status_code(&self, _: u16) {}
+            fn memory_used(&self, _: u64) {}
+            fn fail_reason(&self, _: i32) {}
+            fn observe(&self, _: Duration) {}
+            fn get_time_elapsed(&self) -> u64 {
+                0
+            }
+            fn get_memory_used(&self) -> u64 {
+                0
+            }
+            fn cdn_phase(&self, _: CdnPhase) {}
+        }
+    }
+
+    #[cfg(feature = "metrics")]
+    impl HasStats for NoStats {
+        fn get_stats(&self) -> Arc<dyn StatsVisitor> {
+            Arc::new(NoStats)
+        }
+    }
+
+    /// End-to-end wiring check: a store built the way every executor builds it must be
+    /// counted in `fastedge_wasm_instances_live` for exactly as long as it is alive, since
+    /// that is the window in which it holds pooling-allocator slots.
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn store_lifetime_is_counted_as_a_live_instance() {
+        use crate::instances;
+
+        let engine = make_engine();
+        let before = instances::live();
+
+        let store = StoreBuilder::new(engine.clone(), WasiVersion::Preview1)
+            .build(NoStats)
+            .expect("build store");
+        assert_eq!(
+            instances::live(),
+            before + 1,
+            "building a store must count a live instance"
+        );
+
+        let second = StoreBuilder::new(engine, WasiVersion::Preview1)
+            .build(NoStats)
+            .expect("build store");
+        assert_eq!(instances::live(), before + 2);
+        assert!(instances::peak() >= before + 2);
+
+        drop(second);
+        assert_eq!(instances::live(), before + 1);
+        drop(store);
+        assert_eq!(
+            instances::live(),
+            before,
+            "dropping the store must release the count"
+        );
     }
 }

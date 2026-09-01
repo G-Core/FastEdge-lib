@@ -79,6 +79,7 @@ pub struct SecretOption {
 pub enum Log {
     #[default]
     None,
+    Kafka,
     Victoria,
 }
 

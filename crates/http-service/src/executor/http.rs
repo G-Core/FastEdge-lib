@@ -126,7 +126,18 @@ where
 
         let mut store = store_builder.build(state)?;
 
-        let instance = self.instance_pre.instantiate_async(&mut store).await?;
+        let instance = match self.instance_pre.instantiate_async(&mut store).await {
+            Ok(instance) => instance,
+            Err(error) => {
+                // A denied memory growth during instantiation (e.g. the module's
+                // declared minimum memory exceeds `mem_limit`) is recorded by the
+                // limiter; classify it as out-of-memory instead of a generic error.
+                if store.is_oom() {
+                    return Err(runtime::store::OutOfMemory(error).into());
+                }
+                return Err(error);
+            }
+        };
         let http_handler =
             instance.get_export_index(&mut store, None, "gcore:fastedge/http-handler");
         let process = instance
@@ -396,34 +407,36 @@ mod tests {
             name: SmolStr,
             cfg: &App,
             engine: &WasmEngine<HttpState<FastEdgeConnector>>,
-        ) -> anyhow::Result<Self::Executor> {
-            let mut dictionary = Dictionary::new();
-            for (k, v) in cfg.env.iter() {
-                dictionary.insert(k.to_string(), v.to_string());
+        ) -> impl std::future::Future<Output = anyhow::Result<Self::Executor>> + Send {
+            async move {
+                let mut dictionary = Dictionary::new();
+                for (k, v) in cfg.env.iter() {
+                    dictionary.insert(k.to_string(), v.to_string());
+                }
+                let env = cfg.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
+
+                let logger = self.make_logger(name.clone(), cfg);
+
+                let version = WasiVersion::Preview2;
+                let store_builder = engine
+                    .store_builder(version)
+                    .set_env(&env)
+                    .max_memory_size(cfg.mem_limit)
+                    .max_epoch_ticks(cfg.max_duration)
+                    .dictionary(dictionary)
+                    .logger(logger);
+
+                let component = self.loader().load_component(cfg.binary_id)?;
+                let instance_pre = engine.component_instantiate_pre(&component)?;
+                tracing::debug!("Added '{}' to cache", name);
+                Ok(HttpExecutorImpl::new(
+                    instance_pre,
+                    store_builder,
+                    self.backend(),
+                    false,
+                    cfg.app_id,
+                ))
             }
-            let env = cfg.env.iter().collect::<Vec<(&SmolStr, &SmolStr)>>();
-
-            let logger = self.make_logger(name.clone(), cfg);
-
-            let version = WasiVersion::Preview2;
-            let store_builder = engine
-                .store_builder(version)
-                .set_env(&env)
-                .max_memory_size(cfg.mem_limit)
-                .max_epoch_ticks(cfg.max_duration)
-                .dictionary(dictionary)
-                .logger(logger);
-
-            let component = self.loader().load_component(cfg.binary_id)?;
-            let instance_pre = engine.component_instantiate_pre(&component)?;
-            tracing::debug!("Added '{}' to cache", name);
-            Ok(HttpExecutorImpl::new(
-                instance_pre,
-                store_builder,
-                self.backend(),
-                false,
-                cfg.app_id,
-            ))
         }
     }
 
