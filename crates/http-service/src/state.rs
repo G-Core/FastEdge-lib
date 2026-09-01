@@ -236,6 +236,7 @@ mod tests {
     impl ReadStats for TestStats {
         fn count_kv_read(&self, _value: i32) {}
         fn count_kv_byod_read(&self, _value: i32) {}
+        fn count_kv_read_cached(&self) {}
     }
     impl UserDiagStats for TestStats {
         fn set_user_diag(&self, _diag: &str) {}
