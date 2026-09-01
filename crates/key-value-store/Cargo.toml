@@ -17,6 +17,7 @@ slab = "0.4"
 async-trait = "0.1"
 smol_str = {workspace = true}
 tracing = "0.1"
+tokio = { workspace = true }
 redis = { version = "1.2", features = ["aio", "tokio-comp", "connection-manager", "tokio-native-tls-comp"], optional = true}
 
 [dev-dependencies]
