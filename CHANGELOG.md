@@ -1,3 +1,38 @@
+## [0.21.0] - 2026-09-01
+
+### 🚀 Features
+
+- *(logging)* Remove Kafka log support and migrate to VictoriaLogs exclusively
+- *(logging)* Remove VictoriaLogs feature flag and make support always enabled
+- *(memory)* Classify denied memory growth as out-of-memory during instantiation
+- *(logging)* Revert Kafka log variant to Log enum
+- *(metrics)* Add live/peak gauges for concurrent WASM instances
+- *(redis)* Implement connection pooling for Redis backend
+- *(kvrocks)* Add pool size limits for RedisStore connections
+
+### 🐛 Bug Fixes
+
+- Filter out cdn-loop header and ensure content-type fallback behavior
+- *(hostnames)* Enhance hostname validation to reject loopback and cloud metadata addresses
+- *(instances)* Update peak gauge description and logic for accurate scraping
+- *(http)* Classify execution errors and update timeout handling
+- *(tracing)* Change span type from info to error for better logging
+- *(tracing)* Ensure proper span context during async request processing
+- Unify timeout handling for elapsed deadlines
+
+### 🚜 Refactor
+
+- *(tests)* Improve readability of assertions in test cases
+
+### ⚡ Performance
+
+- Selective executor cache invalidation and non-blocking cold starts
+
+### ⚙️ Miscellaneous Tasks
+
+- *(dependencies)* Update various crate versions in Cargo.lock
+- *(metrics)* Remove redundant tokio metrics, add client/kind labels, fix docs
+- Remove FOSSA configuration file
 ## [0.20.0] - 2026-07-13
 
 ### 🚀 Features
@@ -8,6 +43,10 @@
 ### 🚜 Refactor
 
 - Improve Redis error tracing with detailed context and adjust instrumentation annotations
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
 ## [0.19.0] - 2026-06-30
 
 ### 🚀 Features
