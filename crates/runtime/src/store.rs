@@ -602,10 +602,8 @@ mod tests {
 
     /// No-op stats sink; `StoreBuilder::build` only needs `HasStats` to wire the
     /// key-value store and utils host state.
-    #[cfg(feature = "metrics")]
     struct NoStats;
 
-    #[cfg(feature = "metrics")]
     mod no_stats_impls {
         use super::NoStats;
         use crate::util::stats::{CdnPhase, ReadStats, StatsVisitor};
@@ -639,7 +637,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "metrics")]
     impl HasStats for NoStats {
         fn get_stats(&self) -> Arc<dyn StatsVisitor> {
             Arc::new(NoStats)
@@ -649,7 +646,6 @@ mod tests {
     /// End-to-end wiring check: a store built the way every executor builds it must be
     /// counted in `fastedge_wasm_instances_live` for exactly as long as it is alive, since
     /// that is the window in which it holds pooling-allocator slots.
-    #[cfg(feature = "metrics")]
     #[test]
     fn store_lifetime_is_counted_as_a_live_instance() {
         use crate::instances;

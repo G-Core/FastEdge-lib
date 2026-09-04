@@ -71,7 +71,7 @@ Every Wasmtime `Store` holds a `Data<T>` (in `crates/runtime/src/lib.rs`). It bu
 
 ## Crate features worth knowing
 
-- `runtime`: `metrics` opts into Prometheus + lazy_static and propagates through `http-service/metrics`.
+- `runtime`: no metrics backend is compiled in. App-call outcomes are reported through the `runtime::util::metrics` sink (`set_sink`), and live-instance counts through the plain atomics in `runtime::instances` (`live` / `flush_peak`); embedders (e.g. the FastEdge server) export them however they like. With no sink installed, reporting is a no-op.
 - `key-value-store`: `redis` enables the Redis-backed implementation. `runtime` already turns this on; if you depend on `key-value-store` from elsewhere, opt in explicitly.
 - `cache`: no features yet — backend choice is at runtime via the `Arc<dyn CacheBackend>` injected into `Data<T>`.
 
