@@ -58,19 +58,15 @@ const PREVIEW1_ADAPTER: &[u8] = include_bytes!("adapters/wasi_snapshot_preview1.
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum AppResult {
     SUCCESS,
-    #[cfg(feature = "metrics")]
     UNKNOWN,
     TIMEOUT,
     OOM,
     OTHER,
     /// Request shed by admission control (server overloaded).
-    #[cfg(feature = "metrics")]
     OVERLOADED,
     /// Request rejected because the app is rate limited.
-    #[cfg(feature = "metrics")]
     RATE_LIMITED,
     /// Request rejected because the app is disabled or in draft.
-    #[cfg(feature = "metrics")]
     DISABLED,
 }
 

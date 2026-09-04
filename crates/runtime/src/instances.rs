@@ -14,78 +14,49 @@
 //! through `StoreBuilder::build` — ProxyWasm, `http-handler`, `wasi:http` — is counted
 //! against the same pool it actually draws from. There is deliberately no `executor` label:
 //! the pools are per-`Engine` and shared, so only the total is meaningful for sizing.
+//!
+//! The counters are plain atomics; embedders export them (e.g. as the Prometheus gauges
+//! `fastedge_wasm_instances_live` / `fastedge_wasm_instances_peak`) by reading [`live`] and
+//! draining [`flush_peak`] on each scrape.
 
-#[cfg(feature = "metrics")]
-mod imp {
-    use lazy_static::lazy_static;
-    use prometheus::{IntGauge, register_int_gauge};
-    use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 
-    lazy_static! {
-        static ref WASM_INSTANCES_LIVE: IntGauge = register_int_gauge!(
-            "fastedge_wasm_instances_live",
-            "WASM instances currently alive, each holding one slot in every wasmtime pooling-allocator pool"
-        )
-        .unwrap();
+/// Currently live instances.
+static LIVE: AtomicI64 = AtomicI64::new(0);
 
-        /// Peak since the previous scrape. A plain gauge is sampled at the scrape
-        /// interval and will miss the sub-second concurrency spikes that a stalled backend
-        /// produces — exactly the peaks the pool has to be sized for. This one cannot.
-        static ref WASM_INSTANCES_PEAK: IntGauge = register_int_gauge!(
-            "fastedge_wasm_instances_peak",
-            "Highest number of concurrently live WASM instances observed since the \
-             previous scrape (resets on scrape)"
-        )
-        .unwrap();
-    }
+/// Running max since the previous [`flush_peak`]. Kept separately so the peak can be
+/// updated with an atomic `fetch_max` and drained with `swap(0)` on scrape. A plain
+/// scrape-time sample of [`LIVE`] would miss the sub-second concurrency spikes that a
+/// stalled backend produces — exactly the peaks the pool has to be sized for.
+static PEAK: AtomicI64 = AtomicI64::new(0);
 
-    /// Running max since the previous scrape, kept separately so the peak can be updated
-    /// with an atomic `fetch_max` — `IntGauge` only offers `set`, which cannot express
-    /// "raise to" — and drained with `swap(0)` by [`flush_peak`] on scrape.
-    static PEAK: AtomicI64 = AtomicI64::new(0);
-
-    pub(super) fn acquire() {
-        WASM_INSTANCES_LIVE.inc();
-        // Reading back after `inc` may observe another thread's concurrent increment. That
-        // is still a level that genuinely occurred, so it is a valid sample for the peak.
-        let live = WASM_INSTANCES_LIVE.get();
-        PEAK.fetch_max(live, Ordering::Relaxed);
-    }
-
-    pub(super) fn release() {
-        WASM_INSTANCES_LIVE.dec();
-    }
-
-    /// Currently live instances. Test/diagnostic accessor.
-    pub fn live() -> i64 {
-        WASM_INSTANCES_LIVE.get()
-    }
-
-    /// Peak since the previous [`flush_peak`]. Test/diagnostic accessor.
-    pub fn peak() -> i64 {
-        PEAK.load(Ordering::Relaxed)
-    }
-
-    /// Export and reset the peak gauge; call on each Prometheus scrape. Never reports
-    /// less than the currently live count, so a long-running steady load can't read as 0.
-    pub fn flush_peak() {
-        let peak = PEAK
-            .swap(0, Ordering::Relaxed)
-            .max(WASM_INSTANCES_LIVE.get());
-        WASM_INSTANCES_PEAK.set(peak);
-    }
+fn acquire() {
+    // `fetch_add` returns the previous value, so `+ 1` is the level that this
+    // acquisition genuinely produced — a valid sample for the peak.
+    let live = LIVE.fetch_add(1, Ordering::Relaxed) + 1;
+    PEAK.fetch_max(live, Ordering::Relaxed);
 }
 
-#[cfg(not(feature = "metrics"))]
-mod imp {
-    pub(super) fn acquire() {}
-    pub(super) fn release() {}
-    pub fn flush_peak() {}
+fn release() {
+    LIVE.fetch_sub(1, Ordering::Relaxed);
 }
 
-pub use imp::flush_peak;
-#[cfg(feature = "metrics")]
-pub use imp::{live, peak};
+/// Currently live instances.
+pub fn live() -> i64 {
+    LIVE.load(Ordering::Relaxed)
+}
+
+/// Peak since the previous [`flush_peak`]. Test/diagnostic accessor.
+pub fn peak() -> i64 {
+    PEAK.load(Ordering::Relaxed)
+}
+
+/// Drain and return the peak since the previous call; invoke on each metrics scrape.
+/// Never reports less than the currently live count, so a long-running steady load
+/// can't read as 0.
+pub fn flush_peak() -> i64 {
+    PEAK.swap(0, Ordering::Relaxed).max(live())
+}
 
 /// RAII counter for one live WASM instance.
 ///
@@ -97,7 +68,7 @@ pub struct LiveInstanceGuard;
 
 impl LiveInstanceGuard {
     pub fn new() -> Self {
-        imp::acquire();
+        acquire();
         LiveInstanceGuard
     }
 }
@@ -110,15 +81,15 @@ impl Default for LiveInstanceGuard {
 
 impl Drop for LiveInstanceGuard {
     fn drop(&mut self) {
-        imp::release();
+        release();
     }
 }
 
-#[cfg(all(test, feature = "metrics"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Guards from concurrent tests share the process-global gauge, so assertions are on
+    /// Guards from concurrent tests share the process-global counter, so assertions are on
     /// deltas rather than absolute values.
     #[test]
     fn guard_tracks_live_count_and_raises_peak() {

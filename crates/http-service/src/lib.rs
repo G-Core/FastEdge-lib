@@ -15,7 +15,6 @@ use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{body::Body, server::conn::http1, service::service_fn};
 use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
-#[cfg(feature = "metrics")]
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
@@ -38,7 +37,6 @@ type OwnedFd = std::os::fd::OwnedFd;
 #[cfg(not(target_family = "unix"))]
 type OwnedFd = std::os::raw::c_int;
 
-#[cfg(feature = "metrics")]
 const HTTP_LABEL: &[&str; 1] = &["http"];
 
 const FASTEDGE_INTERNAL_ERROR: u16 = 530;
@@ -277,7 +275,6 @@ where
         // get application name from request URL
         let app_name = match app_name_from_request(&request) {
             Err(error) => {
-                #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                 tracing::info!(cause=?error, traceparent = %traceparent, "App name not provided");
                 return not_found();
@@ -307,7 +304,6 @@ where
 
             let (app_name, cfg) = match lookup {
                 None => {
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                     tracing::info!("Request for unknown application on URL: {}", request.uri());
                     return not_found();
@@ -350,7 +346,6 @@ where
             {
                 Ok(executor) => executor,
                 Err(error) => {
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                     tracing::warn!(cause=?error, app=%app_name,
                         "failure on getting context"
@@ -371,7 +366,6 @@ where
 
             let response = match executor.execute(request, stats.clone()).await {
                 Ok(mut response) => {
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(
                         AppResult::SUCCESS,
                         &["http"],
@@ -389,7 +383,6 @@ where
                     stats.fail_reason(fail_reason as i32);
                     tracing::debug!(?fail_reason, ?traceparent, "stats");
 
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(
                         fail_reason,
                         HTTP_LABEL,
