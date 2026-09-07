@@ -33,8 +33,9 @@ fn redis_read_retry_delay(attempt: usize) -> Duration {
 /// exponential backoff. `op` is re-invoked from scratch on each attempt so it
 /// can pick a fresh pooled connection (used by `get`/`zrange_by_score`/
 /// `bf_exists`; `scan`/`zscan` retry the same connection since their iterator
-/// borrows it across the loop).
-async fn retry_read<T, F, Fut>(mut op: F) -> Result<T, ::redis::RedisError>
+/// borrows it across the loop). Each retry is reported to the installed
+/// [`crate::ReadRetryObserver`] under `command`.
+async fn retry_read<T, F, Fut>(command: &'static str, mut op: F) -> Result<T, ::redis::RedisError>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, ::redis::RedisError>>,
@@ -45,6 +46,7 @@ where
             Ok(value) => return Ok(value),
             Err(error) if attempt < REDIS_READ_RETRIES => {
                 attempt += 1;
+                crate::note_read_retry(command);
                 tracing::debug!(attempt, cause = ?error, "kv-store: redis read retry");
                 tokio::time::sleep(redis_read_retry_delay(attempt)).await;
             }
@@ -115,7 +117,7 @@ impl RedisStore {
 #[async_trait::async_trait]
 impl Store for RedisStore {
     async fn get(&self, key: &str) -> Result<Option<Value>, Error> {
-        retry_read(|| async { self.conn().get(key).await })
+        retry_read(crate::CMD_GET, || async { self.conn().get(key).await })
             .await
             .map_err(|error| {
                 tracing::warn!(cause = ?error, key, "kv-store: redis get");
@@ -129,12 +131,14 @@ impl Store for RedisStore {
         min: f64,
         max: f64,
     ) -> Result<Vec<(Value, f64)>, Error> {
-        retry_read(|| async { self.conn().zrangebyscore_withscores(key, min, max).await })
-            .await
-            .map_err(|error| {
-                tracing::warn!(cause = ?error, key, min, max, "kv-store: redis zrangebyscore");
-                Error::InternalError
-            })
+        retry_read(crate::CMD_ZRANGE_BY_SCORE, || async {
+            self.conn().zrangebyscore_withscores(key, min, max).await
+        })
+        .await
+        .map_err(|error| {
+            tracing::warn!(cause = ?error, key, min, max, "kv-store: redis zrangebyscore");
+            Error::InternalError
+        })
     }
 
     async fn scan(&self, pattern: &str) -> Result<Vec<String>, Error> {
@@ -145,6 +149,7 @@ impl Store for RedisStore {
                 Ok(it) => break it,
                 Err(error) if attempt < REDIS_READ_RETRIES => {
                     attempt += 1;
+                    crate::note_read_retry(crate::CMD_SCAN);
                     tracing::debug!(attempt, cause = ?error, pattern, "kv-store: redis scan_match retry");
                     tokio::time::sleep(redis_read_retry_delay(attempt)).await;
                 }
@@ -172,6 +177,7 @@ impl Store for RedisStore {
                 Ok(it) => break it,
                 Err(error) if attempt < REDIS_READ_RETRIES => {
                     attempt += 1;
+                    crate::note_read_retry(crate::CMD_ZSCAN);
                     tracing::debug!(attempt, cause = ?error, key, pattern, "kv-store: redis zscan_match retry");
                     tokio::time::sleep(redis_read_retry_delay(attempt)).await;
                 }
@@ -192,7 +198,7 @@ impl Store for RedisStore {
     }
 
     async fn bf_exists(&self, key: &str, item: &str) -> Result<bool, Error> {
-        retry_read(|| async {
+        retry_read(crate::CMD_BF_EXISTS, || async {
             redis::cmd("BF.EXISTS")
                 .arg(key)
                 .arg(item)
