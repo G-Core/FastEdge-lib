@@ -32,6 +32,7 @@ mod tests {
     impl ReadStats for NoOpStats {
         fn count_kv_read(&self, _: i32) {}
         fn count_kv_byod_read(&self, _: i32) {}
+        fn count_kv_read_cached(&self) {}
     }
 
     fn make_kv_option(name: &str, param: &str) -> KvStoreOption {

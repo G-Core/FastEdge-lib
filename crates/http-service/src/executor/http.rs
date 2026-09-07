@@ -283,6 +283,8 @@ mod tests {
         fn count_kv_read(&self, _value: i32) {}
 
         fn count_kv_byod_read(&self, _value: i32) {}
+
+        fn count_kv_read_cached(&self) {}
     }
 
     impl UserDiagStats for TestStats {
@@ -354,6 +356,7 @@ mod tests {
             &self,
             _request_id: &SmolStr,
             _app: &SmolStr,
+            _caller_ip: std::net::Ipv4Addr,
             _cfg: &App,
         ) -> Arc<dyn StatsVisitor> {
             Arc::new(TestStats)
