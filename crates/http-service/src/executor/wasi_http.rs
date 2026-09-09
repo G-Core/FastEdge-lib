@@ -6,7 +6,7 @@ use crate::executor;
 use crate::executor::{HttpExecutor, X_CDN_REAL_HOST};
 use crate::state::HttpState;
 use ::http::{HeaderMap, Request, Response, Uri, header};
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
@@ -178,7 +178,6 @@ where
                     Err(elapsed) => Err(elapsed.into()),
                 };
                 if let Err(e) = exec_result {
-                    tracing::warn!(cause=?e, "incoming handler");
                     // Record the failure reason on the shared stats. The response
                     // headers may already have been flushed (the guest called
                     // `response-outparam::set` before trapping mid-body), in which
@@ -203,11 +202,27 @@ where
         );
 
         match receiver.await {
-            Ok(Ok(response)) => {
-                stats.status_code(response.status().as_u16());
-                Ok(response)
+            Ok(inner) => {
+                // The guest already invoked `response-outparam::set`, so a later
+                // failure of the task (e.g. an epoch interrupt while streaming the
+                // body) is never propagated to the caller. Log it here - this is
+                // the only place it can be reported.
+                tokio::task::spawn(
+                    async move {
+                        if let Ok(Err(e)) = task.await {
+                            tracing::warn!(cause=?e, "incoming handler");
+                        }
+                    }
+                    .in_current_span(),
+                );
+                match inner {
+                    Ok(response) => {
+                        stats.status_code(response.status().as_u16());
+                        Ok(response)
+                    }
+                    Err(error) => Err(error.into()),
+                }
             }
-            Ok(Err(error)) => Err(error.into()),
             Err(_) => {
                 let e = match task.await {
                     Ok(r) => {
@@ -215,7 +230,12 @@ where
                     }
                     Err(e) => e.into(),
                 };
-                bail!("guest never invoked `response-outparam::set` method: {e:?}")
+                // Attach context instead of formatting `e` into a new message so the
+                // source chain is preserved: `map_err`/`fail_reason_of` rely on
+                // `root_cause()` downcasting to `wasmtime::Trap` / `Elapsed` to
+                // classify timeouts. Flattening it into a string made every failure
+                // here look like a generic execute error (530 instead of 532).
+                Err(e).context("guest never invoked `response-outparam::set` method")
             }
         }
     }
