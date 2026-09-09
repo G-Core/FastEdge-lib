@@ -202,32 +202,42 @@ where
         );
 
         match receiver.await {
-            Ok(inner) => {
-                // The guest already invoked `response-outparam::set`, so a later
-                // failure of the task (e.g. an epoch interrupt while streaming the
-                // body) is never propagated to the caller. Log it here - this is
-                // the only place it can be reported.
+            Ok(Ok(response)) => {
+                // The response headers are already on their way to the client, so a
+                // later failure of the task (e.g. an epoch interrupt while streaming
+                // the body) can no longer be propagated to the caller. This watcher
+                // is the only place it can be reported.
+                //
+                // It is spawned *only* on this path. On every other path the error
+                // still reaches the caller and is logged upstream, so watching here
+                // as well would log the same failure twice.
                 tokio::task::spawn(
                     async move {
-                        if let Ok(Err(e)) = task.await {
-                            tracing::warn!(cause=?e, "incoming handler");
+                        match task.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => tracing::warn!(cause=?e, "incoming handler"),
+                            // Panic or cancellation. Nothing else observes the task
+                            // once headers are flushed, so report it here too.
+                            Err(e) => tracing::warn!(cause=?e, "incoming handler task"),
                         }
                     }
                     .in_current_span(),
                 );
-                match inner {
-                    Ok(response) => {
-                        stats.status_code(response.status().as_u16());
-                        Ok(response)
-                    }
-                    Err(error) => Err(error.into()),
-                }
+                stats.status_code(response.status().as_u16());
+                Ok(response)
             }
+            // The guest set an error response, which is returned to the caller
+            // below - so the task must not log it as well. Dropping the handle only
+            // detaches the task: it still runs to completion and still records
+            // `fail_reason` on the shared stats.
+            Ok(Err(error)) => Err(error.into()),
             Err(_) => {
                 let e = match task.await {
-                    Ok(r) => {
-                        r.expect_err("if the receiver has an error, the task must have failed")
-                    }
+                    // The guest returned without ever setting the outparam, so there
+                    // is no task error to attribute. Synthesise one rather than
+                    // asserting the task failed, which would panic on this path.
+                    Ok(Ok(())) => anyhow!("handler completed without setting a response"),
+                    Ok(Err(e)) => e,
                     Err(e) => e.into(),
                 };
                 // Attach context instead of formatting `e` into a new message so the
