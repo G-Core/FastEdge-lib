@@ -866,4 +866,25 @@ mod tests {
         let id = AppName::Id(1234);
         assert_eq!("1234", id.to_string());
     }
+
+    // ── Error classification ─────────────────────────────────────────────
+
+    /// A timeout trap must stay classified as a timeout even when the
+    /// `wasi_http` executor wraps it with `guest never invoked
+    /// `response-outparam::set``. Formatting the cause into the message instead
+    /// of chaining it loses the `Trap` downcast and yields 530 instead of 532.
+    #[test]
+    fn test_map_err_keeps_timeout_through_context() {
+        use anyhow::Context;
+
+        let inner = anyhow::Error::from(wasmtime::Trap::Interrupt).context("error while executing");
+        let wrapped = Err::<(), _>(inner)
+            .context("guest never invoked `response-outparam::set` method")
+            .unwrap_err();
+
+        let (status_code, fail_reason, _msg, internal_code) = crate::map_err(wrapped);
+        assert_eq!(crate::FASTEDGE_EXECUTION_TIMEOUT, status_code);
+        assert_eq!(runtime::AppResult::TIMEOUT as i32, fail_reason as i32);
+        assert_eq!(crate::INTERNAL_STATUS_TIMEOUT_INTERRUPT, internal_code);
+    }
 }
