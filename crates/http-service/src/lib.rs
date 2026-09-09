@@ -311,6 +311,7 @@ where
                 Some((app_name, cfg))
                     if cfg.status == Status::Draft || cfg.status == Status::Disabled =>
                 {
+                    metrics::metrics(AppResult::DISABLED, HTTP_LABEL, None, None);
                     tracing::info!(
                         "Request for disabled application '{}' on URL: {}",
                         app_name,
@@ -319,6 +320,7 @@ where
                     return not_found();
                 }
                 Some((app_name, cfg)) if cfg.status == Status::RateLimited => {
+                    metrics::metrics(AppResult::RATE_LIMITED, HTTP_LABEL, None, None);
                     tracing::info!(
                         "Request for rate limited application '{}' on URL: {}",
                         app_name,
@@ -327,6 +329,7 @@ where
                     return too_many_requests();
                 }
                 Some((app_name, cfg)) if cfg.status == Status::Suspended => {
+                    metrics::metrics(AppResult::SUSPENDED, HTTP_LABEL, None, None);
                     tracing::info!(
                         "Request for suspended application '{}' on URL: {}",
                         app_name,
