@@ -68,6 +68,8 @@ pub enum AppResult {
     RATE_LIMITED,
     /// Request rejected because the app is disabled or in draft.
     DISABLED,
+    /// Request rejected because the app is suspended.
+    SUSPENDED,
 }
 
 pub type InstancePre<T> = wasmtime::component::InstancePre<Data<T>>;
