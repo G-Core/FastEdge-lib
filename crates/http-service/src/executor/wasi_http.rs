@@ -6,7 +6,7 @@ use crate::executor;
 use crate::executor::{HttpExecutor, X_CDN_REAL_HOST};
 use crate::state::HttpState;
 use ::http::{HeaderMap, Request, Response, Uri, header};
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
@@ -178,7 +178,6 @@ where
                     Err(elapsed) => Err(elapsed.into()),
                 };
                 if let Err(e) = exec_result {
-                    tracing::warn!(cause=?e, "incoming handler");
                     // Record the failure reason on the shared stats. The response
                     // headers may already have been flushed (the guest called
                     // `response-outparam::set` before trapping mid-body), in which
@@ -204,18 +203,49 @@ where
 
         match receiver.await {
             Ok(Ok(response)) => {
+                // The response headers are already on their way to the client, so a
+                // later failure of the task (e.g. an epoch interrupt while streaming
+                // the body) can no longer be propagated to the caller. This watcher
+                // is the only place it can be reported.
+                //
+                // It is spawned *only* on this path. On every other path the error
+                // still reaches the caller and is logged upstream, so watching here
+                // as well would log the same failure twice.
+                tokio::task::spawn(
+                    async move {
+                        match task.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => tracing::warn!(cause=?e, "incoming handler"),
+                            // Panic or cancellation. Nothing else observes the task
+                            // once headers are flushed, so report it here too.
+                            Err(e) => tracing::warn!(cause=?e, "incoming handler task"),
+                        }
+                    }
+                    .in_current_span(),
+                );
                 stats.status_code(response.status().as_u16());
                 Ok(response)
             }
+            // The guest set an error response, which is returned to the caller
+            // below - so the task must not log it as well. Dropping the handle only
+            // detaches the task: it still runs to completion and still records
+            // `fail_reason` on the shared stats.
             Ok(Err(error)) => Err(error.into()),
             Err(_) => {
                 let e = match task.await {
-                    Ok(r) => {
-                        r.expect_err("if the receiver has an error, the task must have failed")
-                    }
+                    // The guest returned without ever setting the outparam, so there
+                    // is no task error to attribute. Synthesise one rather than
+                    // asserting the task failed, which would panic on this path.
+                    Ok(Ok(())) => anyhow!("handler completed without setting a response"),
+                    Ok(Err(e)) => e,
                     Err(e) => e.into(),
                 };
-                bail!("guest never invoked `response-outparam::set` method: {e:?}")
+                // Attach context instead of formatting `e` into a new message so the
+                // source chain is preserved: `map_err`/`fail_reason_of` rely on
+                // `root_cause()` downcasting to `wasmtime::Trap` / `Elapsed` to
+                // classify timeouts. Flattening it into a string made every failure
+                // here look like a generic execute error (530 instead of 532).
+                Err(e).context("guest never invoked `response-outparam::set` method")
             }
         }
     }
