@@ -49,42 +49,84 @@ impl CacheImpl {
     pub fn new(backend: Arc<dyn CacheBackend>) -> Self {
         Self { backend }
     }
+
+    /// Get the value associated with `key`.
+    pub async fn get(&self, key: &str) -> Result<Option<Payload>, Error> {
+        self.backend.get(key).await
+    }
+
+    /// Set the value for `key` with an optional expiry in milliseconds.
+    pub async fn set(&self, key: &str, value: Payload, ttl_ms: Option<u64>) -> Result<(), Error> {
+        self.backend.set(key, value, ttl_ms).await
+    }
+
+    /// Delete the key-value pair associated with `key`.
+    pub async fn delete(&self, key: &str) -> Result<(), Error> {
+        self.backend.delete(key).await
+    }
+
+    /// Check whether `key` exists in the cache.
+    pub async fn exists(&self, key: &str) -> Result<bool, Error> {
+        self.backend.exists(key).await
+    }
+
+    /// Increment the integer value stored at `key` by `delta`.
+    pub async fn incr(&self, key: &str, delta: i64) -> Result<i64, Error> {
+        self.backend.incr(key, delta).await
+    }
+
+    /// Set or update the expiry of `key` to `ttl_ms` milliseconds from now.
+    pub async fn expire(&self, key: &str, ttl_ms: u64) -> Result<bool, Error> {
+        self.backend.expire(key, ttl_ms).await
+    }
+
+    /// Purge every cache entry owned by the calling application.
+    pub async fn purge(&self) -> Result<u64, Error> {
+        self.backend.purge().await
+    }
+
+    /// Purge every cache entry whose key begins with `prefix`.
+    pub async fn purge_prefix(&self, prefix: &str) -> Result<u64, Error> {
+        self.backend.purge_prefix(prefix).await
+    }
 }
 
 // Empty marker trait
 impl cache_types::Host for CacheImpl {}
 
 // Implement the sync-style cache interface (gcore:fastedge/cache-sync)
-// This is simpler and serializes calls through &mut self.
+// This is simpler and serializes calls through &mut self. Every method
+// delegates to the inherent `CacheImpl` method of the same name, which the
+// ProxyWasm host functions also call.
 impl cache_sync::Host for CacheImpl {
     async fn get(&mut self, key: String) -> Result<Option<Payload>, Error> {
-        self.backend.get(&key).await
+        CacheImpl::get(self, &key).await
     }
 
     async fn set(&mut self, key: String, value: Payload, ttl_ms: Option<u64>) -> Result<(), Error> {
-        self.backend.set(&key, value, ttl_ms).await
+        CacheImpl::set(self, &key, value, ttl_ms).await
     }
 
     async fn delete(&mut self, key: String) -> Result<(), Error> {
-        self.backend.delete(&key).await
+        CacheImpl::delete(self, &key).await
     }
 
     async fn exists(&mut self, key: String) -> Result<bool, Error> {
-        self.backend.exists(&key).await
+        CacheImpl::exists(self, &key).await
     }
 
     async fn incr(&mut self, key: String, delta: i64) -> Result<i64, Error> {
-        self.backend.incr(&key, delta).await
+        CacheImpl::incr(self, &key, delta).await
     }
 
     async fn expire(&mut self, key: String, ttl_ms: u64) -> Result<bool, Error> {
-        self.backend.expire(&key, ttl_ms).await
+        CacheImpl::expire(self, &key, ttl_ms).await
     }
     async fn purge(&mut self) -> Result<u64, Error> {
-        self.backend.purge().await
+        CacheImpl::purge(self).await
     }
     async fn purge_prefix(&mut self, prefix: String) -> Result<u64, Error> {
-        self.backend.purge_prefix(&prefix).await
+        CacheImpl::purge_prefix(self, &prefix).await
     }
 }
 
