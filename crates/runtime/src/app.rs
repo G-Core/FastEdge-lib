@@ -55,7 +55,7 @@ pub struct KvStoreOption {
 }
 
 impl KvStoreOption {
-    /// 100 MiB. Was 25 000 *entries* until 2026-09-15; the unit changed with
+    /// 10 MiB. Was 25 000 *entries* until 2026-09-15; the unit changed with
     /// the cache's weigher, and the field was set nowhere in prod or preprod,
     /// so every store simply takes this default.
     fn default_cache_size() -> u64 {
