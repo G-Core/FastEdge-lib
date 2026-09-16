@@ -63,7 +63,7 @@ impl KvStoreOption {
     }
 
     fn default_cache_ttl() -> u64 {
-        300
+        60
     }
 }
 
