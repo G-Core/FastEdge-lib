@@ -10,10 +10,30 @@ use std::sync::OnceLock;
 use crate::AppResult;
 use crate::epoch_grace::EpochGraceEvent;
 
-/// Sink invoked for every app call: outcome, executor label(s), duration in
-/// microseconds and WASM linear memory used in bytes.
-pub type MetricsSink =
-    fn(result: AppResult, label: &[&str], duration: Option<u64>, memory_used: Option<u64>);
+/// Where in an app call the outcome was decided.
+///
+/// Refines the metrics `outcome` label only — stats (`fail_reason`) always
+/// carry the plain [`AppResult`], so the ClickHouse encoding is untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallPhase {
+    /// Guest initialisation (`_initialize`, `on_context_create`): no request
+    /// callback had run yet.
+    Init,
+    /// A request callback (`on_request_headers`, body chunks, `on_log`, …), or
+    /// a rejection before the guest was involved at all.
+    Request,
+}
+
+/// Sink invoked for every app call: outcome, the phase it was decided in,
+/// executor label(s), duration in microseconds and WASM linear memory used in
+/// bytes.
+pub type MetricsSink = fn(
+    result: AppResult,
+    phase: CallPhase,
+    label: &[&str],
+    duration: Option<u64>,
+    memory_used: Option<u64>,
+);
 
 static SINK: OnceLock<MetricsSink> = OnceLock::new();
 
@@ -22,10 +42,22 @@ pub fn set_sink(sink: MetricsSink) {
     let _ = SINK.set(sink);
 }
 
-/// Report one app call to the installed sink (no-op when none is installed).
+/// Report one app call decided in the request phase (no-op when no sink is
+/// installed). The common case; see [`metrics_in_phase`] for the rest.
 pub fn metrics(result: AppResult, label: &[&str], duration: Option<u64>, memory_used: Option<u64>) {
+    metrics_in_phase(result, CallPhase::Request, label, duration, memory_used);
+}
+
+/// Report one app call, stating the phase its outcome was decided in.
+pub fn metrics_in_phase(
+    result: AppResult,
+    phase: CallPhase,
+    label: &[&str],
+    duration: Option<u64>,
+    memory_used: Option<u64>,
+) {
     if let Some(sink) = SINK.get() {
-        sink(result, label, duration, memory_used);
+        sink(result, phase, label, duration, memory_used);
     }
 }
 
