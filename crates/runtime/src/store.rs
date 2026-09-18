@@ -1,3 +1,4 @@
+use crate::epoch_grace::{EpochGrace, EpochGraceEvent};
 use crate::limiter::ProxyLimiter;
 use crate::logger::Logger;
 use crate::registry::CachedGraphRegistry;
@@ -70,6 +71,13 @@ impl<T> Store<T> {
     /// already exceeds the limit.
     pub fn is_oom(&self) -> bool {
         self.inner.data().store_limits.oom
+    }
+
+    /// (Re-)arm the epoch deadline to `ticks` from now, resetting the stall
+    /// grace baseline to the current thread. Use this instead of
+    /// `set_epoch_deadline` directly; see [`crate::epoch_grace`].
+    pub fn arm_epoch_deadline(&mut self, ticks: u64) {
+        arm_epoch_deadline(&mut self.inner, ticks);
     }
 }
 
@@ -376,22 +384,67 @@ impl StoreBuilder {
                 cache: cache_impl,
                 epoch_pause_ms: epoch_pause_ms.clone(),
                 pause_epoch_timeout_for_external_http: self.epoch_exclude_http_wait,
+                epoch_grace: EpochGrace::new(DEFAULT_EPOCH_TICK_INTERVAL),
                 _live_instance: crate::instances::LiveInstanceGuard::new(),
             },
         );
         inner.limiter(|state| &mut state.store_limits);
         // allow max number of epoch ticks (1 tick = 10 ms)
-        inner.set_epoch_deadline(self.max_duration);
-        // When the deadline fires, consume any host-call credit accumulated by
-        // `epoch_pause_ms` to extend it; if there is no credit, trap as before.
-        inner.epoch_deadline_callback(move |_ctx| {
+        arm_epoch_deadline(&mut inner, self.max_duration);
+        // When the deadline fires: first consume any host-call credit
+        // accumulated by `epoch_pause_ms` to extend it; failing that, extend
+        // once more if the executing thread was parked rather than running
+        // (see `epoch_grace`); otherwise trap as before.
+        inner.epoch_deadline_callback(move |mut ctx| {
             let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
-            match epoch_credit_ticks(credit_ms) {
-                None => Err(anyhow::Error::new(wasmtime::Trap::Interrupt)),
-                Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
-            }
+            epoch_deadline_decision(credit_ms, &mut ctx.data_mut().epoch_grace)
         });
         Ok(Store { inner })
+    }
+}
+
+/// Arm the epoch deadline to `ticks` and record the baseline the stall grace
+/// measures against. Every place that sets a deadline must go through here,
+/// or the grace has no baseline and denies.
+pub(crate) fn arm_epoch_deadline<T>(store: &mut wasmtime::Store<Data<T>>, ticks: u64) {
+    store.data_mut().epoch_grace.arm(ticks);
+    store.set_epoch_deadline(ticks);
+}
+
+/// The epoch-deadline callback's decision, factored out so tests exercise the
+/// production logic rather than a copy of it.
+///
+/// Order matters: host-call credit is the *earned* extension (the guest was
+/// waiting on external I/O the host chose not to charge) and takes precedence;
+/// the stall grace is only consulted when there is none.
+pub(crate) fn epoch_deadline_decision(
+    credit_ms: u64,
+    grace: &mut EpochGrace,
+) -> Result<UpdateDeadline> {
+    if let Some(ticks) = epoch_credit_ticks(credit_ms) {
+        return Ok(UpdateDeadline::Continue(ticks));
+    }
+    let event = grace.on_deadline();
+    crate::util::metrics::report_epoch_grace(event);
+    match event {
+        EpochGraceEvent::Granted {
+            ticks,
+            cpu_used_ms,
+            wall_ms,
+        } => {
+            debug!(
+                ticks,
+                cpu_used_ms,
+                wall_ms,
+                grants = grace.grants(),
+                "epoch deadline reached while parked; extending"
+            );
+            Ok(UpdateDeadline::Continue(ticks))
+        }
+        EpochGraceEvent::Denied(reason) => {
+            debug!(?reason, "epoch deadline reached; trapping");
+            Err(anyhow::Error::new(wasmtime::Trap::Interrupt))
+        }
     }
 }
 
@@ -492,26 +545,39 @@ mod tests {
         Engine::new(&cfg).unwrap()
     }
 
-    /// Install the same epoch-deadline callback used in production
-    /// (see `StoreBuilder::build_with_wasi`).
-    fn install_epoch_callback<T: 'static>(store: &mut WtStore<T>, epoch_pause_ms: Arc<AtomicU64>) {
-        store.epoch_deadline_callback(move |_ctx| {
+    /// Install the epoch-deadline callback used in production (see
+    /// `StoreBuilder::build_with_wasi`) — the same `epoch_deadline_decision`,
+    /// with the store data standing in for `Data::epoch_grace`.
+    fn install_epoch_callback(store: &mut WtStore<EpochGrace>, epoch_pause_ms: Arc<AtomicU64>) {
+        store.epoch_deadline_callback(move |mut ctx| {
             let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
-            match epoch_credit_ticks(credit_ms) {
-                None => Err(anyhow::Error::new(Trap::Interrupt)),
-                Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
-            }
+            epoch_deadline_decision(credit_ms, ctx.data_mut())
         });
     }
+
+    /// Like `SPIN_WAT` but effectively unbounded (seconds of CPU), for tests
+    /// that must observe a trap: with the stall grace in place a 1-tick budget
+    /// can legitimately be extended a bounded number of times before the trap,
+    /// and the guest must still be running when that happens.
+    const LONG_SPIN_WAT: &str = r#"
+        (module
+            (global $i (mut i32) (i32.const 2000000000))
+            (func (export "spin")
+                (loop $l
+                    (global.set $i (i32.sub (global.get $i) (i32.const 1)))
+                    (br_if $l (i32.gt_s (global.get $i) (i32.const 0))))))
+    "#;
 
     #[test]
     fn busy_loop_without_credit_traps_with_interrupt() {
         let engine = make_engine();
-        let module = Module::new(&engine, SPIN_WAT).unwrap();
+        let module = Module::new(&engine, LONG_SPIN_WAT).unwrap();
         let epoch_pause_ms = Arc::new(AtomicU64::new(0));
 
-        let mut store = WtStore::new(&engine, ());
+        // 1 ms per tick, matching the test ticker below.
+        let mut store = WtStore::new(&engine, EpochGrace::new(1));
         store.set_epoch_deadline(1); // very short budget: 1 tick
+        store.data_mut().arm(1);
         install_epoch_callback(&mut store, epoch_pause_ms.clone());
 
         // Background ticker: bump the engine epoch until the test signals stop.
@@ -538,7 +604,9 @@ mod tests {
         ticker.join().unwrap();
 
         // The guest's busy loop must be cut short by the epoch deadline
-        // because `epoch_pause_ms` was never incremented.
+        // because `epoch_pause_ms` was never incremented — and a *busy* guest
+        // consumes CPU at wall rate, so the stall grace cannot rescue it more
+        // than its bounded number of times either.
         let err = result.expect_err("guest must trap when no host-call credit is deposited");
         let trap = err.root_cause().downcast_ref::<Trap>().copied();
         assert_eq!(
@@ -557,8 +625,10 @@ mod tests {
         let module = Module::new(&engine, SPIN_WAT).unwrap();
         let epoch_pause_ms = Arc::new(AtomicU64::new(0));
 
-        let mut store = WtStore::new(&engine, ());
+        // 1 ms per tick, matching the test ticker below.
+        let mut store = WtStore::new(&engine, EpochGrace::new(1));
         store.set_epoch_deadline(1); // very short budget: 1 tick
+        store.data_mut().arm(1);
         install_epoch_callback(&mut store, epoch_pause_ms.clone());
 
         // Background ticker bumps the epoch AND deposits generous credit so
@@ -596,6 +666,57 @@ mod tests {
         // must always be extended — execution should reach the natural
         // end of the bounded loop without trapping.
         result.expect("guest must complete when epoch credit is deposited");
+    }
+
+    /// A worker that is parked while the wall budget runs out — no CPU
+    /// consumed — must be granted the unused budget instead of trapping: the
+    /// guest did no work, so it has not used anything. `thread::sleep` is a
+    /// faithful model of a kernel park: wall time passes, thread CPU time does
+    /// not.
+    #[test]
+    fn parked_thread_is_granted_grace_and_completes() {
+        let engine = make_engine();
+        let module = Module::new(&engine, SPIN_WAT).unwrap();
+        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
+
+        // 200 ticks × 1 ms = 200 ms of budget: generous next to the few ms the
+        // bounded spin needs, so a slow CI box cannot turn the grant into a
+        // second, legitimate deadline hit.
+        const BUDGET_TICKS: u64 = 200;
+        let mut store = WtStore::new(&engine, EpochGrace::new(1));
+        store.set_epoch_deadline(BUDGET_TICKS);
+        store.data_mut().arm(BUDGET_TICKS);
+        install_epoch_callback(&mut store, epoch_pause_ms.clone());
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let ticker = {
+            let engine = engine.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    engine.increment_epoch();
+                    thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+
+        let instance = Instance::new(&mut store, &module, &[]).unwrap();
+        let spin = instance
+            .get_typed_func::<(), ()>(&mut store, "spin")
+            .unwrap();
+
+        // Park: the ticker blows through the entire budget while this thread
+        // consumes no CPU at all.
+        thread::sleep(Duration::from_millis(300));
+
+        let result = spin.call(&mut store, ());
+
+        stop.store(true, Ordering::Relaxed);
+        ticker.join().unwrap();
+
+        result.expect("a parked guest must be granted its unused budget, not trapped");
+        assert_eq!(store.data().grants(), 1, "exactly one grace grant expected");
+        assert_eq!(epoch_pause_ms.load(Ordering::Relaxed), 0);
     }
 
     // ── live-instance accounting ──────────────────────────────────────────

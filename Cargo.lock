@@ -2842,6 +2842,7 @@ dependencies = [
  "http",
  "http-backend",
  "key-value-store",
+ "libc",
  "moka",
  "secret",
  "serde",
@@ -5059,3 +5060,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "fastedge_proxywasm"
+version = "0.5.0"
