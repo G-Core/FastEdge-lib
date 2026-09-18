@@ -56,6 +56,12 @@ pub const DEFAULT_EPOCH_TICK_INTERVAL: u64 = 10;
 
 const PREVIEW1_ADAPTER: &[u8] = include_bytes!("adapters/wasi_snapshot_preview1.reactor.wasm");
 
+/// Outcome of one app call.
+///
+/// Reported as the `outcome` label of `fastedge_calls_total` (see the server's
+/// metrics sink) and, **as its discriminant**, as `fail_reason Int32` in the
+/// ClickHouse stats table. Variants are therefore append-only: never reorder
+/// or remove one.
 #[allow(non_camel_case_types)]
 #[derive(PartialEq, Copy, Clone, Debug)]
 pub enum AppResult {
