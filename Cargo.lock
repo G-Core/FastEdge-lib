@@ -1595,7 +1595,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "key-value-store",
- "nanoid",
  "reactor",
  "runtime",
  "secret",
@@ -2135,15 +2134,6 @@ dependencies = [
  "smallvec",
  "tagptr",
  "uuid",
-]
-
-[[package]]
-name = "nanoid"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8628de41fe064cc3f0cf07f3d299ee3e73521adaff72278731d5c8cae3797873"
-dependencies = [
- "rand 0.9.5",
 ]
 
 [[package]]
@@ -2843,6 +2833,7 @@ dependencies = [
  "http-backend",
  "key-value-store",
  "moka",
+ "rand 0.8.7",
  "secret",
  "serde",
  "serde_json",
@@ -5059,3 +5050,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "fastedge_proxywasm"
+version = "0.5.0"

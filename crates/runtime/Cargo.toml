@@ -29,6 +29,7 @@ utils = { path = "../utils" }
 secret = { path = "../secret" }
 async-trait = "0.1"
 bytes = "1.11"
+rand = "0.8"
 serde = "1.0"
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
