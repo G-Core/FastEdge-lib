@@ -1,5 +1,7 @@
+pub mod access_log;
 pub mod stats;
 
+use crate::access_log::{ExtRequestLog, ExtRequestLogHandle};
 use smol_str::{SmolStr, ToSmolStr};
 use std::fmt::Debug;
 use std::future::Future;
@@ -92,6 +94,12 @@ pub struct Backend<C> {
     epoch_exclude_http_wait: bool,
     cdn_real_host: Option<SmolStr>,
     app_id: Option<u64>,
+    /// Sink for the per-outbound-request access log. Baked into the backend
+    /// template by the embedder; `None` disables outbound-request logging.
+    ext_http_log: Option<Arc<dyn ExtRequestLog>>,
+    /// W3C `traceparent` of the inbound request, set per request so each
+    /// outbound record can be correlated back to it.
+    traceparent: Option<SmolStr>,
 }
 
 pub struct Builder {
@@ -144,6 +152,8 @@ impl Builder {
             epoch_exclude_http_wait: false,
             cdn_real_host: None,
             app_id: None,
+            ext_http_log: None,
+            traceparent: None,
         }
     }
 }
@@ -181,6 +191,48 @@ impl<C> Backend<C> {
 
     pub fn app_id(&self) -> Option<u64> {
         self.app_id
+    }
+
+    /// Set the outbound-request access-log sink (baked into the template once).
+    pub fn set_ext_http_log(&mut self, log: Arc<dyn ExtRequestLog>) {
+        self.ext_http_log = Some(log);
+    }
+
+    /// Set the inbound `traceparent` used to correlate outbound records.
+    pub fn set_traceparent(&mut self, traceparent: SmolStr) {
+        self.traceparent = Some(traceparent);
+    }
+
+    /// Snapshot the outbound-request log sink + correlation context into a
+    /// cloneable handle, for logging from a context where `self` is not
+    /// available (e.g. the WASI-HTTP spawned send task). `None` when no sink or
+    /// `traceparent` is set.
+    pub fn ext_request_log_handle(&self) -> Option<ExtRequestLogHandle> {
+        match (self.ext_http_log.as_ref(), self.traceparent.as_ref()) {
+            (Some(log), Some(traceparent)) => Some(ExtRequestLogHandle::new(
+                log.clone(),
+                traceparent.clone(),
+                self.app_id.unwrap_or(0),
+            )),
+            _ => None,
+        }
+    }
+
+    /// Emit one access-log record for a completed outbound request. No-op when
+    /// no sink or no `traceparent` is set. `status` is `0` on failure.
+    pub fn log_ext_request(
+        &self,
+        app_id: u64,
+        method: &str,
+        uri: &str,
+        status: u16,
+        elapsed: Duration,
+    ) {
+        if let (Some(log), Some(traceparent)) =
+            (self.ext_http_log.as_ref(), self.traceparent.as_ref())
+        {
+            log.log_ext_request(traceparent, app_id, method, uri, status, elapsed);
+        }
     }
 
     /// Set external request stats
@@ -424,6 +476,11 @@ where
             self.max_sub_requests -= 1;
         }
 
+        // Capture the outbound method/target for the access-log record before
+        // `make_request` consumes the request.
+        let log_method = method_str(&req.method);
+        let log_uri = req.uri.to_smolstr();
+
         let request = self.make_request(req).map_err(|error| {
             warn!(cause=?error, "making request to backend");
             HttpError::RequestError
@@ -483,12 +540,41 @@ where
             })
         }
         .await;
+        let elapsed = started.elapsed();
         if self.epoch_exclude_http_wait {
             self.epoch_pause_ms
-                .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                .fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
         }
+
+        // Emit one access-log record for this outbound request. Failures before a
+        // response (connection error / timeout) are logged with status 0.
+        let status = match &result {
+            Ok(response) => response.status,
+            Err(_) => 0,
+        };
+        self.log_ext_request(
+            self.app_id.unwrap_or(0),
+            &log_method,
+            &log_uri,
+            status,
+            elapsed,
+        );
         result
     }
+}
+
+/// Stable string label for a guest [`Method`], for the access log.
+fn method_str(method: &Method) -> SmolStr {
+    match method {
+        Method::Get => "GET",
+        Method::Post => "POST",
+        Method::Put => "PUT",
+        Method::Delete => "DELETE",
+        Method::Head => "HEAD",
+        Method::Patch => "PATCH",
+        Method::Options => "OPTIONS",
+    }
+    .into()
 }
 
 // extract canonical host name

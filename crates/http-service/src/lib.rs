@@ -18,7 +18,10 @@ use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
-    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder, app::Status, service::Service,
+    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
+    access_log::{AccessLog, RequestKind},
+    app::Status,
+    service::Service,
 };
 use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
@@ -258,19 +261,66 @@ where
     T::Executor: HttpExecutor + Send + Sync,
     S: StatsVisitor + Send + 'static,
 {
-    /// handle HTTP request.
+    /// handle HTTP request, emitting exactly one system request-log record for
+    /// every processing outcome (success, failure, or early rejection).
     async fn handle_request<B>(
         &self,
-        mut request: hyper::Request<B>,
+        request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
         let traceparent = remote_traceparent(&request);
+        let mut log = AccessLog::new(traceparent.to_string(), RequestKind::Http);
+        log.method = Some(request.method().as_str().to_string());
+        log.uri = Some(request.uri().to_string());
+
+        let result = self
+            .handle_request_inner(request, &traceparent, &mut log)
+            .await;
+
+        match &result {
+            Ok(response) => {
+                log.status_code = response.status().as_u16();
+                log.internal_status_code = response
+                    .headers()
+                    .get(X_CDN_INTERNAL_STATUS)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+            }
+            Err(_) => {
+                log.status_code = FASTEDGE_INTERNAL_ERROR;
+                log.internal_status_code = INTERNAL_STATUS_EXECUTE_ERROR;
+            }
+        }
+        self.context.access_log_sender().log(log);
+        result
+    }
+
+    async fn handle_request_inner<B>(
+        &self,
+        mut request: hyper::Request<B>,
+        traceparent: &SmolStr,
+        log: &mut AccessLog,
+    ) -> Result<hyper::Response<HyperOutgoingBody>>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
+
+        // Pin the resolved traceparent onto the request (it may have been
+        // generated when the client sent none) so the executor/backend logs
+        // outbound requests under the same id the access log uses.
+        if let Ok(value) = HeaderValue::from_str(traceparent) {
+            request
+                .headers_mut()
+                .insert(HeaderName::from_static(TRACEPARENT), value);
+        }
 
         // get application name from request URL
         let app_name = match app_name_from_request(&request) {
@@ -341,6 +391,10 @@ where
                 Some((app_name, cfg)) => (app_name, cfg),
             };
 
+            log.app_id = Some(cfg.app_id);
+            log.client_id = Some(cfg.client_id);
+            log.app_name = Some(app_name.to_string());
+
             // get cached execute context for this application
             let executor = match self
                 .context
@@ -365,7 +419,7 @@ where
                 .unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
             let stats = self
                 .context
-                .new_stats_row(&traceparent, &app_name, caller_ip, &cfg);
+                .new_stats_row(traceparent, &app_name, caller_ip, &cfg);
 
             let response = match executor.execute(request, stats.clone()).await {
                 Ok(mut response) => {
@@ -404,6 +458,7 @@ where
                     builder.body(msg)?
                 }
             };
+            log.duration = Some(Duration::from_micros(stats.get_time_elapsed()));
             Ok(response)
         }
         .instrument(span)
@@ -434,9 +489,9 @@ pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
             wasmtime::Trap::UnreachableCodeReached => AppResult::OOM,
             _ => AppResult::OTHER,
         }
-    } else if root_cause.downcast_ref::<Elapsed>().is_some()
-        || root_cause.to_string().ends_with("deadline has elapsed")
-    {
+    } else if root_cause.downcast_ref::<Elapsed>().is_some() {
+        AppResult::TIMEOUT
+    } else if root_cause.to_string().ends_with("deadline has elapsed") {
         AppResult::TIMEOUT
     } else {
         AppResult::OTHER
@@ -537,8 +592,9 @@ fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
         .map(|s| s.to_smolstr())
-        .unwrap_or(nanoid::nanoid!().to_smolstr())
+        .unwrap_or_else(runtime::new_traceparent)
 }
 
 /// Creates an HTTP 530 response with an `X-CDN-Internal-Status` header.

@@ -3,6 +3,7 @@ use http::request::Parts;
 use http::uri::Scheme;
 use http::{HeaderMap, HeaderName, HeaderValue, Uri, header};
 use http_backend::Backend;
+use http_backend::access_log::ExtRequestLogHandle;
 use http_backend::{is_backend_host, is_fastedge_internal_header, is_public_host};
 use runtime::BackendRequest;
 use runtime::store::HasStats;
@@ -31,6 +32,10 @@ const FASTEDGE_APP_ID: HeaderName = HeaderName::from_static("fastedge-app-id");
 const CDN_LOOP: HeaderName = HeaderName::from_static("cdn-loop");
 
 impl<C> BackendRequest for HttpState<C> {
+    fn ext_request_log_handle(&self) -> Option<ExtRequestLogHandle> {
+        self.http_backend.ext_request_log_handle()
+    }
+
     #[instrument(skip(self, head), level = "debug", ret)]
     fn backend_request(&mut self, mut head: Parts) -> anyhow::Result<Parts> {
         match self.http_backend.strategy {

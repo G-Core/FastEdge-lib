@@ -94,6 +94,13 @@ where
         }
         let mut http_backend = self.backend;
         http_backend.set_app_id(self.app_id);
+        if let Some(traceparent) = parts
+            .headers
+            .get(executor::TRACEPARENT)
+            .and_then(|v| v.to_str().ok())
+        {
+            http_backend.set_traceparent(traceparent.into());
+        }
         http_backend.epoch_exclude_http_wait(self.epoch_exclude_http_wait);
         if let Some(counter) = epoch_pause_ms {
             http_backend.set_epoch_pause_ms(counter);

@@ -46,7 +46,7 @@ impl PreCompiledLoader<u64> for Context {
     }
 
     fn load_module(&self, _id: u64) -> anyhow::Result<Module> {
-        unreachable!("")
+        unreachable!("fastedge-run loads components only, not core wasm modules")
     }
 }
 

@@ -98,6 +98,13 @@ where
         let mut http_backend = self.backend;
 
         http_backend.set_app_id(self.app_id);
+        if let Some(traceparent) = parts
+            .headers
+            .get(executor::TRACEPARENT)
+            .and_then(|v| v.to_str().ok())
+        {
+            http_backend.set_traceparent(traceparent.into());
+        }
         http_backend
             .propagate_headers(parts.headers.clone())
             .context("propagate headers")?;

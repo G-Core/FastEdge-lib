@@ -1,5 +1,6 @@
 use crate::app::KvStoreOption;
 use crate::store::HasStats;
+use http_backend::access_log::ExtRequestLogHandle;
 use http_backend::stats::ExtStatsTimer;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -22,6 +23,7 @@ use wasmtime::{
 };
 use wit_component::ComponentEncoder;
 
+pub mod access_log;
 pub mod app;
 pub mod instances;
 mod limiter;
@@ -30,8 +32,12 @@ mod registry;
 pub mod service;
 pub mod store;
 pub mod stub;
+pub mod trace;
 pub mod util;
 
+pub use trace::new_traceparent;
+
+use crate::access_log::{AccessLogSender, NoopAccessLogSender};
 use crate::app::SecretOption;
 use crate::logger::Logger;
 use crate::util::stats::StatsVisitor;
@@ -129,6 +135,13 @@ pub struct Data<T: 'static> {
 
 pub trait BackendRequest {
     fn backend_request(&mut self, head: Parts) -> anyhow::Result<Parts>;
+
+    /// Snapshot the outbound-request access-log handle, if configured. Default
+    /// `None` (no outbound-request logging). Implemented by embedders that carry
+    /// a sink; used by the WASI-HTTP send path.
+    fn ext_request_log_handle(&self) -> Option<ExtRequestLogHandle> {
+        None
+    }
 }
 
 impl<T> AsRef<T> for Data<T> {
@@ -162,6 +175,14 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
     where
         Self: Sized,
     {
+        // Capture the outbound method/target and access-log handle before the
+        // request is consumed. The URI here is the original external target,
+        // before `backend_request` rewrites it to the internal backend
+        // authority.
+        let log_method = SmolStr::new(request.method().as_str());
+        let log_uri = SmolStr::new(request.uri().to_string());
+        let log_handle = self.inner.ext_request_log_handle();
+
         let (head, body) = request.into_parts();
         let head = self.inner.backend_request(head).map_err(|e| {
             tracing::warn!(cause=?e, "backend request");
@@ -180,8 +201,18 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
             let resp =
                 default_send_request_handler(request, OutgoingRequestConfig { use_tls, ..config })
                     .await;
+            let elapsed = started.elapsed();
             if epoch_exclude_http_wait {
-                epoch_pause_ms.fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
+                epoch_pause_ms.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
+            }
+            // One access-log record per outbound request (status 0 = no response
+            // received, e.g. connection refused / timeout).
+            if let Some(handle) = log_handle {
+                let status = match &resp {
+                    Ok(incoming) => incoming.resp.status().as_u16(),
+                    Err(_) => 0,
+                };
+                handle.log(&log_method, &log_uri, status, elapsed);
             }
             Ok(resp)
         });
@@ -441,6 +472,18 @@ pub trait ContextT {
         caller_ip: Ipv4Addr,
         cfg: &App,
     ) -> Arc<dyn StatsVisitor>;
+
+    /// Sink for the per-request system log (see [`access_log`]).
+    ///
+    /// Distinct from the guest application log produced by [`make_logger`].
+    /// Defaults to a no-op until a concrete appender (e.g. UDP syslog) is wired
+    /// in, so existing embedders need not implement it.
+    ///
+    /// [`make_logger`]: ContextT::make_logger
+    fn access_log_sender(&self) -> &dyn AccessLogSender {
+        static NOOP: NoopAccessLogSender = NoopAccessLogSender;
+        &NOOP
+    }
 }
 
 pub trait ExecutorCache {
