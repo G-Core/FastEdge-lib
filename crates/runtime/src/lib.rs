@@ -10,7 +10,10 @@ use std::{fmt::Debug, ops::Deref};
 use utils::{Dictionary, Utils};
 use wasmtime_wasi::ResourceTable;
 use wasmtime_wasi::WasiCtxView;
-use wasmtime_wasi_http::{HttpResult, WasiHttpCtx, WasiHttpView};
+use wasmtime_wasi_http::{
+    DEFAULT_FORBIDDEN_HEADERS, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView,
+    WasiHttpHooks, WasiHttpView, default_send_request,
+};
 use wasmtime_wasi_io::IoView;
 
 use crate::store::StoreBuilder;
@@ -44,16 +47,13 @@ use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
 use http::request::Parts;
-use http::{HeaderName, Request, header};
+use http::{HeaderName, Request, Response, header};
+use http_body_util::BodyExt;
 use secret::SecretStore;
 use smol_str::SmolStr;
 use std::borrow::Cow;
+use std::future::Future;
 use wasmtime_environ::wasmparser::{Encoding, Parser, Payload};
-use wasmtime_wasi_http::body::HyperOutgoingBody;
-use wasmtime_wasi_http::{
-    bindings::http::types::ErrorCode,
-    types::{HostFutureIncomingResponse, OutgoingRequestConfig, default_send_request_handler},
-};
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 
 pub const DEFAULT_EPOCH_TICK_INTERVAL: u64 = 10;
@@ -100,14 +100,48 @@ pub enum WasiVersion {
 /// Wrapper for the Preview 1 and Preview 2 versions of `WasiCtx`.
 pub enum Wasi {
     /// Preview 1 `WasiCtx`
-    Preview1(wasmtime_wasi::preview1::WasiP1Ctx),
+    Preview1(wasmtime_wasi::p1::WasiP1Ctx),
     /// Preview 2 `WasiCtx`
     Preview2(wasmtime_wasi::WasiCtx),
 }
 
+/// The embedder-side `wasi:http` overrides, bundled with the guest state `T`.
+///
+/// wasmtime 48 split the old `WasiHttpView` in two: the view now only hands out
+/// the HTTP context, the resource table and a `&mut dyn WasiHttpHooks`, while
+/// the overrides themselves (`send_request`, `is_forbidden_header`) moved onto
+/// [`WasiHttpHooks`]. Because the hooks are borrowed out of the store data as a
+/// single trait object, everything an override needs has to live in one struct.
+/// That is this struct: it owns the guest state `T` (reached from the rest of
+/// the runtime through `AsRef`/`AsMut` on [`Data`]) alongside the epoch
+/// bookkeeping that `send_request` updates.
+pub struct HttpHooks<T> {
+    inner: T,
+    /// Milliseconds of host I/O that should not count against the epoch
+    /// deadline. Shared with the `epoch_deadline_callback` installed on the
+    /// Store, which drains this counter to extend the deadline.
+    epoch_pause_ms: Arc<AtomicU64>,
+    /// Whether elapsed time of external HTTP should refund epoch ticks.
+    pause_epoch_timeout_for_external_http: bool,
+}
+
+impl<T> HttpHooks<T> {
+    pub fn new(
+        inner: T,
+        epoch_pause_ms: Arc<AtomicU64>,
+        pause_epoch_timeout_for_external_http: bool,
+    ) -> Self {
+        Self {
+            inner,
+            epoch_pause_ms,
+            pause_epoch_timeout_for_external_http,
+        }
+    }
+}
+
 /// Host state data associated with individual [Store]s and [Instance]s.
 pub struct Data<T: 'static> {
-    inner: T,
+    hooks: HttpHooks<T>,
     wasi: Wasi,
     pub wasi_nn: WasiNnCtx,
     // memory usage limiter
@@ -121,13 +155,6 @@ pub struct Data<T: 'static> {
     pub dictionary: Dictionary,
     pub utils: Utils,
     pub cache: cache::CacheImpl,
-    /// Milliseconds of host I/O that should not count against the epoch
-    /// deadline. The `epoch_deadline_callback` installed on the Store reads
-    /// and clears this counter, converting milliseconds into extra ticks to
-    /// extend the deadline.
-    pub epoch_pause_ms: Arc<AtomicU64>,
-    /// Whether elapsed time of external HTTP should refund epoch ticks.
-    pub pause_epoch_timeout_for_external_http: bool,
     /// Counts this instance in `fastedge_wasm_instances_live` for as long as the store —
     /// and therefore its pooling-allocator slots — is alive. Held only for its `Drop`.
     _live_instance: crate::instances::LiveInstanceGuard,
@@ -146,13 +173,13 @@ pub trait BackendRequest {
 
 impl<T> AsRef<T> for Data<T> {
     fn as_ref(&self) -> &T {
-        &self.inner
+        &self.hooks.inner
     }
 }
 
 impl<T> AsMut<T> for Data<T> {
     fn as_mut(&mut self) -> &mut T {
-        &mut self.inner
+        &mut self.hooks.inner
     }
 }
 
@@ -162,19 +189,33 @@ impl<T: Send> IoView for Data<T> {
     }
 }
 
-impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
-    fn ctx(&mut self) -> &mut WasiHttpCtx {
-        &mut self.http
-    }
+/// Boxed future used by [`WasiHttpHooks::send_request`] to report an error
+/// raised while the request or response body was being processed.
+type HttpIoFuture = Box<dyn Future<Output = wasmtime_wasi_http::Result<()>> + Send>;
 
+impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: &mut self.http,
+            table: &mut self.table,
+            hooks: &mut self.hooks,
+        }
+    }
+}
+
+impl<T: Send + BackendRequest + HasStats> WasiHttpHooks for HttpHooks<T> {
     fn send_request(
         &mut self,
-        request: Request<HyperOutgoingBody>,
-        config: OutgoingRequestConfig,
-    ) -> HttpResult<HostFutureIncomingResponse>
-    where
-        Self: Sized,
-    {
+        request: Request<WasiBody>,
+        options: Option<RequestOptions>,
+        fut: HttpIoFuture,
+    ) -> Box<
+        dyn Future<Output = wasmtime_wasi_http::Result<(Response<WasiBody>, HttpIoFuture)>> + Send,
+    > {
+        // The request-side error channel is unused: a request rejected by
+        // `backend_request` fails the whole call below instead.
+        let _ = fut;
+
         // Capture the outbound method/target and access-log handle before the
         // request is consumed. The URI here is the original external target,
         // before `backend_request` rewrites it to the internal backend
@@ -184,23 +225,28 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
         let log_handle = self.inner.ext_request_log_handle();
 
         let (head, body) = request.into_parts();
-        let head = self.inner.backend_request(head).map_err(|e| {
-            tracing::warn!(cause=?e, "backend request");
-            ErrorCode::InternalError(Some(e.to_string()))
-        })?;
-        let use_tls = matches!(head.uri.scheme_str(), Some("https"));
+        let head = match self.inner.backend_request(head) {
+            Ok(head) => head,
+            Err(e) => {
+                tracing::warn!(cause=?e, "backend request");
+                let cause = e.to_string();
+                return Box::new(async move {
+                    Err(wasmtime_wasi_http::Error::InternalError(Some(cause)))
+                });
+            }
+        };
+        // `default_send_request` derives TLS usage from the rewritten URI's
+        // scheme, so the backend rewrite above decides it.
         let request = Request::from_parts(head, body);
         // start external request stats timer
         let stats = self.inner.get_stats();
         let epoch_pause_ms = self.epoch_pause_ms.clone();
         let epoch_exclude_http_wait = self.pause_epoch_timeout_for_external_http;
 
-        let handle = wasmtime_wasi::runtime::spawn(async move {
-            let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until request is done
+        Box::new(async move {
+            let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until response head is in
             let started = Instant::now();
-            let resp =
-                default_send_request_handler(request, OutgoingRequestConfig { use_tls, ..config })
-                    .await;
+            let sent = default_send_request(request, options).await;
             let elapsed = started.elapsed();
             if epoch_exclude_http_wait {
                 epoch_pause_ms.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
@@ -208,19 +254,18 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
             // One access-log record per outbound request (status 0 = no response
             // received, e.g. connection refused / timeout).
             if let Some(handle) = log_handle {
-                let status = match &resp {
-                    Ok(incoming) => incoming.resp.status().as_u16(),
+                let status = match &sent {
+                    Ok((incoming, _)) => incoming.status().as_u16(),
                     Err(_) => 0,
                 };
                 handle.log(&log_method, &log_uri, status, elapsed);
             }
-            Ok(resp)
-        });
-        Ok(HostFutureIncomingResponse::pending(handle))
-    }
-
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
+            let (response, io) = sent?;
+            Ok((
+                response.map(BodyExt::boxed_unsync),
+                Box::new(io) as HttpIoFuture,
+            ))
+        })
     }
 
     fn is_forbidden_header(&mut self, name: &HeaderName) -> bool {
@@ -235,12 +280,12 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
             return true;
         }
         // Fall back to wasmtime's default forbidden-header policy.
-        wasmtime_wasi_http::types::DEFAULT_FORBIDDEN_HEADERS.contains(name)
+        DEFAULT_FORBIDDEN_HEADERS.contains(name)
     }
 }
 
 impl<T> Data<T> {
-    pub fn preview1_wasi_ctx_mut(&mut self) -> &mut wasmtime_wasi::preview1::WasiP1Ctx {
+    pub fn preview1_wasi_ctx_mut(&mut self) -> &mut wasmtime_wasi::p1::WasiP1Ctx {
         match &mut self.wasi {
             Wasi::Preview1(ctx) => ctx,
             Wasi::Preview2(_) => unreachable!("using WASI Preview 2 functions with Preview 1 ctx"),
@@ -301,10 +346,8 @@ impl Default for WasmConfig {
         // Debug build: keep full, symbolized guest backtraces. We are optimizing
         // execution CPU, not trap-path cost, and this is the standalone debug
         // runner — detailed backtraces are the whole point.
-        inner.wasm_backtrace(true);
         inner.wasm_backtrace_details(WasmBacktraceDetails::Enable);
 
-        inner.async_support(true);
         inner.consume_fuel(false); // this is custom Gcore setting
         inner.profiler(ProfilingStrategy::None);
         inner.epoch_interruption(true); // required by store.rs timeout mechanism

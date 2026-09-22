@@ -12,7 +12,7 @@ use http_body_util::BodyExt;
 use hyper::body::Body;
 use runtime::{App, WasmEngine};
 use smol_str::SmolStr;
-use wasmtime_wasi_http::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub use http::HttpExecutorImpl;
 pub use wasi_http::WasiHttpExecutorImpl;

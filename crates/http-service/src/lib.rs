@@ -27,7 +27,7 @@ use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
 use tokio::{net::TcpListener, time::error::Elapsed};
 use tracing::Instrument;
-pub use wasmtime_wasi_http::body::HyperOutgoingBody;
+pub use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub mod executor;
 pub mod state;
@@ -221,7 +221,7 @@ where
         // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
         wasmtime_wasi::p2::add_to_linker_async(linker)?;
         linker.allow_shadowing(true);
-        wasmtime_wasi_http::add_to_linker_async(linker)?;
+        wasmtime_wasi_http::p2::add_to_linker_async(linker)?;
         wasmtime_wasi_nn::wit::add_to_linker(linker, |data: &mut runtime::Data<_>| {
             WasiNnView::new(&mut data.table, &mut data.wasi_nn)
         })?;
@@ -413,7 +413,7 @@ where
 
             let caller_ip = request
                 .headers()
-                .get(crate::executor::X_REAL_IP)
+                .get(executor::X_REAL_IP)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<std::net::Ipv4Addr>().ok())
                 .unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
@@ -495,7 +495,7 @@ pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
     let root_cause = error.root_cause();
     if error.chain().any(|e| e.is::<runtime::store::OutOfMemory>()) {
         AppResult::OOM
-    } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+    } else if let Some(exit) = root_cause.downcast_ref::<wasmtime_wasi::I32Exit>() {
         if exit.0 == 0 {
             AppResult::SUCCESS
         } else {
@@ -527,15 +527,15 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::OOM,
             Full::new(Bytes::from("fastedge: Out of memory"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_OUT_OF_MEMORY,
         )
-    } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+    } else if let Some(exit) = root_cause.downcast_ref::<wasmtime_wasi::I32Exit>() {
         if exit.0 == 0 {
             (
                 StatusCode::OK.as_u16(),
                 AppResult::SUCCESS,
-                Empty::new().map_err(|never| match never {}).boxed(),
+                Empty::new().map_err(|never| match never {}).boxed_unsync(),
                 0,
             )
         } else {
@@ -544,7 +544,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::OTHER,
                 Full::new(Bytes::from("fastedge: App failed"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_APP_EXIT_ERROR,
             )
         }
@@ -555,7 +555,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::TIMEOUT,
                 Full::new(Bytes::from("fastedge: Execution timeout"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_TIMEOUT_INTERRUPT,
             ),
             wasmtime::Trap::UnreachableCodeReached => (
@@ -563,7 +563,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::OOM,
                 Full::new(Bytes::from("fastedge: Out of memory"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_OUT_OF_MEMORY,
             ),
             _ => (
@@ -571,7 +571,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::OTHER,
                 Full::new(Bytes::from("fastedge: App failed"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_WASM_TRAP_OTHER,
             ),
         }
@@ -581,7 +581,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::TIMEOUT,
             Full::new(Bytes::from("fastedge: Execution timeout"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_TIMEOUT_ELAPSED,
         )
     } else if root_cause.to_string().ends_with("deadline has elapsed") {
@@ -590,7 +590,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::TIMEOUT,
             Full::new(Bytes::from("fastedge: Execution timeout"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_TIMEOUT_DEADLINE,
         )
     } else {
@@ -599,7 +599,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::OTHER,
             Full::new(Bytes::from("fastedge: Execute error"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_EXECUTE_ERROR,
         )
     };
@@ -626,7 +626,7 @@ fn internal_fastedge_error(
         .body(
             Full::new(Bytes::from(format!("fastedge: {}", msg)))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
         )?)
 }
 
@@ -637,7 +637,7 @@ fn not_found() -> Result<hyper::Response<HyperOutgoingBody>> {
         .body(
             Full::new(Bytes::from("fastedge: Unknown app"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
         )?)
 }
 
@@ -645,14 +645,14 @@ fn not_found() -> Result<hyper::Response<HyperOutgoingBody>> {
 fn too_many_requests() -> Result<hyper::Response<HyperOutgoingBody>> {
     Ok(hyper::Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
-        .body(Empty::new().map_err(|never| match never {}).boxed())?)
+        .body(Empty::new().map_err(|never| match never {}).boxed_unsync())?)
 }
 
 /// Creates an HTTP 406 response.
 fn not_acceptable() -> Result<hyper::Response<HyperOutgoingBody>> {
     Ok(hyper::Response::builder()
         .status(StatusCode::NOT_ACCEPTABLE)
-        .body(Empty::new().map_err(|never| match never {}).boxed())?)
+        .body(Empty::new().map_err(|never| match never {}).boxed_unsync())?)
 }
 
 #[derive(Debug, Clone)]
@@ -826,7 +826,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -843,7 +843,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -860,7 +860,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -877,7 +877,7 @@ mod tests {
             empty_body_request().uri(uri).body(
                 Empty::<Bytes>::new()
                     .map_err(|never| match never {})
-                    .boxed()
+                    .boxed_unsync()
             )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -895,7 +895,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -913,7 +913,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -929,7 +929,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         assert_err!(app_name_from_request(&req));
@@ -943,7 +943,7 @@ mod tests {
             empty_body_request().uri("/").body(
                 Empty::<Bytes>::new()
                     .map_err(|never| match never {})
-                    .boxed()
+                    .boxed_unsync()
             )
         );
         assert_err!(app_name_from_request(&req));

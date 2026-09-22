@@ -2,7 +2,7 @@ use crate::limiter::ProxyLimiter;
 use crate::logger::Logger;
 use crate::registry::CachedGraphRegistry;
 use crate::util::stats::StatsVisitor;
-use crate::{DEFAULT_EPOCH_TICK_INTERVAL, Data, Wasi, WasiVersion};
+use crate::{DEFAULT_EPOCH_TICK_INTERVAL, Data, HttpHooks, Wasi, WasiVersion};
 use anyhow::Result;
 use secret::SecretStore;
 use std::sync::Arc;
@@ -353,7 +353,7 @@ impl StoreBuilder {
         let mut inner = wasmtime::Store::new(
             &self.engine,
             Data {
-                inner,
+                hooks: HttpHooks::new(inner, epoch_pause_ms.clone(), self.epoch_exclude_http_wait),
                 wasi,
                 wasi_nn,
                 store_limits: self.store_limits,
@@ -374,8 +374,6 @@ impl StoreBuilder {
                 dictionary: self.dictionary,
                 utils,
                 cache: cache_impl,
-                epoch_pause_ms: epoch_pause_ms.clone(),
-                pause_epoch_timeout_for_external_http: self.epoch_exclude_http_wait,
                 _live_instance: crate::instances::LiveInstanceGuard::new(),
             },
         );
@@ -387,7 +385,7 @@ impl StoreBuilder {
         inner.epoch_deadline_callback(move |_ctx| {
             let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
             match epoch_credit_ticks(credit_ms) {
-                None => Err(anyhow::Error::new(wasmtime::Trap::Interrupt)),
+                None => Err(wasmtime::Error::new(wasmtime::Trap::Interrupt)),
                 Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
             }
         });
@@ -498,7 +496,7 @@ mod tests {
         store.epoch_deadline_callback(move |_ctx| {
             let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
             match epoch_credit_ticks(credit_ms) {
-                None => Err(anyhow::Error::new(Trap::Interrupt)),
+                None => Err(wasmtime::Error::new(Trap::Interrupt)),
                 Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
             }
         });
