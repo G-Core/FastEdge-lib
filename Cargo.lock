@@ -2806,6 +2806,7 @@ dependencies = [
  "claims",
  "http",
  "http-backend",
+ "http-body",
  "http-body-util",
  "key-value-store",
  "moka",

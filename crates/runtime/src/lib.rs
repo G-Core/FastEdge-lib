@@ -3,9 +3,11 @@ use crate::store::HasStats;
 use http_backend::access_log::ExtRequestLogHandle;
 use http_backend::stats::ExtStatsTimer;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::sync::{Arc, OnceLock};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 use std::{fmt::Debug, ops::Deref};
 use utils::{Dictionary, Utils};
 use wasmtime_wasi::ResourceTable;
@@ -46,8 +48,10 @@ use crate::logger::Logger;
 use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
 pub use app::{App, SecretValue, SecretValues};
+use bytes::Bytes;
 use http::request::Parts;
 use http::{HeaderName, Request, Response, header};
+use http_body::{Body, Frame, SizeHint};
 use http_body_util::BodyExt;
 use secret::SecretStore;
 use smol_str::SmolStr;
@@ -193,6 +197,156 @@ impl<T: Send> IoView for Data<T> {
 /// raised while the request or response body was being processed.
 type HttpIoFuture = Box<dyn Future<Output = wasmtime_wasi_http::Result<()>> + Send>;
 
+/// Deposits host I/O wait time into the shared epoch-pause counter, carrying
+/// sub-millisecond remainders across deposits so that bodies streamed in many
+/// small frames do not have their wait time truncated away frame by frame.
+struct EpochRefund {
+    epoch_pause_ms: Arc<AtomicU64>,
+    carry: Duration,
+}
+
+impl EpochRefund {
+    fn new(epoch_pause_ms: Arc<AtomicU64>) -> Self {
+        Self {
+            epoch_pause_ms,
+            carry: Duration::ZERO,
+        }
+    }
+
+    fn deposit(&mut self, elapsed: Duration) {
+        let total = self.carry + elapsed;
+        let ms = total.as_millis() as u64;
+        self.carry = total - Duration::from_millis(ms);
+        if ms > 0 {
+            self.epoch_pause_ms.fetch_add(ms, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Response-body wrapper that refunds epoch ticks for time spent waiting on
+/// the network. `default_send_request` resolves as soon as the response
+/// *headers* are in; the body then streams lazily through the returned
+/// `Response` and is only polled when the guest reads it. Any time a frame
+/// poll stays `Pending` the guest is blocked on host I/O, so that time is
+/// deposited into `epoch_pause_ms`, mirroring the send-phase refund in
+/// [`WasiHttpHooks::send_request`].
+struct ResponseBodyEpochRefund {
+    inner: WasiBody,
+    refund: EpochRefund,
+    /// When the in-progress frame poll first returned `Pending`.
+    pending_since: Option<Instant>,
+}
+
+impl Body for ResponseBodyEpochRefund {
+    type Data = Bytes;
+    type Error = wasmtime_wasi_http::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        let result = Pin::new(&mut this.inner).poll_frame(cx);
+        match &result {
+            Poll::Pending => {
+                this.pending_since.get_or_insert_with(Instant::now);
+            }
+            Poll::Ready(_) => {
+                if let Some(started) = this.pending_since.take() {
+                    this.refund.deposit(started.elapsed());
+                }
+            }
+        }
+        result
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+impl Drop for ResponseBodyEpochRefund {
+    fn drop(&mut self) {
+        // Body dropped mid-wait (e.g. the request ended early): flush the tail.
+        if let Some(started) = self.pending_since.take() {
+            self.refund.deposit(started.elapsed());
+        }
+    }
+}
+
+/// Request-body wrapper covering the tail of the request-body lifetime.
+///
+/// Until the response headers arrive, [`WasiHttpHooks::send_request`] refunds
+/// the whole wall clock of `default_send_request`, which already includes
+/// request-body streaming, so no extra accounting is needed there (and any
+/// would double count). But hyper may still be sending the request body
+/// *after* the headers arrived — driven by the background `io` future — while
+/// the guest blocks in a body write waiting for backpressure to clear. That
+/// wait shows up as the gap between this body yielding a frame and hyper
+/// polling for the next one; a `Pending` poll, by contrast, means the guest
+/// itself has not produced data yet and must stay on the clock. Gaps are
+/// refunded only for their portion past `headers_at`.
+struct RequestBodyEpochRefund {
+    inner: WasiBody,
+    refund: EpochRefund,
+    /// Set once the response headers are in (send-phase refund window closed).
+    headers_at: Arc<OnceLock<Instant>>,
+    /// When the previous poll yielded a frame.
+    ready_since: Option<Instant>,
+}
+
+impl RequestBodyEpochRefund {
+    /// Refund the elapsed part of the current inter-poll gap that falls
+    /// outside the send-phase refund window.
+    fn settle_gap(&mut self) {
+        let Some(ready) = self.ready_since.take() else {
+            return;
+        };
+        let Some(headers) = self.headers_at.get() else {
+            return;
+        };
+        self.refund.deposit(ready.max(*headers).elapsed());
+    }
+}
+
+impl Body for RequestBodyEpochRefund {
+    type Data = Bytes;
+    type Error = wasmtime_wasi_http::Error;
+
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let this = self.get_mut();
+        this.settle_gap();
+        let result = Pin::new(&mut this.inner).poll_frame(cx);
+        if let Poll::Ready(Some(Ok(_))) = &result {
+            this.ready_since = Some(Instant::now());
+        }
+        result
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.inner.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+impl Drop for RequestBodyEpochRefund {
+    fn drop(&mut self) {
+        // hyper drops the body when it is done sending it (or the connection
+        // failed); settle the wait between the last yielded frame and now.
+        self.settle_gap();
+    }
+}
+
 impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
     fn http(&mut self) -> WasiHttpCtxView<'_> {
         WasiHttpCtxView {
@@ -204,6 +358,21 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpView for Data<T> {
 }
 
 impl<T: Send + BackendRequest + HasStats> WasiHttpHooks for HttpHooks<T> {
+    fn is_forbidden_header(&mut self, name: &HeaderName) -> bool {
+        // We want to allow the host header to be set.
+        if name.eq(&header::HOST) {
+            return false;
+        }
+        // Block all headers with the reserved `fastedge` prefix — these are
+        // internal routing headers that guest modules must not set.
+        let name_str = name.as_str();
+        if name_str.starts_with("fastedge-") || name_str.starts_with("fastedge_") {
+            return true;
+        }
+        // Fall back to wasmtime's default forbidden-header policy.
+        DEFAULT_FORBIDDEN_HEADERS.contains(name)
+    }
+
     fn send_request(
         &mut self,
         request: Request<WasiBody>,
@@ -245,11 +414,28 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpHooks for HttpHooks<T> {
 
         Box::new(async move {
             let _stats_timer = ExtStatsTimer::new(stats); // keep timer alive until response head is in
+            // Set once the response headers are in; the request-body wrapper
+            // only refunds waits that fall outside the send-phase window below.
+            let headers_at = Arc::new(OnceLock::new());
+            let request = if epoch_exclude_http_wait {
+                request.map(|body| {
+                    RequestBodyEpochRefund {
+                        inner: body,
+                        refund: EpochRefund::new(epoch_pause_ms.clone()),
+                        headers_at: headers_at.clone(),
+                        ready_since: None,
+                    }
+                    .boxed_unsync()
+                })
+            } else {
+                request
+            };
             let started = Instant::now();
             let sent = default_send_request(request, options).await;
             let elapsed = started.elapsed();
             if epoch_exclude_http_wait {
                 epoch_pause_ms.fetch_add(elapsed.as_millis() as u64, Ordering::Relaxed);
+                let _ = headers_at.set(Instant::now());
             }
             // One access-log record per outbound request (status 0 = no response
             // received, e.g. connection refused / timeout).
@@ -261,26 +447,22 @@ impl<T: Send + BackendRequest + HasStats> WasiHttpHooks for HttpHooks<T> {
                 handle.log(&log_method, &log_uri, status, elapsed);
             }
             let (response, io) = sent?;
-            Ok((
-                response.map(BodyExt::boxed_unsync),
-                Box::new(io) as HttpIoFuture,
-            ))
+            // The send-phase refund above stops at the response headers; the
+            // body wrappers keep refunding network wait past that point.
+            let response = if epoch_exclude_http_wait {
+                response.map(|body| {
+                    ResponseBodyEpochRefund {
+                        inner: body.boxed_unsync(),
+                        refund: EpochRefund::new(epoch_pause_ms.clone()),
+                        pending_since: None,
+                    }
+                    .boxed_unsync()
+                })
+            } else {
+                response.map(BodyExt::boxed_unsync)
+            };
+            Ok((response, Box::new(io) as HttpIoFuture))
         })
-    }
-
-    fn is_forbidden_header(&mut self, name: &HeaderName) -> bool {
-        // We want to allow the host header to be set.
-        if name.eq(&header::HOST) {
-            return false;
-        }
-        // Block all headers with the reserved `fastedge` prefix — these are
-        // internal routing headers that guest modules must not set.
-        let name_str = name.as_str();
-        if name_str.starts_with("fastedge-") || name_str.starts_with("fastedge_") {
-            return true;
-        }
-        // Fall back to wasmtime's default forbidden-header policy.
-        DEFAULT_FORBIDDEN_HEADERS.contains(name)
     }
 }
 
