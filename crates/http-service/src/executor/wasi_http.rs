@@ -15,9 +15,10 @@ use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
 use smol_str::SmolStr;
 use tracing::Instrument;
-use wasmtime_wasi_http::bindings::ProxyPre;
-use wasmtime_wasi_http::bindings::http::types::Scheme;
-use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
+use wasmtime_wasi_http::WasiHttpView;
+use wasmtime_wasi_http::p2::bindings::ProxyPre;
+use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -77,7 +78,7 @@ where
             .map_err(|_| anyhow!("body read error"))?
             .to_bytes();
         let body = Full::new(body).map_err(|never| match never {});
-        let body = body.boxed();
+        let body: HyperOutgoingBody = body.boxed_unsync();
 
         let properties = executor::get_properties(&parts.headers);
         let mut store_builder = self
@@ -147,11 +148,15 @@ where
         let request = Request::from_parts(parts, body);
         let req = store
             .data_mut()
+            .http()
             .new_incoming_request(Scheme::Http, request)
+            .map_err(anyhow::Error::from)
             .context("new incoming request")?;
         let out = store
             .data_mut()
+            .http()
             .new_response_outparam(sender)
+            .map_err(anyhow::Error::from)
             .context("new response outparam")?;
         let proxy_pre = ProxyPre::new(instance_pre)?;
 
@@ -162,9 +167,9 @@ where
                 // declared minimum memory exceeds `mem_limit`) is recorded by the
                 // limiter; classify it as out-of-memory instead of a generic error.
                 if store.is_oom() {
-                    return Err(runtime::store::OutOfMemory(error).into());
+                    return Err(runtime::store::OutOfMemory(error.into()).into());
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
 
@@ -180,7 +185,11 @@ where
                 )
                 .await
                 {
-                    Ok(inner) => inner,
+                    // Convert into `anyhow::Error` here so the task's error type
+                    // stays what `fail_reason_of`/`map_err` classify. The
+                    // conversion rebuilds the context chain, so `root_cause()`
+                    // still downcasts to `wasmtime::Trap`.
+                    Ok(inner) => inner.map_err(anyhow::Error::from),
                     // tokio timeout elapsed (outer deadline hit).
                     Err(elapsed) => Err(elapsed.into()),
                 };

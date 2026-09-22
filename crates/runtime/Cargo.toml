@@ -11,7 +11,6 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
-wasi-common = { workspace = true }
 wasmtime-wasi-nn = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 wasmtime-environ = { workspace = true }
@@ -19,6 +18,7 @@ wasmtime-wasi-io = { workspace = true }
 smol_str = { workspace = true }
 moka = { workspace = true }
 http = { workspace = true }
+http-body-util = "0.1"
 wit-component = "0.246.2"
 tracing = { workspace = true }
 bytesize = { workspace = true }

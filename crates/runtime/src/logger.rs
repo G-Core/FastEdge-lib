@@ -1,15 +1,11 @@
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use std::any::Any;
 use std::collections::HashMap;
-use std::io::IoSlice;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
-use wasi_common::file::{FdFlags, FileType};
-use wasi_common::{Error, WasiFile};
 use wasmtime_wasi::cli::{IsTerminal, StdoutStream};
 use wasmtime_wasi_io::poll::Pollable;
 use wasmtime_wasi_io::streams::OutputStream;
@@ -271,29 +267,5 @@ impl OutputStream for Console {
 
     fn check_write(&mut self) -> StreamResult<usize> {
         Ok(usize::MAX)
-    }
-}
-
-#[async_trait]
-impl WasiFile for Console {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    async fn get_filetype(&self) -> Result<FileType, Error> {
-        Ok(FileType::Pipe)
-    }
-
-    async fn get_fdflags(&self) -> Result<FdFlags, Error> {
-        Ok(FdFlags::APPEND)
-    }
-
-    async fn write_vectored<'a>(&self, bufs: &[IoSlice<'a>]) -> Result<u64, Error> {
-        let n = bufs.iter().fold(0, |n, buf| {
-            print!("{}", std::str::from_utf8(&buf).unwrap());
-            n + buf.len()
-        });
-
-        Ok(n as u64)
     }
 }
