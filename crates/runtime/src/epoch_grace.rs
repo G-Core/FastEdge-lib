@@ -152,9 +152,44 @@ impl EpochGrace {
         self.grants = 0;
     }
 
+    /// Re-baseline for a *credited* deadline extension (host-call credit
+    /// returned `Continue(ticks)`): the new segment of `ticks` is measured
+    /// from the current thread, CPU clock and wall clock, so a later
+    /// no-credit hit compares CPU used within this segment against this
+    /// segment's budget — not the accumulated usage since the original arm
+    /// against a stale budget.
+    ///
+    /// Deliberately unlike [`Self::arm`], the grant counter is **not**
+    /// reset: stall grants stay bounded to [`MAX_STALL_GRANTS`] per armed
+    /// budget no matter how many credited extensions happen in between, so
+    /// host-call credit cannot be used to mint fresh stall allowances.
+    pub fn rebase(&mut self, ticks: u64) {
+        self.rebase_at(
+            ticks,
+            thread::current().id(),
+            thread_cpu_ns(),
+            Instant::now(),
+        );
+    }
+
+    fn rebase_at(&mut self, ticks: u64, thread: ThreadId, cpu_ns: Option<u64>, wall: Instant) {
+        self.baseline = Some(Baseline {
+            thread,
+            cpu_ns,
+            wall,
+            ticks,
+        });
+    }
+
     /// Extensions handed out for the currently armed budget.
     pub fn grants(&self) -> u32 {
         self.grants
+    }
+
+    /// Ticks of the current baseline segment; test-only introspection.
+    #[cfg(test)]
+    pub(crate) fn baseline_ticks(&self) -> Option<u64> {
+        self.baseline.map(|b| b.ticks)
     }
 
     /// Decide what to do about a deadline hit that has no host-call credit,
@@ -326,6 +361,45 @@ mod tests {
                 "grant #{i} expected, got {ev:?}"
             );
         }
+        assert_eq!(
+            g.decide(Some(1_000 * NS_PER_MS), tid, t0),
+            EpochGraceEvent::Denied(DenyReason::GrantsExhausted)
+        );
+    }
+
+    #[test]
+    fn rebase_measures_the_next_segment_from_the_rebase() {
+        // 1 s armed budget; the guest burnt 900 ms of CPU, then a credited
+        // extension rebased it to a fresh 50-tick (500 ms) segment. A later
+        // hit that used 100 ms *within the new segment* must be a grant —
+        // without the rebase it would read 1 000 ms against the stale 1 s
+        // budget and be denied as CpuExhausted.
+        let (mut g, tid, t0) = armed(100, 1_000);
+        let t1 = t0 + Duration::from_millis(2_000);
+        g.rebase_at(50, tid, Some((1_000 + 900) * NS_PER_MS), t1);
+        let ev = g.decide(
+            Some((1_000 + 900 + 100) * NS_PER_MS),
+            tid,
+            t1 + Duration::from_millis(500),
+        );
+        assert_eq!(
+            ev,
+            EpochGraceEvent::Granted {
+                ticks: 40, // (500 ms - 100 ms) / 10 ms
+                cpu_used_ms: 100,
+                wall_ms: 500,
+            }
+        );
+    }
+
+    #[test]
+    fn rebase_does_not_reset_the_grant_allowance() {
+        let (mut g, tid, t0) = armed(100, 1_000);
+        for _ in 0..MAX_STALL_GRANTS {
+            g.decide(Some(1_000 * NS_PER_MS), tid, t0);
+        }
+        g.rebase_at(100, tid, Some(1_000 * NS_PER_MS), t0);
+        assert_eq!(g.grants(), MAX_STALL_GRANTS);
         assert_eq!(
             g.decide(Some(1_000 * NS_PER_MS), tid, t0),
             EpochGraceEvent::Denied(DenyReason::GrantsExhausted)
