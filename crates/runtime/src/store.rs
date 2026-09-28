@@ -422,6 +422,10 @@ pub(crate) fn epoch_deadline_decision(
     grace: &mut EpochGrace,
 ) -> Result<UpdateDeadline> {
     if let Some(ticks) = epoch_credit_ticks(credit_ms) {
+        // The credited extension starts a new deadline segment; rebase the
+        // stall grace on it so the next no-credit hit measures CPU against
+        // this segment, not the long-expired one. Grant allowance is kept.
+        grace.rebase(ticks);
         return Ok(UpdateDeadline::Continue(ticks));
     }
     let event = grace.on_deadline();
@@ -515,6 +519,19 @@ mod tests {
             epoch_credit_ticks(u64::MAX),
             Some(u64::MAX.div_ceil(DEFAULT_EPOCH_TICK_INTERVAL)),
         );
+    }
+
+    #[test]
+    fn credited_extension_rebases_the_stall_grace() {
+        // A credited Continue starts a new deadline segment; the grace
+        // baseline must move to it, or the next no-credit hit measures CPU
+        // across both segments against the stale budget.
+        let mut grace = EpochGrace::new(DEFAULT_EPOCH_TICK_INTERVAL);
+        grace.arm(100);
+        let decision = epoch_deadline_decision(25, &mut grace).unwrap();
+        assert!(matches!(decision, UpdateDeadline::Continue(3)));
+        assert_eq!(grace.baseline_ticks(), Some(3));
+        assert_eq!(grace.grants(), 0);
     }
 
     // ── integration test: end-to-end deadline extension ───────────────────
