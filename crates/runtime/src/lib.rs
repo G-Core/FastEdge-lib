@@ -1,5 +1,4 @@
 use crate::app::KvStoreOption;
-use crate::epoch_grace::EpochGrace;
 use crate::store::HasStats;
 use http_backend::stats::ExtStatsTimer;
 use std::net::Ipv4Addr;
@@ -24,7 +23,6 @@ use wasmtime::{
 use wit_component::ComponentEncoder;
 
 pub mod app;
-pub mod epoch_grace;
 pub mod instances;
 mod limiter;
 pub mod logger;
@@ -124,11 +122,6 @@ pub struct Data<T: 'static> {
     pub epoch_pause_ms: Arc<AtomicU64>,
     /// Whether elapsed time of external HTTP should refund epoch ticks.
     pub pause_epoch_timeout_for_external_http: bool,
-    /// CPU-aware grace for the epoch deadline: when the wall budget runs out
-    /// with no host-call credit, distinguishes a thread that was parked in the
-    /// kernel from a guest that really spent its budget. See
-    /// [`crate::epoch_grace`].
-    pub epoch_grace: EpochGrace,
     /// Counts this instance in `fastedge_wasm_instances_live` for as long as the store —
     /// and therefore its pooling-allocator slots — is alive. Held only for its `Drop`.
     _live_instance: crate::instances::LiveInstanceGuard,
