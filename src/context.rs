@@ -125,6 +125,7 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
         let store_builder = engine
             .store_builder(version)
             .set_env(&env)
+            .preload_wasi_nn()?
             .max_memory_size(app.mem_limit)
             .max_epoch_ticks(app.max_duration)
             .logger(logger)

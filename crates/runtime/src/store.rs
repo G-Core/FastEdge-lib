@@ -18,6 +18,7 @@ use wasmtime::UpdateDeadline;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_nn::Graph;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 
 /// Default extra wall-clock budget (in ms) added to the tokio timeout that
@@ -126,7 +127,12 @@ pub struct StoreBuilder {
     logger: Option<Logger>,
     version: WasiVersion,
     properties: HashMap<String, String>,
+    /// Process-wide graph cache, shared with every other builder of the engine.
     registry: CachedGraphRegistry,
+    /// The app's wasi-nn graphs, resolved once by [`Self::preload_wasi_nn`] so
+    /// building a `Store` only clones handles. `None` until preloaded; then
+    /// `build` falls back to loading on the spot.
+    nn_graphs: Option<Vec<(String, Graph)>>,
     secret_store: SecretStore,
     key_value_store: key_value_store::Builder,
     dictionary: Dictionary,
@@ -138,7 +144,11 @@ pub struct StoreBuilder {
 
 impl StoreBuilder {
     // Called by Engine::store_builder.
-    pub(crate) fn new(engine: wasmtime::Engine, version: WasiVersion) -> Self {
+    pub(crate) fn new(
+        engine: wasmtime::Engine,
+        version: WasiVersion,
+        registry: CachedGraphRegistry,
+    ) -> Self {
         Self {
             engine,
             max_duration: 100,
@@ -147,7 +157,8 @@ impl StoreBuilder {
             logger: None,
             version,
             properties: Default::default(),
-            registry: CachedGraphRegistry::new(),
+            registry,
+            nn_graphs: None,
             secret_store: Default::default(),
             key_value_store: key_value_store::Builder::default(),
             dictionary: Default::default(),
@@ -268,35 +279,37 @@ impl StoreBuilder {
         }
     }
 
+    /// Resolves the app's wasi-nn graphs (from `FASTEDGE_NN_*` env, see
+    /// [`crate::registry`]) now, so that every `Store` built later gets them
+    /// for the price of an `Arc` clone.
+    ///
+    /// Call this where the executor is created — a cache miss loads a model,
+    /// which takes seconds and gigabytes, and that belongs on the blocking
+    /// pool, not on the request path. Loads are coalesced process-wide, so
+    /// concurrent executor creations for the same app share one load.
+    pub fn preload_wasi_nn(self) -> Result<Self> {
+        let spec = crate::registry::preload_spec(&self.env);
+        debug!("preload graphs: {:?}", spec);
+        let nn_graphs = self.registry.load_graphs(&spec)?;
+        Ok(Self {
+            nn_graphs: Some(nn_graphs),
+            ..self
+        })
+    }
+
     pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
-        // initialize application specific graph
-        let backends: Vec<&str> = self
-            .env
-            .iter()
-            .find(|(k, _)| k == "FASTEDGE_NN_BACKENDS")
-            .map(|(_, v)| v.split(",").collect())
-            .unwrap_or_default();
-
-        debug!("wasi-nn backends: {:?}", backends);
-
-        let preload_graphs: Vec<(String, String)> = backends
-            .into_iter()
-            .flat_map(|b| {
-                let entry = self.env.iter().filter_map(|(k, v)| {
-                    if k.starts_with(&format!("FASTEDGE_NN_{}", b.to_ascii_uppercase())) {
-                        Some((b.to_string(), v.to_string()))
-                    } else {
-                        None
-                    }
-                });
-                entry
-            })
-            .collect();
-        debug!("preload graphs: {:?}", preload_graphs);
-
-        let (backends, registry) = self.registry.preload_graphs(preload_graphs)?;
-
-        Ok(WasiNnCtx::new(backends, registry))
+        let registry = match &self.nn_graphs {
+            Some(graphs) => CachedGraphRegistry::registry_for(graphs),
+            // Builder not preloaded (the CLI, tests): resolve on the spot.
+            // Cached graphs are only cloned; a cold one is loaded right here,
+            // on whatever thread is building the store.
+            None => {
+                let spec = crate::registry::preload_spec(&self.env);
+                debug!("preload graphs (not preloaded by the executor): {:?}", spec);
+                CachedGraphRegistry::registry_for(&self.registry.load_graphs(&spec)?)
+            }
+        };
+        Ok(WasiNnCtx::new(crate::registry::backends(), registry))
     }
 
     /// Builds a [`Store`] from this builder with `Default` WasiCtxBuilder
@@ -651,16 +664,20 @@ mod tests {
         let engine = make_engine();
         let before = instances::live();
 
-        let store = StoreBuilder::new(engine.clone(), WasiVersion::Preview1)
-            .build(NoStats)
-            .expect("build store");
+        let store = StoreBuilder::new(
+            engine.clone(),
+            WasiVersion::Preview1,
+            CachedGraphRegistry::new(),
+        )
+        .build(NoStats)
+        .expect("build store");
         assert_eq!(
             instances::live(),
             before + 1,
             "building a store must count a live instance"
         );
 
-        let second = StoreBuilder::new(engine, WasiVersion::Preview1)
+        let second = StoreBuilder::new(engine, WasiVersion::Preview1, CachedGraphRegistry::new())
             .build(NoStats)
             .expect("build store");
         assert_eq!(instances::live(), before + 2);
@@ -674,5 +691,45 @@ mod tests {
             before,
             "dropping the store must release the count"
         );
+    }
+
+    /// An app without wasi-nn env preloads nothing, and a store's wasi-nn
+    /// context then comes from the preloaded (empty) set without touching the
+    /// loader. (`make_wasi_nn` is called directly: building a whole `Store`
+    /// here would race the live-instance counts asserted by the test above.)
+    #[test]
+    fn preload_wasi_nn_without_nn_env_is_a_noop() {
+        let builder = StoreBuilder::new(
+            make_engine(),
+            WasiVersion::Preview1,
+            CachedGraphRegistry::new(),
+        )
+        .set_env(&[("UNRELATED", "1")])
+        .preload_wasi_nn()
+        .expect("preload");
+        assert_eq!(builder.nn_graphs.as_ref().map(Vec::len), Some(0));
+        builder
+            .make_wasi_nn()
+            .expect("wasi-nn ctx from preloaded graphs");
+    }
+
+    /// A graph the executor cannot load fails executor creation — with the
+    /// offending directory in the error — instead of every request later on.
+    #[test]
+    fn preload_wasi_nn_reports_an_unloadable_graph_at_executor_creation() {
+        let error = StoreBuilder::new(
+            make_engine(),
+            WasiVersion::Preview1,
+            CachedGraphRegistry::new(),
+        )
+        .set_env(&[
+            ("FASTEDGE_NN_BACKENDS", "openvino"),
+            ("FASTEDGE_NN_OPENVINO_MODEL", "/no/such/model-dir"),
+        ])
+        .preload_wasi_nn()
+        .err()
+        .expect("missing model dir must fail")
+        .to_string();
+        assert!(error.contains("/no/such/model-dir"), "{error}");
     }
 }

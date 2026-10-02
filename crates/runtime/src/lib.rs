@@ -583,6 +583,9 @@ pub struct WasmEngine<T: 'static> {
     inner: Engine,
     component_linker: ComponentLinker<T>,
     module_linker: ModuleLinker<T>,
+    /// One wasi-nn graph cache for all stores of this engine, so a model is
+    /// loaded once per process rather than once per executor (see `registry`).
+    graph_registry: crate::registry::CachedGraphRegistry,
 }
 
 // Manual impl: `derive(Clone)` would incorrectly require `T: Clone`, but the
@@ -595,6 +598,7 @@ impl<T> Clone for WasmEngine<T> {
             inner: self.inner.clone(),
             component_linker: self.component_linker.clone(),
             module_linker: self.module_linker.clone(),
+            graph_registry: self.graph_registry.clone(),
         }
     }
 }
@@ -615,7 +619,7 @@ impl<T: Send + Sync> WasmEngine<T> {
     }
 
     pub fn store_builder(&self, version: WasiVersion) -> StoreBuilder {
-        StoreBuilder::new(self.inner.clone(), version)
+        StoreBuilder::new(self.inner.clone(), version, self.graph_registry.clone())
     }
 
     /// Creates a new [`InstancePre`] for the given [`Component`].
@@ -658,6 +662,7 @@ impl<T: Send + Sync> WasmEngineBuilder<T> {
             inner: self.engine,
             component_linker: self.component_linker,
             module_linker: self.module_linker,
+            graph_registry: crate::registry::CachedGraphRegistry::new(),
         }
     }
 }
