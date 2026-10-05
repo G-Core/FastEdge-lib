@@ -473,6 +473,13 @@ pub trait ContextT {
         cfg: &App,
     ) -> Arc<dyn StatsVisitor>;
 
+    /// Exact `User-Agent` value whose requests are not persisted to the stats
+    /// store (synthetic probes such as a security scanner). The comparison is
+    /// byte-exact and case-sensitive; `None` disables the filter.
+    fn stats_excluded_user_agent(&self) -> Option<&str> {
+        None
+    }
+
     /// Sink for the per-request system log (see [`access_log`]).
     ///
     /// Distinct from the guest application log produced by [`make_logger`].

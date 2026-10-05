@@ -44,6 +44,10 @@ pub trait StatsVisitor: ReadStats + UserDiagStats + ExtRequestStats + Send + Syn
     fn get_memory_used(&self) -> u64;
     /// Register cdn phase
     fn cdn_phase(&self, phase: CdnPhase);
+    /// Mark the record as not to be persisted to the stats store (e.g. a
+    /// synthetic probe that must not count as traffic). Counters keep being
+    /// collected and Prometheus metrics / logs are unaffected. No-op by default.
+    fn discard(&self) {}
 }
 
 impl StatsTimer {
