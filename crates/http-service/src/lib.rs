@@ -420,6 +420,13 @@ where
             let stats = self
                 .context
                 .new_stats_row(traceparent, &app_name, caller_ip, &cfg);
+            if is_stats_excluded_user_agent(
+                self.context.stats_excluded_user_agent(),
+                request.headers(),
+            ) {
+                tracing::debug!("stats excluded by user agent");
+                stats.discard();
+            }
 
             let response = match executor.execute(request, stats.clone()).await {
                 Ok(mut response) => {
@@ -463,6 +470,17 @@ where
         }
         .instrument(span)
         .await
+    }
+}
+
+/// `true` when `excluded` is set and the request's first `User-Agent` header
+/// equals it byte for byte. Used to keep synthetic probes out of the stats store.
+fn is_stats_excluded_user_agent(excluded: Option<&str>, headers: &HeaderMap) -> bool {
+    match excluded {
+        Some(ua) => headers
+            .get(http::header::USER_AGENT)
+            .is_some_and(|v| v.as_bytes() == ua.as_bytes()),
+        None => false,
     }
 }
 
@@ -775,6 +793,25 @@ mod tests {
 
     fn empty_body_request() -> http::request::Builder {
         http::Request::builder().method("GET")
+    }
+
+    // ── Stats exclusion by User-Agent ─────────────────────────────────────
+
+    #[test_case(Some("scanner/1.0"), Some("scanner/1.0"), true;  "exact match is excluded")]
+    #[test_case(Some("scanner/1.0"), Some("Scanner/1.0"), false; "case differs: not excluded")]
+    #[test_case(Some("scanner/1.0"), Some("scanner/1.0 "), false; "trailing space: not excluded")]
+    #[test_case(Some("scanner/1.0"), Some("x scanner/1.0"), false; "substring: not excluded")]
+    #[test_case(Some("scanner/1.0"), None, false; "no user agent: not excluded")]
+    #[test_case(None, Some("scanner/1.0"), false; "filter disabled: not excluded")]
+    fn stats_excluded_user_agent(excluded: Option<&str>, ua: Option<&str>, expected: bool) {
+        let mut headers = http::HeaderMap::new();
+        if let Some(ua) = ua {
+            headers.insert(http::header::USER_AGENT, ua.parse().unwrap());
+        }
+        assert_eq!(
+            crate::is_stats_excluded_user_agent(excluded, &headers),
+            expected
+        );
     }
 
     // ── Name variant: server_name header ──────────────────────────────────
