@@ -1,6 +1,5 @@
-use anyhow::{Error, Result};
 use tracing::instrument;
-use wasmtime::{ResourceLimiter, StoreLimits};
+use wasmtime::{Error, ResourceLimiter, Result, StoreLimits};
 
 /// A proxy wrapper of `wasmtime::ResourceLimiter` trait impl used to track used memory
 #[derive(Clone, Debug)]

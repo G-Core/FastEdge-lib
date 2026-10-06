@@ -42,7 +42,7 @@ pub struct Context {
 impl PreCompiledLoader<u64> for Context {
     fn load_component(&self, _id: u64) -> anyhow::Result<Component> {
         let wasm_sample = componentize_if_necessary(&self.wasm_bytes)?;
-        Component::new(&self.engine, wasm_sample)
+        Ok(Component::new(&self.engine, wasm_sample)?)
     }
 
     fn load_module(&self, _id: u64) -> anyhow::Result<Module> {

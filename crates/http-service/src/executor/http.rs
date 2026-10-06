@@ -13,7 +13,7 @@ use runtime::{InstancePre, store::StoreBuilder};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
-use wasmtime_wasi_http::body::HyperOutgoingBody;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -140,9 +140,9 @@ where
                 // declared minimum memory exceeds `mem_limit`) is recorded by the
                 // limiter; classify it as out-of-memory instead of a generic error.
                 if store.is_oom() {
-                    return Err(runtime::store::OutOfMemory(error).into());
+                    return Err(runtime::store::OutOfMemory(error.into()).into());
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
         let http_handler =
@@ -166,7 +166,7 @@ where
                         .write_msg(format!("Execution error: {}", error))
                         .await;
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
         let status_code = StatusCode::try_from(resp.status)?;
@@ -185,7 +185,7 @@ where
 
         let body = resp
             .body
-            .map(|b| Full::from(b).map_err(|never| match never {}).boxed())
+            .map(|b| Full::from(b).map_err(|never| match never {}).boxed_unsync())
             .unwrap_or_default();
         builder.body(body).map_err(anyhow::Error::msg)
     }
@@ -381,11 +381,11 @@ mod tests {
                 DUMMY_SAMPLE
             };
             let wasm_sample = componentize_if_necessary(bytes)?;
-            Component::new(&self.engine, wasm_sample)
+            Ok(Component::new(&self.engine, wasm_sample)?)
         }
 
         fn load_module(&self, _id: u64) -> anyhow::Result<Module> {
-            Module::new(&self.engine, DUMMY_SAMPLE)
+            Ok(Module::new(&self.engine, DUMMY_SAMPLE)?)
         }
     }
 
@@ -502,7 +502,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -534,7 +534,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -593,7 +593,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -648,7 +648,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -676,7 +676,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -704,7 +704,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -732,7 +732,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -764,7 +764,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -798,7 +798,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -832,7 +832,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -862,7 +862,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -893,7 +893,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -925,7 +925,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
 
@@ -951,7 +951,7 @@ mod tests {
             Request::builder().method("GET").uri("/").body(
                 Empty::<Bytes>::new()
                     .map_err(|never| match never {})
-                    .boxed()
+                    .boxed_unsync()
             )
         );
 
