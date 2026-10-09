@@ -44,6 +44,10 @@ pub struct KvStoreOption {
     pub name: SmolStr,
     #[serde(default)]
     pub prefix: SmolStr,
+    /// Maximum **bytes** held by this store's in-process value cache (keys,
+    /// values and per-entry overhead), not a number of entries: entry count
+    /// cannot bound memory, since the same 25 000 entries are 2 MiB of
+    /// 64-byte values or 200 MiB of 8 KiB ones.
     #[serde(default = "KvStoreOption::default_cache_size")]
     pub cache_size: u64,
     #[serde(default = "KvStoreOption::default_cache_ttl")]
@@ -51,8 +55,11 @@ pub struct KvStoreOption {
 }
 
 impl KvStoreOption {
+    /// 10 MiB. Was 25 000 *entries* until 2026-09-15; the unit changed with
+    /// the cache's weigher, and the field was set nowhere in prod or preprod,
+    /// so every store simply takes this default.
     fn default_cache_size() -> u64 {
-        25000
+        10 * 1024 * 1024
     }
 
     fn default_cache_ttl() -> u64 {
@@ -306,7 +313,7 @@ mod tests {
         assert_eq!(kv.param, "");
         assert_eq!(kv.name, "store");
         assert_eq!(kv.prefix, "pre");
-        assert_eq!(kv.cache_size, 25000);
+        assert_eq!(kv.cache_size, 10 * 1024 * 1024);
         assert_eq!(kv.cache_ttl, 60);
     }
 
@@ -316,14 +323,14 @@ mod tests {
         "param": "url2",
         "name": "store2",
         "prefix": "pre2",
-        "cache_size": 5000,
+        "cache_size": 5000000,
         "cache_ttl": 120
     }"#;
         let kv: KvStoreOption = serde_json::from_str(json).unwrap();
         assert_eq!(kv.param, "url2");
         assert_eq!(kv.name, "store2");
         assert_eq!(kv.prefix, "pre2");
-        assert_eq!(kv.cache_size, 5000);
+        assert_eq!(kv.cache_size, 5000000);
         assert_eq!(kv.cache_ttl, 120);
     }
 

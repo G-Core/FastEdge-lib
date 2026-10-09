@@ -39,7 +39,7 @@ impl GraphRegistry for StoreRegistry {
 impl CachedGraphRegistry {
     pub fn new() -> Self {
         let builder = Cache::builder()
-            // Max 10,000 entries
+            // Max 100 entries
             .max_capacity(100)
             // Time to idle (TTI):  30 minutes
             .time_to_idle(Duration::from_secs(30 * 60));

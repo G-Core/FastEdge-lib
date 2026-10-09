@@ -15,13 +15,12 @@ tracing = "0.1"
 hyper = { version = "1", features = ["full"] }
 http = "1.4"
 async-trait = "0.1"
-wasmtime = { git = "https://github.com/G-Core/wasmtime.git", features = ["component-model"], branch = "release-36.0.0"}
-wasmtime-wasi = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
-wasmtime-wasi-io = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
-wasi-common = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
-wasmtime-wasi-nn = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0", features = ["openvino", "candle"] }
-wasmtime-wasi-http = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
-wasmtime-environ = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-36.0.0"}
+wasmtime = { git = "https://github.com/G-Core/wasmtime.git", features = ["component-model"], branch = "release-48.0.0" }
+wasmtime-wasi = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
+wasmtime-wasi-io = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
+wasmtime-wasi-nn = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0", features = ["openvino", "candle"] }
+wasmtime-wasi-http = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
+wasmtime-environ = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
 bytesize = "2.3.1"
 
 clap = { version = "4", features = ["derive"] }
@@ -56,7 +55,7 @@ http = { workspace = true }
 tokio = { workspace = true }
 wasmtime = { workspace = true }
 smol_str = { workspace = true }
-async-trait = {workspace = true}
+async-trait = { workspace = true }
 clap = { version = "4.6", features = ["derive"] }
 pretty_env_logger = "0.5"
 runtime = { path = "crates/runtime", default-features = false }
@@ -69,7 +68,7 @@ cache = { path = "crates/cache" }
 hyper-tls = "0.6"
 hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
 http-body-util = "0.1"
-bytesize = { workspace = true}
+bytesize = { workspace = true }
 
 [target.'cfg(target_family = "unix")'.dependencies]
 shellflip = "2.1.2"

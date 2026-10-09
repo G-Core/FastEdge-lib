@@ -15,17 +15,19 @@ use http_backend::SERVER_NAME_HEADER;
 use http_body_util::{BodyExt, Empty, Full};
 use hyper::{body::Body, server::conn::http1, service::service_fn};
 use hyper_util::{client::legacy::connect::Connect, rt::TokioIo};
-#[cfg(feature = "metrics")]
 use runtime::util::metrics;
 use runtime::util::stats::StatsVisitor;
 use runtime::{
-    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder, app::Status, service::Service,
+    App, AppResult, ContextT, Router, WasmEngine, WasmEngineBuilder,
+    access_log::{AccessLog, RequestKind},
+    app::Status,
+    service::Service,
 };
 use smol_str::{SmolStr, ToSmolStr};
 use state::HttpState;
 use tokio::{net::TcpListener, time::error::Elapsed};
 use tracing::Instrument;
-pub use wasmtime_wasi_http::body::HyperOutgoingBody;
+pub use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 pub mod executor;
 pub mod state;
@@ -38,7 +40,6 @@ type OwnedFd = std::os::fd::OwnedFd;
 #[cfg(not(target_family = "unix"))]
 type OwnedFd = std::os::raw::c_int;
 
-#[cfg(feature = "metrics")]
 const HTTP_LABEL: &[&str; 1] = &["http"];
 
 const FASTEDGE_INTERNAL_ERROR: u16 = 530;
@@ -220,7 +221,7 @@ where
         // Allow re-importing of `wasi:clocks/wall-clock@0.2.0`
         wasmtime_wasi::p2::add_to_linker_async(linker)?;
         linker.allow_shadowing(true);
-        wasmtime_wasi_http::add_to_linker_async(linker)?;
+        wasmtime_wasi_http::p2::add_to_linker_async(linker)?;
         wasmtime_wasi_nn::wit::add_to_linker(linker, |data: &mut runtime::Data<_>| {
             WasiNnView::new(&mut data.table, &mut data.wasi_nn)
         })?;
@@ -260,24 +261,70 @@ where
     T::Executor: HttpExecutor + Send + Sync,
     S: StatsVisitor + Send + 'static,
 {
-    /// handle HTTP request.
+    /// handle HTTP request, emitting exactly one system request-log record for
+    /// every processing outcome (success, failure, or early rejection).
     async fn handle_request<B>(
         &self,
-        mut request: hyper::Request<B>,
+        request: hyper::Request<B>,
     ) -> Result<hyper::Response<HyperOutgoingBody>>
     where
         B: BodyExt + Send,
         <B as Body>::Data: Send,
     {
         let traceparent = remote_traceparent(&request);
+        let mut log = AccessLog::new(traceparent.to_string(), RequestKind::Http);
+        log.method = Some(request.method().as_str().to_string());
+        log.uri = Some(request.uri().to_string());
+
+        let result = self
+            .handle_request_inner(request, &traceparent, &mut log)
+            .await;
+
+        match &result {
+            Ok(response) => {
+                log.status_code = response.status().as_u16();
+                log.internal_status_code = response
+                    .headers()
+                    .get(X_CDN_INTERNAL_STATUS)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+            }
+            Err(_) => {
+                log.status_code = FASTEDGE_INTERNAL_ERROR;
+                log.internal_status_code = INTERNAL_STATUS_EXECUTE_ERROR;
+            }
+        }
+        self.context.access_log_sender().log(log);
+        result
+    }
+
+    async fn handle_request_inner<B>(
+        &self,
+        mut request: hyper::Request<B>,
+        traceparent: &SmolStr,
+        log: &mut AccessLog,
+    ) -> Result<hyper::Response<HyperOutgoingBody>>
+    where
+        B: BodyExt + Send,
+        <B as Body>::Data: Send,
+    {
         request
             .headers_mut()
             .extend(app_req_headers(self.context.append_headers()));
 
+        // Pin the resolved traceparent onto the request (it may have been
+        // generated when the client sent none) so the executor/backend logs
+        // outbound requests under the same id the access log uses.
+        if let Ok(value) = HeaderValue::from_str(traceparent) {
+            request
+                .headers_mut()
+                .insert(HeaderName::from_static(TRACEPARENT), value);
+        }
+
         // get application name from request URL
         let app_name = match app_name_from_request(&request) {
             Err(error) => {
-                #[cfg(feature = "metrics")]
                 metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                 tracing::info!(cause=?error, traceparent = %traceparent, "App name not provided");
                 return not_found();
@@ -307,7 +354,6 @@ where
 
             let (app_name, cfg) = match lookup {
                 None => {
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                     tracing::info!("Request for unknown application on URL: {}", request.uri());
                     return not_found();
@@ -315,6 +361,7 @@ where
                 Some((app_name, cfg))
                     if cfg.status == Status::Draft || cfg.status == Status::Disabled =>
                 {
+                    metrics::metrics(AppResult::DISABLED, HTTP_LABEL, None, None);
                     tracing::info!(
                         "Request for disabled application '{}' on URL: {}",
                         app_name,
@@ -323,6 +370,7 @@ where
                     return not_found();
                 }
                 Some((app_name, cfg)) if cfg.status == Status::RateLimited => {
+                    metrics::metrics(AppResult::RATE_LIMITED, HTTP_LABEL, None, None);
                     tracing::info!(
                         "Request for rate limited application '{}' on URL: {}",
                         app_name,
@@ -331,6 +379,7 @@ where
                     return too_many_requests();
                 }
                 Some((app_name, cfg)) if cfg.status == Status::Suspended => {
+                    metrics::metrics(AppResult::SUSPENDED, HTTP_LABEL, None, None);
                     tracing::info!(
                         "Request for suspended application '{}' on URL: {}",
                         app_name,
@@ -342,6 +391,10 @@ where
                 Some((app_name, cfg)) => (app_name, cfg),
             };
 
+            log.app_id = Some(cfg.app_id);
+            log.client_id = Some(cfg.client_id);
+            log.app_name = Some(app_name.to_string());
+
             // get cached execute context for this application
             let executor = match self
                 .context
@@ -350,7 +403,6 @@ where
             {
                 Ok(executor) => executor,
                 Err(error) => {
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(AppResult::UNKNOWN, HTTP_LABEL, None, None);
                     tracing::warn!(cause=?error, app=%app_name,
                         "failure on getting context"
@@ -361,17 +413,23 @@ where
 
             let caller_ip = request
                 .headers()
-                .get(crate::executor::X_REAL_IP)
+                .get(executor::X_REAL_IP)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<std::net::Ipv4Addr>().ok())
                 .unwrap_or(std::net::Ipv4Addr::UNSPECIFIED);
             let stats = self
                 .context
-                .new_stats_row(&traceparent, &app_name, caller_ip, &cfg);
+                .new_stats_row(traceparent, &app_name, caller_ip, &cfg);
+            if is_stats_excluded_user_agent(
+                self.context.stats_excluded_user_agent(),
+                request.headers(),
+            ) {
+                tracing::debug!("stats excluded by user agent");
+                stats.discard();
+            }
 
             let response = match executor.execute(request, stats.clone()).await {
                 Ok(mut response) => {
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(
                         AppResult::SUCCESS,
                         &["http"],
@@ -389,7 +447,6 @@ where
                     stats.fail_reason(fail_reason as i32);
                     tracing::debug!(?fail_reason, ?traceparent, "stats");
 
-                    #[cfg(feature = "metrics")]
                     metrics::metrics(
                         fail_reason,
                         HTTP_LABEL,
@@ -408,10 +465,22 @@ where
                     builder.body(msg)?
                 }
             };
+            log.duration = Some(Duration::from_micros(stats.get_time_elapsed()));
             Ok(response)
         }
         .instrument(span)
         .await
+    }
+}
+
+/// `true` when `excluded` is set and the request's first `User-Agent` header
+/// equals it byte for byte. Used to keep synthetic probes out of the stats store.
+fn is_stats_excluded_user_agent(excluded: Option<&str>, headers: &HeaderMap) -> bool {
+    match excluded {
+        Some(ua) => headers
+            .get(http::header::USER_AGENT)
+            .is_some_and(|v| v.as_bytes() == ua.as_bytes()),
+        None => false,
     }
 }
 
@@ -426,7 +495,7 @@ pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
     let root_cause = error.root_cause();
     if error.chain().any(|e| e.is::<runtime::store::OutOfMemory>()) {
         AppResult::OOM
-    } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+    } else if let Some(exit) = root_cause.downcast_ref::<wasmtime_wasi::I32Exit>() {
         if exit.0 == 0 {
             AppResult::SUCCESS
         } else {
@@ -438,9 +507,9 @@ pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
             wasmtime::Trap::UnreachableCodeReached => AppResult::OOM,
             _ => AppResult::OTHER,
         }
-    } else if root_cause.downcast_ref::<Elapsed>().is_some()
-        || root_cause.to_string().ends_with("deadline has elapsed")
-    {
+    } else if root_cause.downcast_ref::<Elapsed>().is_some() {
+        AppResult::TIMEOUT
+    } else if root_cause.to_string().ends_with("deadline has elapsed") {
         AppResult::TIMEOUT
     } else {
         AppResult::OTHER
@@ -458,15 +527,15 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::OOM,
             Full::new(Bytes::from("fastedge: Out of memory"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_OUT_OF_MEMORY,
         )
-    } else if let Some(exit) = root_cause.downcast_ref::<wasi_common::I32Exit>() {
+    } else if let Some(exit) = root_cause.downcast_ref::<wasmtime_wasi::I32Exit>() {
         if exit.0 == 0 {
             (
                 StatusCode::OK.as_u16(),
                 AppResult::SUCCESS,
-                Empty::new().map_err(|never| match never {}).boxed(),
+                Empty::new().map_err(|never| match never {}).boxed_unsync(),
                 0,
             )
         } else {
@@ -475,7 +544,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::OTHER,
                 Full::new(Bytes::from("fastedge: App failed"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_APP_EXIT_ERROR,
             )
         }
@@ -486,7 +555,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::TIMEOUT,
                 Full::new(Bytes::from("fastedge: Execution timeout"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_TIMEOUT_INTERRUPT,
             ),
             wasmtime::Trap::UnreachableCodeReached => (
@@ -494,7 +563,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::OOM,
                 Full::new(Bytes::from("fastedge: Out of memory"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_OUT_OF_MEMORY,
             ),
             _ => (
@@ -502,7 +571,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
                 AppResult::OTHER,
                 Full::new(Bytes::from("fastedge: App failed"))
                     .map_err(|never| match never {})
-                    .boxed(),
+                    .boxed_unsync(),
                 INTERNAL_STATUS_WASM_TRAP_OTHER,
             ),
         }
@@ -512,7 +581,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::TIMEOUT,
             Full::new(Bytes::from("fastedge: Execution timeout"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_TIMEOUT_ELAPSED,
         )
     } else if root_cause.to_string().ends_with("deadline has elapsed") {
@@ -521,7 +590,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::TIMEOUT,
             Full::new(Bytes::from("fastedge: Execution timeout"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_TIMEOUT_DEADLINE,
         )
     } else {
@@ -530,7 +599,7 @@ fn map_err(error: Error) -> (u16, AppResult, HyperOutgoingBody, u16) {
             AppResult::OTHER,
             Full::new(Bytes::from("fastedge: Execute error"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
             INTERNAL_STATUS_EXECUTE_ERROR,
         )
     };
@@ -541,8 +610,9 @@ fn remote_traceparent<B>(req: &hyper::Request<B>) -> SmolStr {
     req.headers()
         .get(TRACEPARENT)
         .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
         .map(|s| s.to_smolstr())
-        .unwrap_or(nanoid::nanoid!().to_smolstr())
+        .unwrap_or_else(runtime::new_traceparent)
 }
 
 /// Creates an HTTP 530 response with an `X-CDN-Internal-Status` header.
@@ -556,7 +626,7 @@ fn internal_fastedge_error(
         .body(
             Full::new(Bytes::from(format!("fastedge: {}", msg)))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
         )?)
 }
 
@@ -567,7 +637,7 @@ fn not_found() -> Result<hyper::Response<HyperOutgoingBody>> {
         .body(
             Full::new(Bytes::from("fastedge: Unknown app"))
                 .map_err(|never| match never {})
-                .boxed(),
+                .boxed_unsync(),
         )?)
 }
 
@@ -575,14 +645,14 @@ fn not_found() -> Result<hyper::Response<HyperOutgoingBody>> {
 fn too_many_requests() -> Result<hyper::Response<HyperOutgoingBody>> {
     Ok(hyper::Response::builder()
         .status(StatusCode::TOO_MANY_REQUESTS)
-        .body(Empty::new().map_err(|never| match never {}).boxed())?)
+        .body(Empty::new().map_err(|never| match never {}).boxed_unsync())?)
 }
 
 /// Creates an HTTP 406 response.
 fn not_acceptable() -> Result<hyper::Response<HyperOutgoingBody>> {
     Ok(hyper::Response::builder()
         .status(StatusCode::NOT_ACCEPTABLE)
-        .body(Empty::new().map_err(|never| match never {}).boxed())?)
+        .body(Empty::new().map_err(|never| match never {}).boxed_unsync())?)
 }
 
 #[derive(Debug, Clone)]
@@ -725,6 +795,25 @@ mod tests {
         http::Request::builder().method("GET")
     }
 
+    // ── Stats exclusion by User-Agent ─────────────────────────────────────
+
+    #[test_case(Some("scanner/1.0"), Some("scanner/1.0"), true;  "exact match is excluded")]
+    #[test_case(Some("scanner/1.0"), Some("Scanner/1.0"), false; "case differs: not excluded")]
+    #[test_case(Some("scanner/1.0"), Some("scanner/1.0 "), false; "trailing space: not excluded")]
+    #[test_case(Some("scanner/1.0"), Some("x scanner/1.0"), false; "substring: not excluded")]
+    #[test_case(Some("scanner/1.0"), None, false; "no user agent: not excluded")]
+    #[test_case(None, Some("scanner/1.0"), false; "filter disabled: not excluded")]
+    fn stats_excluded_user_agent(excluded: Option<&str>, ua: Option<&str>, expected: bool) {
+        let mut headers = http::HeaderMap::new();
+        if let Some(ua) = ua {
+            headers.insert(http::header::USER_AGENT, ua.parse().unwrap());
+        }
+        assert_eq!(
+            crate::is_stats_excluded_user_agent(excluded, &headers),
+            expected
+        );
+    }
+
     // ── Name variant: server_name header ──────────────────────────────────
 
     #[test_case("app.server.com",  "/",        "app";      "server_name: normal subdomain")]
@@ -737,7 +826,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -754,7 +843,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -771,7 +860,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -788,7 +877,7 @@ mod tests {
             empty_body_request().uri(uri).body(
                 Empty::<Bytes>::new()
                     .map_err(|never| match never {})
-                    .boxed()
+                    .boxed_unsync()
             )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -806,7 +895,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -824,7 +913,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         let app_name = assert_ok!(app_name_from_request(&req));
@@ -840,7 +929,7 @@ mod tests {
                 .body(
                     Empty::<Bytes>::new()
                         .map_err(|never| match never {})
-                        .boxed()
+                        .boxed_unsync()
                 )
         );
         assert_err!(app_name_from_request(&req));
@@ -854,7 +943,7 @@ mod tests {
             empty_body_request().uri("/").body(
                 Empty::<Bytes>::new()
                     .map_err(|never| match never {})
-                    .boxed()
+                    .boxed_unsync()
             )
         );
         assert_err!(app_name_from_request(&req));
@@ -872,5 +961,26 @@ mod tests {
     fn test_app_name_display_id() {
         let id = AppName::Id(1234);
         assert_eq!("1234", id.to_string());
+    }
+
+    // ── Error classification ─────────────────────────────────────────────
+
+    /// A timeout trap must stay classified as a timeout even when the
+    /// `wasi_http` executor wraps it with `guest never invoked
+    /// `response-outparam::set``. Formatting the cause into the message instead
+    /// of chaining it loses the `Trap` downcast and yields 530 instead of 532.
+    #[test]
+    fn test_map_err_keeps_timeout_through_context() {
+        use anyhow::Context;
+
+        let inner = anyhow::Error::from(wasmtime::Trap::Interrupt).context("error while executing");
+        let wrapped = Err::<(), _>(inner)
+            .context("guest never invoked `response-outparam::set` method")
+            .unwrap_err();
+
+        let (status_code, fail_reason, _msg, internal_code) = crate::map_err(wrapped);
+        assert_eq!(crate::FASTEDGE_EXECUTION_TIMEOUT, status_code);
+        assert_eq!(runtime::AppResult::TIMEOUT as i32, fail_reason as i32);
+        assert_eq!(crate::INTERNAL_STATUS_TIMEOUT_INTERRUPT, internal_code);
     }
 }

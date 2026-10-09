@@ -5,6 +5,7 @@ use reactor::gcore::fastedge::key_value;
 use slab::Slab;
 use smol_str::SmolStr;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tracing::instrument;
 use wasmtime::component::Resource;
 
@@ -57,6 +58,37 @@ pub trait StoreManager: Sync + Send {
         param: &str,
         metric: Arc<dyn ReadStats>,
     ) -> Result<Arc<dyn Store>, Error>;
+}
+
+/// Command label passed to a [`ReadRetryObserver`]: `get` / `get_tracked`.
+pub const CMD_GET: &str = "get";
+/// Command label passed to a [`ReadRetryObserver`]: `zrange_by_score`.
+pub const CMD_ZRANGE_BY_SCORE: &str = "zrange_by_score";
+/// Command label passed to a [`ReadRetryObserver`]: `scan`.
+pub const CMD_SCAN: &str = "scan";
+/// Command label passed to a [`ReadRetryObserver`]: `zscan`.
+pub const CMD_ZSCAN: &str = "zscan";
+/// Command label passed to a [`ReadRetryObserver`]: `bf_exists`.
+pub const CMD_BF_EXISTS: &str = "bf_exists";
+
+/// Called once per retried backing-store read attempt (the retry itself, not
+/// the first attempt), with the command label that was retried.
+pub type ReadRetryObserver = fn(command: &'static str);
+
+static READ_RETRY_OBSERVER: OnceLock<ReadRetryObserver> = OnceLock::new();
+
+/// Install the process-wide read-retry observer. Lets an embedder count retries
+/// (e.g. into a Prometheus counter) without this crate depending on a metrics
+/// backend. Returns `false` if an observer was already installed.
+pub fn set_read_retry_observer(observer: ReadRetryObserver) -> bool {
+    READ_RETRY_OBSERVER.set(observer).is_ok()
+}
+
+/// Report one retried read attempt to the installed observer, if any.
+pub fn note_read_retry(command: &'static str) {
+    if let Some(observer) = READ_RETRY_OBSERVER.get() {
+        observer(command);
+    }
 }
 
 /// Key-Value store read metrics
@@ -263,6 +295,27 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicI32;
+
+    static OBSERVED_RETRIES: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+
+    #[test]
+    fn read_retry_observer_receives_retries() {
+        fn observer(command: &'static str) {
+            assert_eq!(command, CMD_GET);
+            OBSERVED_RETRIES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        assert!(set_read_retry_observer(observer), "first install wins");
+        // A second install is rejected rather than silently swapping the hook.
+        assert!(!set_read_retry_observer(observer));
+
+        note_read_retry(CMD_GET);
+        note_read_retry(CMD_GET);
+        assert_eq!(
+            OBSERVED_RETRIES.load(std::sync::atomic::Ordering::SeqCst),
+            2
+        );
+    }
 
     // Mock implementation of Store
     struct MockStore {

@@ -6,7 +6,7 @@ use crate::executor;
 use crate::executor::{HttpExecutor, X_CDN_REAL_HOST};
 use crate::state::HttpState;
 use ::http::{HeaderMap, Request, Response, Uri, header};
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
 use http_backend::Backend;
 use http_body_util::{BodyExt, Full};
@@ -15,9 +15,10 @@ use runtime::util::stats::{StatsTimer, StatsVisitor};
 use runtime::{InstancePre, store::StoreBuilder};
 use smol_str::SmolStr;
 use tracing::Instrument;
-use wasmtime_wasi_http::bindings::ProxyPre;
-use wasmtime_wasi_http::bindings::http::types::Scheme;
-use wasmtime_wasi_http::{WasiHttpView, body::HyperOutgoingBody};
+use wasmtime_wasi_http::WasiHttpView;
+use wasmtime_wasi_http::p2::bindings::ProxyPre;
+use wasmtime_wasi_http::p2::bindings::http::types::Scheme;
+use wasmtime_wasi_http::p2::body::HyperOutgoingBody;
 
 /// Execute context used by ['HttpService']
 #[derive(Clone)]
@@ -77,7 +78,7 @@ where
             .map_err(|_| anyhow!("body read error"))?
             .to_bytes();
         let body = Full::new(body).map_err(|never| match never {});
-        let body = body.boxed();
+        let body: HyperOutgoingBody = body.boxed_unsync();
 
         let properties = executor::get_properties(&parts.headers);
         let mut store_builder = self
@@ -94,6 +95,13 @@ where
         }
         let mut http_backend = self.backend;
         http_backend.set_app_id(self.app_id);
+        if let Some(traceparent) = parts
+            .headers
+            .get(executor::TRACEPARENT)
+            .and_then(|v| v.to_str().ok())
+        {
+            http_backend.set_traceparent(traceparent.into());
+        }
         http_backend.epoch_exclude_http_wait(self.epoch_exclude_http_wait);
         if let Some(counter) = epoch_pause_ms {
             http_backend.set_epoch_pause_ms(counter);
@@ -140,11 +148,15 @@ where
         let request = Request::from_parts(parts, body);
         let req = store
             .data_mut()
+            .http()
             .new_incoming_request(Scheme::Http, request)
+            .map_err(anyhow::Error::from)
             .context("new incoming request")?;
         let out = store
             .data_mut()
+            .http()
             .new_response_outparam(sender)
+            .map_err(anyhow::Error::from)
             .context("new response outparam")?;
         let proxy_pre = ProxyPre::new(instance_pre)?;
 
@@ -155,9 +167,9 @@ where
                 // declared minimum memory exceeds `mem_limit`) is recorded by the
                 // limiter; classify it as out-of-memory instead of a generic error.
                 if store.is_oom() {
-                    return Err(runtime::store::OutOfMemory(error).into());
+                    return Err(runtime::store::OutOfMemory(error.into()).into());
                 }
-                return Err(error);
+                return Err(error.into());
             }
         };
 
@@ -173,12 +185,15 @@ where
                 )
                 .await
                 {
-                    Ok(inner) => inner,
+                    // Convert into `anyhow::Error` here so the task's error type
+                    // stays what `fail_reason_of`/`map_err` classify. The
+                    // conversion rebuilds the context chain, so `root_cause()`
+                    // still downcasts to `wasmtime::Trap`.
+                    Ok(inner) => inner.map_err(anyhow::Error::from),
                     // tokio timeout elapsed (outer deadline hit).
                     Err(elapsed) => Err(elapsed.into()),
                 };
                 if let Err(e) = exec_result {
-                    tracing::warn!(cause=?e, "incoming handler");
                     // Record the failure reason on the shared stats. The response
                     // headers may already have been flushed (the guest called
                     // `response-outparam::set` before trapping mid-body), in which
@@ -204,18 +219,49 @@ where
 
         match receiver.await {
             Ok(Ok(response)) => {
+                // The response headers are already on their way to the client, so a
+                // later failure of the task (e.g. an epoch interrupt while streaming
+                // the body) can no longer be propagated to the caller. This watcher
+                // is the only place it can be reported.
+                //
+                // It is spawned *only* on this path. On every other path the error
+                // still reaches the caller and is logged upstream, so watching here
+                // as well would log the same failure twice.
+                tokio::task::spawn(
+                    async move {
+                        match task.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(e)) => tracing::warn!(cause=?e, "incoming handler"),
+                            // Panic or cancellation. Nothing else observes the task
+                            // once headers are flushed, so report it here too.
+                            Err(e) => tracing::warn!(cause=?e, "incoming handler task"),
+                        }
+                    }
+                    .in_current_span(),
+                );
                 stats.status_code(response.status().as_u16());
                 Ok(response)
             }
+            // The guest set an error response, which is returned to the caller
+            // below - so the task must not log it as well. Dropping the handle only
+            // detaches the task: it still runs to completion and still records
+            // `fail_reason` on the shared stats.
             Ok(Err(error)) => Err(error.into()),
             Err(_) => {
                 let e = match task.await {
-                    Ok(r) => {
-                        r.expect_err("if the receiver has an error, the task must have failed")
-                    }
+                    // The guest returned without ever setting the outparam, so there
+                    // is no task error to attribute. Synthesise one rather than
+                    // asserting the task failed, which would panic on this path.
+                    Ok(Ok(())) => anyhow!("handler completed without setting a response"),
+                    Ok(Err(e)) => e,
                     Err(e) => e.into(),
                 };
-                bail!("guest never invoked `response-outparam::set` method: {e:?}")
+                // Attach context instead of formatting `e` into a new message so the
+                // source chain is preserved: `map_err`/`fail_reason_of` rely on
+                // `root_cause()` downcasting to `wasmtime::Trap` / `Elapsed` to
+                // classify timeouts. Flattening it into a string made every failure
+                // here look like a generic execute error (530 instead of 532).
+                Err(e).context("guest never invoked `response-outparam::set` method")
             }
         }
     }
