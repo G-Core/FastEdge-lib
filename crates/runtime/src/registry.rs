@@ -15,10 +15,13 @@
 //! The guest refers to the graph by that directory's last path component.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use moka::ops::compute::Op;
 use moka::sync::Cache;
 use wasmtime_wasi_nn::backend::candle::CandleBackend;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
@@ -64,6 +67,70 @@ impl GraphKey {
     }
 }
 
+/// Identity of a graph directory's *contents* at preload time: name, size and
+/// mtime of every regular file in it. A model replaced in place (rsync, cp)
+/// changes it, so the next executor build loads the new files instead of
+/// serving the cached graph until the process restarts. One `stat` per file;
+/// no hashing of multi-GiB weights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Revision(u64);
+
+/// What one scan of a graph directory tells: its [`Revision`] and the bytes
+/// on disk (for the load log; the resident size is larger, see `rss_bytes`).
+#[derive(Clone, Copy, Debug)]
+struct DirFiles {
+    revision: Revision,
+    bytes: u64,
+}
+
+impl DirFiles {
+    fn scan(dir: &Path) -> Result<Self> {
+        let mut entries = std::fs::read_dir(dir)
+            .and_then(|it| it.collect::<std::io::Result<Vec<_>>>())
+            .with_context(|| format!("read graph directory {}", dir.display()))?;
+        entries.sort_by_key(|e| e.file_name());
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut bytes = 0;
+        for entry in entries {
+            let meta = entry
+                .metadata()
+                .with_context(|| format!("stat {}", entry.path().display()))?;
+            if meta.is_file() {
+                entry.file_name().hash(&mut hasher);
+                meta.len().hash(&mut hasher);
+                meta.modified().ok().hash(&mut hasher);
+                bytes += meta.len();
+            }
+        }
+        Ok(Self {
+            revision: Revision(hasher.finish()),
+            bytes,
+        })
+    }
+}
+
+/// This process's resident set, for the before/after of a model load. Linux
+/// only (`/proc/self/statm`); `None` elsewhere or on any read error.
+fn rss_bytes() -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+        let resident_pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+        Some(resident_pages * 4096)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// A cache entry: the graph plus the revision of the files it was loaded from.
+#[derive(Clone)]
+struct CachedGraph {
+    revision: Revision,
+    graph: Graph,
+}
+
 /// One graph as resolved for a store builder: the shared cache entry it came
 /// from, the name the guest loads it by, and the handle.
 #[derive(Clone)]
@@ -87,7 +154,7 @@ pub struct LoadedGraph {
 /// load would expire on schedule and the next executor rebuild would load a
 /// second ~2.3 GiB copy next to the one live executors still hold.
 #[derive(Clone)]
-pub struct CachedGraphRegistry(Cache<GraphKey, Graph>);
+pub struct CachedGraphRegistry(Cache<GraphKey, CachedGraph>);
 
 impl Default for CachedGraphRegistry {
     fn default() -> Self {
@@ -179,7 +246,18 @@ impl CachedGraphRegistry {
         let builder = Cache::builder()
             // Max 100 entries
             .max_capacity(100)
-            .time_to_idle(time_to_idle);
+            .time_to_idle(time_to_idle)
+            // Models are few and each is gigabytes: say when one leaves the
+            // cache and why. Memory is only freed once executors built on it
+            // drop their handles.
+            .eviction_listener(|key: Arc<GraphKey>, _: CachedGraph, cause| {
+                tracing::info!(
+                    backend = %key.kind,
+                    path = %key.path.display(),
+                    ?cause,
+                    "wasi-nn graph dropped from the process cache"
+                );
+            });
 
         Self(builder.build())
     }
@@ -194,13 +272,16 @@ impl CachedGraphRegistry {
         }
     }
 
-    /// Resolves every graph in `spec`, loading the ones not cached yet.
+    /// Resolves every graph in `spec`, loading the ones not cached yet — or
+    /// cached from files that have since changed ([`Revision`]).
     ///
-    /// Concurrent requests for the same graph wait for a single load instead of
-    /// each running one (`try_get_with`): a cold graph used to be loaded once
-    /// per concurrent miss, each copy costing the full model footprint. The
-    /// handles returned keep the graph alive for the executor's lifetime; the
-    /// cache entry's own lifetime is a matter of traffic (see [`Self::mark_used`]).
+    /// The per-key compute is atomic: concurrent requests for the same graph
+    /// wait for a single load instead of each running one (a cold graph used
+    /// to be loaded once per concurrent miss, each copy costing the full model
+    /// footprint), and a stale entry is replaced in place, so the old graph is
+    /// freed as soon as the executors built on it are gone. The handles
+    /// returned keep a graph alive for the executor's lifetime; the cache
+    /// entry's own lifetime is a matter of traffic (see [`Self::mark_used`]).
     pub fn load_graphs(&self, spec: &[(String, String)]) -> Result<Vec<LoadedGraph>> {
         let mut graphs: Vec<LoadedGraph> = Vec::with_capacity(spec.len());
         for (kind, path) in spec {
@@ -216,10 +297,44 @@ impl CachedGraphRegistry {
                     path
                 );
             }
+            let files = DirFiles::scan(&key.path)?;
+            let revision = files.revision;
             let graph = self
                 .0
-                .try_get_with(key.clone(), || load_graph(kind, path))
-                .map_err(|error| anyhow!("wasi-nn backend load {}: {:#}", path, error))?;
+                .entry(key.clone())
+                .and_try_compute_with(|current| match current {
+                    Some(entry) if entry.value().revision == revision => {
+                        tracing::debug!(backend = %kind, path = %path, name = %name,
+                            "wasi-nn graph served from the process cache");
+                        Ok(Op::Nop)
+                    }
+                    current => {
+                        let replacing = current.is_some();
+                        let rss_before = rss_bytes();
+                        let started = Instant::now();
+                        let graph = load_graph(kind, path)?;
+                        tracing::info!(
+                            backend = %kind,
+                            path = %path,
+                            name = %name,
+                            file_bytes = files.bytes,
+                            rss_delta_bytes = rss_before
+                                .zip(rss_bytes())
+                                .map(|(before, after)| after.saturating_sub(before)),
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            replacing,
+                            "wasi-nn graph loaded into the process cache"
+                        );
+                        Ok(Op::Put(CachedGraph { revision, graph }))
+                    }
+                })
+                .map_err(|error: anyhow::Error| {
+                    anyhow!("wasi-nn backend load {}: {:#}", path, error)
+                })?
+                .into_entry()
+                .expect("Nop on a present entry or Put: the entry is there")
+                .into_value()
+                .graph;
             graphs.push(LoadedGraph { key, name, graph });
         }
         Ok(graphs)
@@ -335,6 +450,45 @@ mod tests {
         Graph::from(Box::new(StubGraph) as Box<dyn wasmtime_wasi_nn::backend::BackendGraph>)
     }
 
+    fn cached(graph: Graph) -> CachedGraph {
+        CachedGraph {
+            revision: Revision(0),
+            graph,
+        }
+    }
+
+    /// Replacing a model's files in place must be seen by the next executor
+    /// build; touching nothing must not (or every rebuild would reload).
+    #[test]
+    fn revision_follows_the_files_contents_not_the_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("model.bin");
+        std::fs::write(&bin, b"v1").unwrap();
+        std::fs::write(dir.path().join("model.xml"), b"<net/>").unwrap();
+        let first = DirFiles::scan(dir.path()).unwrap().revision;
+        assert_eq!(
+            first,
+            DirFiles::scan(dir.path()).unwrap().revision,
+            "stable when untouched"
+        );
+
+        std::fs::write(&bin, b"v2-longer").unwrap();
+        assert_ne!(
+            first,
+            DirFiles::scan(dir.path()).unwrap().revision,
+            "size change seen"
+        );
+
+        std::fs::write(dir.path().join("extra.bin"), b"x").unwrap();
+        let with_extra = DirFiles::scan(dir.path()).unwrap().revision;
+        std::fs::remove_file(dir.path().join("extra.bin")).unwrap();
+        assert_ne!(
+            with_extra,
+            DirFiles::scan(dir.path()).unwrap().revision,
+            "added/removed file seen"
+        );
+    }
+
     /// The idle clock must follow store creations, not preloads: a model that
     /// serves requests continuously stays cached past its idle timeout, and
     /// one that stops being used is dropped.
@@ -346,11 +500,11 @@ mod tests {
             kind: "stub".into(),
             path: "/models/m".into(),
         };
-        registry.0.insert(key.clone(), stub_graph());
+        registry.0.insert(key.clone(), cached(stub_graph()));
         let held = vec![LoadedGraph {
             key: key.clone(),
             name: "m".into(),
-            graph: registry.0.get(&key).unwrap(),
+            graph: registry.0.get(&key).unwrap().graph,
         }];
 
         // Busy for 3x the idle timeout, touched every third of it.
@@ -402,9 +556,14 @@ mod tests {
         std::fs::create_dir_all(&a).unwrap();
         std::fs::create_dir_all(&b).unwrap();
         let registry = CachedGraphRegistry::with_time_to_idle(Duration::from_secs(60));
+        // Cached at the directory's current revision, so `a` hits and the
+        // failure is the duplicate name, not a load.
         registry.0.insert(
             GraphKey::new("openvino", a.to_str().unwrap()).unwrap(),
-            stub_graph(),
+            CachedGraph {
+                revision: DirFiles::scan(&a).unwrap().revision,
+                graph: stub_graph(),
+            },
         );
         let error = registry
             .load_graphs(&[
