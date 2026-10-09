@@ -1,6 +1,6 @@
 use crate::limiter::ProxyLimiter;
 use crate::logger::Logger;
-use crate::registry::CachedGraphRegistry;
+use crate::registry::{CachedGraphRegistry, LoadedGraph};
 use crate::util::stats::StatsVisitor;
 use crate::{DEFAULT_EPOCH_TICK_INTERVAL, Data, HttpHooks, Wasi, WasiVersion};
 use anyhow::Result;
@@ -18,7 +18,6 @@ use wasmtime::UpdateDeadline;
 use wasmtime::component::ResourceTable;
 use wasmtime_wasi::WasiCtxBuilder;
 use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_wasi_nn::Graph;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 
 /// Default extra wall-clock budget (in ms) added to the tokio timeout that
@@ -130,9 +129,10 @@ pub struct StoreBuilder {
     /// Process-wide graph cache, shared with every other builder of the engine.
     registry: CachedGraphRegistry,
     /// The app's wasi-nn graphs, resolved once by [`Self::preload_wasi_nn`] so
-    /// building a `Store` only clones handles. `None` until preloaded; then
-    /// `build` falls back to loading on the spot.
-    nn_graphs: Option<Vec<(String, Graph)>>,
+    /// building a `Store` only clones handles. `None` until preloaded, and a
+    /// store built from a never-preloaded builder gets no wasi-nn context at
+    /// all: preloading is the opt-in (proxy-wasm does not link wasi-nn).
+    nn_graphs: Option<Vec<LoadedGraph>>,
     secret_store: SecretStore,
     key_value_store: key_value_store::Builder,
     dictionary: Dictionary,
@@ -297,19 +297,22 @@ impl StoreBuilder {
         })
     }
 
-    pub fn make_wasi_nn(&self) -> Result<WasiNnCtx> {
-        let registry = match &self.nn_graphs {
-            Some(graphs) => CachedGraphRegistry::registry_for(graphs),
-            // Builder not preloaded (the CLI, tests): resolve on the spot.
-            // Cached graphs are only cloned; a cold one is loaded right here,
-            // on whatever thread is building the store.
-            None => {
-                let spec = crate::registry::preload_spec(&self.env);
-                debug!("preload graphs (not preloaded by the executor): {:?}", spec);
-                CachedGraphRegistry::registry_for(&self.registry.load_graphs(&spec)?)
-            }
-        };
-        Ok(WasiNnCtx::new(crate::registry::backends(), registry))
+    /// Whether the app's env asks for wasi-nn graphs (`FASTEDGE_NN_*`).
+    /// Lets an executor factory whose engine lacks wasi-nn flag the misconfig
+    /// instead of silently ignoring it.
+    pub fn has_wasi_nn_env(&self) -> bool {
+        !crate::registry::preload_spec(&self.env).is_empty()
+    }
+
+    /// The store's wasi-nn context, or `None` for a builder that was never
+    /// [`Self::preload_wasi_nn`]ed — that is the opt-in, and a store without it
+    /// pays nothing here (no backends, no registry, no allocations).
+    pub fn make_wasi_nn(&self) -> Option<WasiNnCtx> {
+        let graphs = self.nn_graphs.as_ref()?;
+        // Keep the process-wide entries alive while this app has traffic;
+        // nothing else reads them between executor rebuilds.
+        self.registry.mark_used(graphs);
+        Some(CachedGraphRegistry::ctx_for(graphs))
     }
 
     /// Builds a [`Store`] from this builder with `Default` WasiCtxBuilder
@@ -334,7 +337,7 @@ impl StoreBuilder {
         let table = ResourceTable::new();
 
         wasi_ctx_builder.envs(&self.env);
-        let wasi_nn = self.make_wasi_nn()?;
+        let wasi_nn = self.make_wasi_nn();
 
         let logger = if let Some(mut logger) = self.logger {
             logger.extend(self.properties);
@@ -711,6 +714,23 @@ mod tests {
         builder
             .make_wasi_nn()
             .expect("wasi-nn ctx from preloaded graphs");
+    }
+
+    /// A builder that never preloaded (proxy-wasm) builds no wasi-nn context,
+    /// whatever the env says: the engine would not link it anyway.
+    #[test]
+    fn make_wasi_nn_is_none_without_preload() {
+        let builder = StoreBuilder::new(
+            make_engine(),
+            WasiVersion::Preview1,
+            CachedGraphRegistry::new(),
+        )
+        .set_env(&[
+            ("FASTEDGE_NN_BACKENDS", "openvino"),
+            ("FASTEDGE_NN_OPENVINO_MODEL", "/no/such/model-dir"),
+        ]);
+        assert!(builder.has_wasi_nn_env());
+        assert!(builder.make_wasi_nn().is_none());
     }
 
     /// A graph the executor cannot load fails executor creation — with the

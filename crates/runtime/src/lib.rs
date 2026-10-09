@@ -40,6 +40,7 @@ pub mod stub;
 pub mod trace;
 pub mod util;
 
+pub use registry::CachedGraphRegistry;
 pub use trace::new_traceparent;
 
 use crate::access_log::{AccessLogSender, NoopAccessLogSender};
@@ -147,7 +148,10 @@ impl<T> HttpHooks<T> {
 pub struct Data<T: 'static> {
     hooks: HttpHooks<T>,
     wasi: Wasi,
-    pub wasi_nn: WasiNnCtx,
+    /// `None` for a store whose builder was never `preload_wasi_nn`ed — the
+    /// proxy-wasm engine does not link wasi-nn, so its stores skip the context
+    /// (and its allocations) entirely.
+    pub wasi_nn: Option<WasiNnCtx>,
     // memory usage limiter
     store_limits: ProxyLimiter,
     pub timeout: u64,
@@ -610,6 +614,7 @@ pub struct WasmEngineBuilder<T: 'static> {
     engine: Engine,
     component_linker: ComponentLinker<T>,
     module_linker: ModuleLinker<T>,
+    graph_registry: crate::registry::CachedGraphRegistry,
 }
 
 impl<T: Send + Sync> WasmEngine<T> {
@@ -645,7 +650,16 @@ impl<T: Send + Sync> WasmEngineBuilder<T> {
             engine: Engine::clone(engine),
             component_linker,
             module_linker,
+            graph_registry: crate::registry::CachedGraphRegistry::new(),
         })
+    }
+
+    /// Shares `registry` with this engine instead of the private one it starts
+    /// with. Every engine of a process must get the same registry, or each one
+    /// loads its own copy of a model (see [`ContextT::graph_registry`]).
+    pub fn graph_registry(&mut self, registry: crate::registry::CachedGraphRegistry) -> &mut Self {
+        self.graph_registry = registry;
+        self
     }
 
     pub fn component_linker_ref(&mut self) -> &mut ComponentLinker<T> {
@@ -662,7 +676,7 @@ impl<T: Send + Sync> WasmEngineBuilder<T> {
             inner: self.engine,
             component_linker: self.component_linker,
             module_linker: self.module_linker,
-            graph_registry: crate::registry::CachedGraphRegistry::new(),
+            graph_registry: self.graph_registry,
         }
     }
 }
@@ -690,6 +704,12 @@ pub trait ContextT {
     fn loader(&self) -> &dyn PreCompiledLoader<u64>;
 
     fn engine_ref(&self) -> &Engine;
+
+    /// The process-wide wasi-nn graph cache. Every engine built from this
+    /// context (one per service) shares it, so a model is loaded once per
+    /// process rather than once per service. Return a clone of one long-lived
+    /// instance, never a fresh registry per call.
+    fn graph_registry(&self) -> crate::registry::CachedGraphRegistry;
 
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore>;
 

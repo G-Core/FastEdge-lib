@@ -351,6 +351,10 @@ mod tests {
             &self.engine
         }
 
+        fn graph_registry(&self) -> runtime::CachedGraphRegistry {
+            runtime::CachedGraphRegistry::new()
+        }
+
         fn make_secret_store(&self, _secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore> {
             todo!()
         }

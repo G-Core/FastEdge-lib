@@ -14,8 +14,8 @@ use runtime::app::{KvStoreOption, SecretOption};
 use runtime::logger::{Console, Logger};
 use runtime::util::stats::{CdnPhase, StatsVisitor};
 use runtime::{
-    App, ContextT, ExecutorCache, PreCompiledLoader, Router, WasiVersion, WasmEngine,
-    componentize_if_necessary,
+    App, CachedGraphRegistry, ContextT, ExecutorCache, PreCompiledLoader, Router, WasiVersion,
+    WasmEngine, componentize_if_necessary,
 };
 use secret::SecretStore;
 use smol_str::SmolStr;
@@ -34,9 +34,10 @@ pub struct Context {
     pub(crate) engine: Engine,
     pub(crate) app: Option<App>,
     pub(crate) backend: Backend<HttpsConnector<HttpConnector>>,
-    pub(crate) wasm_bytes: Vec<u8>,
+    pub(crate) wasm_bytes: Arc<[u8]>,
     pub(crate) wasi_http: bool,
     pub(crate) cache_backend: Arc<MemoryCacheBackend>,
+    pub(crate) graph_registry: CachedGraphRegistry,
 }
 
 impl PreCompiledLoader<u64> for Context {
@@ -67,6 +68,10 @@ impl ContextT for Context {
 
     fn engine_ref(&self) -> &Engine {
         &self.engine
+    }
+
+    fn graph_registry(&self) -> CachedGraphRegistry {
+        self.graph_registry.clone()
     }
 
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore> {
@@ -101,15 +106,15 @@ impl ContextT for Context {
     }
 }
 
-impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
-    type Executor = RunExecutor;
-
-    async fn get_executor(
+impl Context {
+    /// Builds an executor for `app`. Blocking and CPU-bound (component compilation,
+    /// wasi-nn graph preload), so it must run on the blocking pool.
+    fn make_executor(
         &self,
         name: SmolStr,
         app: &App,
         engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
-    ) -> anyhow::Result<Self::Executor> {
+    ) -> anyhow::Result<RunExecutor> {
         let mut dictionary = Dictionary::new();
         for (k, v) in app.env.iter() {
             dictionary.insert(k.to_string(), v.to_string());
@@ -153,6 +158,24 @@ impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
                 app.app_id,
             )))
         }
+    }
+}
+
+impl ExecutorFactory<HttpState<HttpsConnector<HttpConnector>>> for Context {
+    type Executor = RunExecutor;
+
+    async fn get_executor(
+        &self,
+        name: SmolStr,
+        app: &App,
+        engine: &WasmEngine<HttpState<HttpsConnector<HttpConnector>>>,
+    ) -> anyhow::Result<Self::Executor> {
+        // Building an executor compiles the component and may load a multi-GiB wasi-nn
+        // graph, so keep it off the async worker (as the server's `get_executor` does).
+        let this = self.clone();
+        let app = app.clone();
+        let engine = engine.clone();
+        tokio::task::spawn_blocking(move || this.make_executor(name, &app, &engine)).await?
     }
 }
 
