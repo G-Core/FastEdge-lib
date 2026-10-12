@@ -7,7 +7,6 @@ authors.workspace = true
 
 [features]
 default = []
-metrics = ["runtime/metrics"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -17,7 +16,6 @@ http = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-nn = { workspace = true }
-wasi-common = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 tracing = { workspace = true }
 smol_str = { workspace = true }
@@ -27,7 +25,6 @@ http-backend = { path = "../http-backend" }
 utils = { path = "../utils" }
 secret = { path = "../secret" }
 cache = { path = "../cache" }
-nanoid = "0.5"
 async-trait = "0.1"
 hyper-util = { version = "0.1", features = ["server", "server-graceful"] }
 http-body-util = "0.1"

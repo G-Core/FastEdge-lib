@@ -26,7 +26,7 @@ cargo run --bin fastedge-run -- http --port 8080 --wasm ./my_app.wasm
 ## Repository setup gotchas
 
 - **WIT is vendored via git subtree.** `crates/reactor/wit/` contains the `FastEdge-wit` sources directly, so no `git submodule update` step is required after clone or branch switches. To sync it with upstream, run `git subtree pull --prefix=crates/reactor/wit https://github.com/G-Core/FastEdge-wit.git main --squash`.
-- **Custom Wasmtime fork.** All `wasmtime-*` deps point at `github.com/G-Core/wasmtime.git#release-36.0.0`. `.cargo/config.toml` contains a commented-out `[patch]` block that redirects those to a local sibling `../wasmtime` checkout — uncomment when developing against a local Wasmtime tree.
+- **Custom Wasmtime fork.** All `wasmtime-*` deps point at `github.com/G-Core/wasmtime.git#release-48.0.0`. The repo-root `.cargo/config.toml` carries a `[patch]` block redirecting `wasmtime`, `wasmtime-wasi`, `wasmtime-wasi-nn` and `wasmtime-wasi-http` to a local sibling `../wasmtime` checkout; `wasmtime-wasi-io` and `wasmtime-environ` are not patched, so a local tree must stay in sync with the pushed branch.
 - **Wasm components vs core modules.** `componentize_if_necessary` (in `crates/runtime/src/lib.rs`) auto-wraps core modules using the bundled Preview1 adapter (`crates/runtime/src/adapters/wasi_snapshot_preview1.reactor.wasm`). Don't replace that adapter casually — it's pinned to the Wasmtime fork.
 
 ## Architecture
@@ -71,7 +71,7 @@ Every Wasmtime `Store` holds a `Data<T>` (in `crates/runtime/src/lib.rs`). It bu
 
 ## Crate features worth knowing
 
-- `runtime`: `metrics` opts into Prometheus + lazy_static and propagates through `http-service/metrics`.
+- `runtime`: no metrics backend is compiled in. App-call outcomes are reported through the `runtime::util::metrics` sink (`set_sink`), and live-instance counts through the plain atomics in `runtime::instances` (`live` / `flush_peak`); embedders (e.g. the FastEdge server) export them however they like. With no sink installed, reporting is a no-op.
 - `key-value-store`: `redis` enables the Redis-backed implementation. `runtime` already turns this on; if you depend on `key-value-store` from elsewhere, opt in explicitly.
 - `cache`: no features yet — backend choice is at runtime via the `Arc<dyn CacheBackend>` injected into `Data<T>`.
 
