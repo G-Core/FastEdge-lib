@@ -43,6 +43,7 @@ where
     pub fn build(self) -> anyhow::Result<S> {
         let engine = {
             let mut builder = WasmEngine::builder(self.context.engine_ref())?;
+            builder.graph_registry(self.context.graph_registry());
             S::configure_engine(&mut builder)?;
             builder.build()
         };

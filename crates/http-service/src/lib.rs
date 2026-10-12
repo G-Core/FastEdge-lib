@@ -223,7 +223,12 @@ where
         linker.allow_shadowing(true);
         wasmtime_wasi_http::p2::add_to_linker_async(linker)?;
         wasmtime_wasi_nn::wit::add_to_linker(linker, |data: &mut runtime::Data<_>| {
-            WasiNnView::new(&mut data.table, &mut data.wasi_nn)
+            // Executors preload (`StoreBuilder::preload_wasi_nn`), so this is set;
+            // a store built without it (tests) gets an empty context on first use.
+            let wasi_nn = data
+                .wasi_nn
+                .get_or_insert_with(|| runtime::CachedGraphRegistry::ctx_for(&[]));
+            WasiNnView::new(&mut data.table, wasi_nn)
         })?;
         Ok(())
     }
