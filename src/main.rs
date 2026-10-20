@@ -17,7 +17,7 @@ use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::{CacheMode, KvStoreOption, Status};
 use runtime::service::{Service, ServiceBuilder};
-use runtime::{App, SecretValue, WasmConfig};
+use runtime::{App, CachedGraphRegistry, SecretValue, WasmConfig};
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -192,9 +192,10 @@ async fn main() -> anyhow::Result<()> {
                 engine,
                 app: Some(cli_app),
                 backend,
-                wasm_bytes,
+                wasm_bytes: wasm_bytes.into(),
                 wasi_http: run.wasi_http.unwrap_or_default(),
                 cache_backend: Arc::new(MemoryCacheBackend::new()),
+                graph_registry: CachedGraphRegistry::new(),
             };
 
             let http: HttpService<Context, StatsStub> = ServiceBuilder::new(context).build()?;
