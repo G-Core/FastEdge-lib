@@ -265,7 +265,7 @@ checksum = "3d7c8918969267b2932ffd5655509bbbea0833823058c378876953217f5fc50e"
 
 [[package]]
 name = "cache"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "async-trait",
  "reactor",
@@ -962,7 +962,7 @@ dependencies = [
 
 [[package]]
 name = "fastedge-run"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1527,7 +1527,7 @@ dependencies = [
 
 [[package]]
 name = "http-backend"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "claims",
@@ -1570,7 +1570,7 @@ dependencies = [
 
 [[package]]
 name = "http-service"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1969,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "key-value-store"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "async-trait",
  "reactor",
@@ -2757,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "reactor"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "wasmtime",
 ]
@@ -2878,7 +2878,7 @@ dependencies = [
 
 [[package]]
 name = "runtime"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3038,7 +3038,7 @@ checksum = "0cd08a21f852bd2fe42e3b2a6c76a0db6a95a5b5bd29c0521dd0b30fa1712ec8"
 
 [[package]]
 name = "secret"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "reactor",
@@ -3770,7 +3770,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "utils"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "reactor",
 ]
@@ -3831,7 +3831,7 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasi-nn-candle"
-version = "0.21.0"
+version = "0.22.0"
 dependencies = [
  "candle-core",
  "candle-nn",

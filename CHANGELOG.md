@@ -1,3 +1,48 @@
+## [0.22.0] - 2026-10-21
+
+### 🚀 Features
+
+- *(stats)* Refactor stats handling to include caller IP and improve data structure
+- *(stats)* Revert app_name parameter to new_stats_row
+- *(stats)* Add cached read tracking to ReadStats and MeteredStore
+- *(metrics)* Consolidate app call metrics into unified `fastedge_calls_total`
+- *(proxywasm)* Add cache support with new host functions and cache backend integration
+- *(metrics)* Add value cache metrics and improve lifecycle management
+- *(kv-cache)* Enhance cache identity management with distinct store_id and metric_label
+- *(kv-store)* Improve error handling and retry logic for Redis operations
+- *(runtime)* Reduce default cache TTL to 60 seconds
+- *(runtime)* Introduce epoch grace mechanism for improved timeout handling
+- *(runtime)* Refine app-call error classification with init-phase support
+- *(runtime)* Add rebase mechanism for improved stall grace handling
+- *(access-log)* Per-request access log shipped via log sender
+- *(stats)* Add support for excluding requests from specific User-Agents in stats
+- *(runtime)* Upgrade Wasmtime to 48.0.0 and refactor HTTP hooks
+- *(runtime)* Add epoch refund for precise HTTP wait time accounting
+- *(wasi-nn)* Process-wide graph registry, single-flight loads, in-place model updates
+- *(wasi-nn)* Per-graph OpenVINO device properties from app env
+- *(wasi-nn-candle)* Implement Candle backend for LLaMA models
+
+### 🐛 Bug Fixes
+
+- *(http-service)* Preserve error chain so wasi-http timeouts return 532
+- *(wasi-http)* Improve error handling for response tasks and logging
+- *(runtime)* Consolidate timeout condition checks in error handling
+- *(http)* Execute HTTP apps on the dedicated wasm runtime
+- *(http)* Keep the consolidated timeout condition from fdae7ab
+- *(http-backend)* Refuse numeric IPv4 notations in is_public_host
+
+### 🚜 Refactor
+
+- *(metrics)* Extract Prometheus backend from fastedge-lib into server
+- *(metrics)* Improve error labeling logic and ensure peak >= live consistency in `runtime::instances`
+- *(runtime)* Remove `epoch_grace` module and associated metrics
+
+### ⚙️ Miscellaneous Tasks
+
+- Update Cargo.lock with dependency version bumps and new additions
+- *(runtime)* Upgrade Wasmtime to 48.0.2 and update dependency management
+- *(dependencies)* Update multiple crate versions in Cargo.lock
+- *(http-service)* Allow clippy::double_must_use on HttpExecutor
 ## [0.21.0] - 2026-09-01
 
 ### 🚀 Features
@@ -20,19 +65,20 @@
 - *(tracing)* Ensure proper span context during async request processing
 - Unify timeout handling for elapsed deadlines
 
-### 🚜 Refactor
-
-- *(tests)* Improve readability of assertions in test cases
-
 ### ⚡ Performance
 
 - Selective executor cache invalidation and non-blocking cold starts
+
+### 🚜 Refactor
+
+- *(tests)* Improve readability of assertions in test cases
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(dependencies)* Update various crate versions in Cargo.lock
 - *(metrics)* Remove redundant tokio metrics, add client/kind labels, fix docs
 - Remove FOSSA configuration file
+- Release
 ## [0.20.0] - 2026-07-13
 
 ### 🚀 Features
@@ -123,6 +169,10 @@
 - Release
 ## [0.16.5] - 2026-05-11
 
+### 🚜 Refactor
+
+- Remove default `ACCESS_CONTROL_ALLOW_ORIGIN` and `CACHE_CONTROL` headers for cleaner response handling
+
 ### ⚙️ Miscellaneous Tasks
 
 - Release
@@ -132,7 +182,6 @@
 
 - Remove unused request IDs and streamline request handling
 - Improve header handling and tracing consistency
-- Remove default `ACCESS_CONTROL_ALLOW_ORIGIN` and `CACHE_CONTROL` headers for cleaner response handling
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -298,13 +347,17 @@
 - Release
 ## [0.13.0] - 2025-10-09
 
-### 💼 Other
+### 🐛 Bug Fixes
 
-- Proxy-wasm dictionary interface and sdk v0.3.0
+- Use_tls for https scheme
 
 ### ⚙️ Miscellaneous Tasks
 
 - Release
+
+### 💼 Other
+
+- Proxy-wasm dictionary interface and sdk v0.3.0
 ## [0.12.1] - 2025-10-03
 
 ### 🐛 Bug Fixes
@@ -319,7 +372,6 @@
 ### 🐛 Bug Fixes
 
 - Added fossa CI workflow
-- Use_tls for https scheme
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -436,10 +488,15 @@
 
 ### 🐛 Bug Fixes
 
+- Log backend send error and fixing unit tests
 - Fastedge-run handler for terminate signal
 - Updated audit-check version
 - Disabling cargo audit
 - Setting use_tls to false in OutgoingRequestConfig
+
+### 🚜 Refactor
+
+- StatRow structure
 
 ### ⚙️ Miscellaneous Tasks
 
@@ -457,12 +514,7 @@
 
 ### 🐛 Bug Fixes
 
-- Log backend send error and fixing unit tests
 - Mixing of http scheme and cloning of InstancePre obj
-
-### 🚜 Refactor
-
-- StatRow structure
 
 ### ⚙️ Miscellaneous Tasks
 
