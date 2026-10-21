@@ -65,6 +65,21 @@ pub struct HttpConfig {
     pub cancel: std::sync::Weak<shellflip::ShutdownHandle>,
     pub listen_fd: Option<OwnedFd>,
     pub backoff: u64,
+    /// Runtime to execute requests (app lookup and guest execution) on. The
+    /// connection itself (accept, hyper parsing, socket I/O) stays on the
+    /// runtime `run` is polled on. `None` executes requests in place.
+    pub cpu_handle: Option<tokio::runtime::Handle>,
+}
+
+/// Aborts the spawned request task when the hyper service future is dropped
+/// (client disconnect, shutdown), so moving execution to `cpu_handle` keeps the
+/// in-place behaviour of cancelling the request with its connection.
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 pub struct HttpService<T: ContextT, S: StatsVisitor> {
@@ -130,6 +145,7 @@ where
         tracing::info!("Listening on http://{}", listen_addr);
         let mut backoff = 1;
         let self_ = Arc::new(self);
+        let cpu_handle = config.cpu_handle;
         let graceful = hyper_util::server::graceful::GracefulShutdown::new();
         #[cfg(target_family = "unix")]
         let mut signal = config
@@ -148,14 +164,26 @@ where
                         Ok((stream, _)) => {
                             tracing::debug!(remote=?stream.peer_addr(), "new http connection");
                             let connection = self_.clone();
+                            let cpu_handle = cpu_handle.clone();
                             let io = TokioIo::new(stream);
 
                             let service = service_fn(move |req| {
                                 let self_ = connection.clone();
+                                let cpu_handle = cpu_handle.clone();
                                 async move {
-                                    self_
-                                        .handle_request(req)
-                                        .await
+                                    let Some(cpu_handle) = cpu_handle else {
+                                        return self_.handle_request(req).await;
+                                    };
+                                    let mut task = AbortOnDrop(cpu_handle.spawn(async move {
+                                        self_.handle_request(req).await
+                                    }));
+                                    match (&mut task.0).await {
+                                        Ok(result) => result,
+                                        Err(error) if error.is_panic() => {
+                                            std::panic::resume_unwind(error.into_panic())
+                                        }
+                                        Err(error) => Err(Error::new(error).context("request task")),
+                                    }
                                 }
                             });
 
@@ -512,9 +540,9 @@ pub(crate) fn fail_reason_of(error: &Error) -> AppResult {
             wasmtime::Trap::UnreachableCodeReached => AppResult::OOM,
             _ => AppResult::OTHER,
         }
-    } else if root_cause.downcast_ref::<Elapsed>().is_some()
-        || root_cause.to_string().ends_with("deadline has elapsed")
-    {
+    } else if root_cause.downcast_ref::<Elapsed>().is_some() {
+        AppResult::TIMEOUT
+    } else if root_cause.to_string().ends_with("deadline has elapsed") {
         AppResult::TIMEOUT
     } else {
         AppResult::OTHER
