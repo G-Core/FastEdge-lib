@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use moka::ops::compute::Op;
 use moka::sync::Cache;
-use wasmtime_wasi_nn::backend::candle::CandleBackend;
+use wasi_nn_candle::CandleBackend;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 use wasmtime_wasi_nn::wit::types::GraphEncoding;
 use wasmtime_wasi_nn::{

@@ -1,0 +1,17 @@
+[package]
+name = "wasi-nn-candle"
+description = "wasi-nn backend running LLaMA-family models with Candle"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+authors.workspace = true
+
+[dependencies]
+wasmtime-wasi-nn = { workspace = true }
+candle-core = "0.8.4"
+candle-nn = "0.8.4"
+candle-transformers = "0.8.4"
+tracing = { workspace = true }
+
+[lints]
+workspace = true
