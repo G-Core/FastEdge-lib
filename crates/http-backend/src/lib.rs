@@ -733,16 +733,36 @@ fn extract_host(addr: &str) -> &str {
 }
 
 pub fn is_public_host(host: &str) -> bool {
-    let host = extract_host(host);
+    // A bare IPv6 literal (`::1`) has no brackets for `extract_host` to strip,
+    // and its last segment would otherwise be taken for a port.
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return !is_private_ip(&ip);
+    }
+    // Resolvers ignore trailing root-label dots: `169.254.169.254.` is that IP.
+    let host = extract_host(host).trim_end_matches('.');
     // Try to parse as IP address
     match host.parse::<IpAddr>() {
         Ok(ip) => !is_private_ip(&ip),
+        // Numeric IPv4 spellings `IpAddr` rejects but `inet_aton` accepts
+        // (`2852039166`, `0x7f000001`, `017700000001`, `127.1`) are refused
+        // outright rather than decoded: no real hostname ends in a numeric label.
+        Err(_) if ends_in_number(host) => false,
         // Not an IP literal: reject hostnames that are guaranteed to resolve to
         // a loopback/internal address. Arbitrary hostnames still need to be
         // re-validated against their resolved IP at connection time (see
         // `is_private_ip`) to fully close the SSRF vector (CWE-918).
         Err(_) => !is_private_hostname(host),
     }
+}
+
+/// WHATWG URL "ends in a number": the last label is decimal digits or a
+/// `0x`-prefixed hex number, so the host is an IPv4 address in some notation.
+fn ends_in_number(host: &str) -> bool {
+    let last = host.rsplit('.').next().unwrap_or(host);
+    if let Some(hex) = last.strip_prefix("0x").or_else(|| last.strip_prefix("0X")) {
+        return hex.bytes().all(|b| b.is_ascii_hexdigit());
+    }
+    !last.is_empty() && last.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Returns `true` for hostnames that must never be treated as public because
@@ -1475,6 +1495,40 @@ mod tests {
         assert!(!is_public_host("Metadata.Google.Internal"));
         assert!(!is_public_host("metadata.google.internal."));
         assert!(!is_public_host("metadata"));
+    }
+
+    #[test]
+    fn test_is_public_host_numeric_ipv4_notations() {
+        // inet_aton spellings of private addresses (CWE-918 bypass).
+        assert!(!is_public_host("2852039166")); // 169.254.169.254
+        assert!(!is_public_host("2852039166:80"));
+        assert!(!is_public_host("2130706433")); // 127.0.0.1
+        assert!(!is_public_host("0x7f000001"));
+        assert!(!is_public_host("0X7F000001:8080"));
+        assert!(!is_public_host("017700000001"));
+        assert!(!is_public_host("127.1"));
+        assert!(!is_public_host("127.0.1"));
+        assert!(!is_public_host("127.000.000.001"));
+        assert!(!is_public_host("0177.0.0.1"));
+        assert!(!is_public_host("0xa9.0xfe.0xa9.0xfe"));
+        assert!(!is_public_host("example.0x7f"));
+        // Non-canonical spellings of public addresses are refused too.
+        assert!(!is_public_host("134744072")); // 8.8.8.8
+        assert!(!is_public_host("0x"));
+        // Trailing root-label dots.
+        assert!(!is_public_host("169.254.169.254."));
+        assert!(!is_public_host("127.0.0.1..:80"));
+        assert!(is_public_host("8.8.8.8."));
+        // Bare (unbracketed) IPv6 literals.
+        assert!(!is_public_host("::1"));
+        assert!(!is_public_host("::ffff:169.254.169.254"));
+        assert!(!is_public_host("fe80::1"));
+        assert!(is_public_host("2001:4860:4860::8888"));
+        // Hostnames with numeric non-final labels stay public.
+        assert!(is_public_host("123.example.com"));
+        assert!(is_public_host("0x7f.example.com"));
+        assert!(is_public_host("1e100.net"));
+        assert!(is_public_host("example.com."));
     }
 
     #[test]
