@@ -22,6 +22,8 @@ pub(crate) static TRACEPARENT: &str = "traceparent";
 pub(crate) static X_CDN_REQUESTOR: &str = "x-cdn-requestor";
 pub(crate) static X_CDN_REAL_HOST: &str = "x-cdn-real-host";
 
+// async_trait puts a bare `#[must_use]` on the boxed future it returns.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait HttpExecutor {
     async fn execute<B>(

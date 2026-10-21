@@ -288,7 +288,7 @@ impl StoreBuilder {
     /// pool, not on the request path. Loads are coalesced process-wide, so
     /// concurrent executor creations for the same app share one load.
     pub fn preload_wasi_nn(self) -> Result<Self> {
-        let spec = crate::registry::preload_spec(&self.env);
+        let spec = crate::registry::preload_spec(&self.env)?;
         debug!("preload graphs: {:?}", spec);
         let nn_graphs = self.registry.load_graphs(&spec)?;
         Ok(Self {
@@ -301,7 +301,8 @@ impl StoreBuilder {
     /// Lets an executor factory whose engine lacks wasi-nn flag the misconfig
     /// instead of silently ignoring it.
     pub fn has_wasi_nn_env(&self) -> bool {
-        !crate::registry::preload_spec(&self.env).is_empty()
+        // A malformed spec still asks for wasi-nn; the error surfaces at preload.
+        crate::registry::preload_spec(&self.env).map_or(true, |spec| !spec.is_empty())
     }
 
     /// The store's wasi-nn context, or `None` for a builder that was never

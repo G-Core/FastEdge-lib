@@ -18,7 +18,8 @@ async-trait = "0.1"
 wasmtime = { git = "https://github.com/G-Core/wasmtime.git", features = ["component-model"], branch = "release-48.0.0" }
 wasmtime-wasi = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
 wasmtime-wasi-io = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
-wasmtime-wasi-nn = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0", features = ["openvino", "candle"] }
+# The Candle backend lives in crates/wasi-nn-candle; only OpenVINO is still compiled into the fork.
+wasmtime-wasi-nn = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0", features = ["openvino"] }
 wasmtime-wasi-http = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
 wasmtime-environ = { git = "https://github.com/G-Core/wasmtime.git", branch = "release-48.0.0" }
 bytesize = "2.3.1"

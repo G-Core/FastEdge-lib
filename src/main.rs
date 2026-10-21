@@ -206,6 +206,7 @@ async fn main() -> anyhow::Result<()> {
                 cancel: shutdown_coordinator.handle_weak(),
                 listen_fd: None,
                 backoff: 64,
+                cpu_handle: None,
             });
             #[cfg(target_family = "unix")]
             let mut terminate =

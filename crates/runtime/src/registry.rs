@@ -13,6 +13,9 @@
 //! the backends (`openvino`, `candle`), and every key starting with
 //! `FASTEDGE_NN_<BACKEND>` names a directory the backend can load a graph from.
 //! The guest refers to the graph by that directory's last path component.
+//! `FASTEDGE_NN_<BACKEND>_PROPERTIES` is the exception: `KEY=VALUE,...` device
+//! properties the backend sets before compiling that app's graphs (OpenVINO
+//! `NUM_STREAMS`, `INFERENCE_NUM_THREADS`, `ENABLE_CPU_PINNING`, ...).
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -23,7 +26,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use moka::ops::compute::Op;
 use moka::sync::Cache;
-use wasmtime_wasi_nn::backend::candle::CandleBackend;
+use wasi_nn_candle::CandleBackend;
 use wasmtime_wasi_nn::wit::WasiNnCtx;
 use wasmtime_wasi_nn::wit::types::GraphEncoding;
 use wasmtime_wasi_nn::{
@@ -41,8 +44,18 @@ use wasmtime_wasi_nn::{
 /// idle executors still hold. Hours, not minutes.
 pub const GRAPH_TIME_TO_IDLE: Duration = Duration::from_secs(4 * 60 * 60);
 
-/// `(backend kind, graph directory)` pairs an app asks to have loaded.
-pub type PreloadSpec = Vec<(String, String)>;
+/// One graph an app asks to have loaded: the backend kind, the directory, and
+/// the device properties the backend sets before compiling it (from
+/// `FASTEDGE_NN_<BACKEND>_PROPERTIES`; only OpenVINO honours them).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphSpec {
+    pub kind: String,
+    pub path: String,
+    pub properties: Vec<(String, String)>,
+}
+
+/// The graphs an app asks to have loaded.
+pub type PreloadSpec = Vec<GraphSpec>;
 
 /// What the process-wide cache is keyed by: the backend and the graph's
 /// canonical directory. Two apps pointing at `/tenant-a/model` and
@@ -68,10 +81,12 @@ impl GraphKey {
 }
 
 /// Identity of a graph directory's *contents* at preload time: name, size and
-/// mtime of every regular file in it. A model replaced in place (rsync, cp)
-/// changes it, so the next executor build loads the new files instead of
-/// serving the cached graph until the process restarts. One `stat` per file;
-/// no hashing of multi-GiB weights.
+/// mtime of every regular file in it, plus the device properties the graph is
+/// compiled with. A model replaced in place (rsync, cp) changes it, so the next
+/// executor build loads the new files instead of serving the cached graph
+/// until the process restarts; so does a changed `NUM_STREAMS`, which shapes
+/// the compiled graph as much as the files do. One `stat` per file; no hashing
+/// of multi-GiB weights.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Revision(u64);
 
@@ -84,7 +99,7 @@ struct DirFiles {
 }
 
 impl DirFiles {
-    fn scan(dir: &Path) -> Result<Self> {
+    fn scan(dir: &Path, properties: &[(String, String)]) -> Result<Self> {
         let mut entries = std::fs::read_dir(dir)
             .and_then(|it| it.collect::<std::io::Result<Vec<_>>>())
             .with_context(|| format!("read graph directory {}", dir.display()))?;
@@ -101,6 +116,10 @@ impl DirFiles {
                 meta.modified().ok().hash(&mut hasher);
                 bytes += meta.len();
             }
+        }
+        for (key, value) in properties {
+            key.hash(&mut hasher);
+            value.hash(&mut hasher);
         }
         Ok(Self {
             revision: Revision(hasher.finish()),
@@ -186,27 +205,61 @@ impl GraphRegistry for StoreRegistry {
 ///
 /// `FASTEDGE_NN_BACKENDS=openvino,candle` selects the backends; for each, every
 /// env key starting with `FASTEDGE_NN_<BACKEND>` (backend upper-cased) holds a
-/// graph directory. Order follows the backend list, then the env order.
-pub fn preload_spec<K: AsRef<str>, V: AsRef<str>>(env: &[(K, V)]) -> PreloadSpec {
+/// graph directory — except `FASTEDGE_NN_<BACKEND>_PROPERTIES`, which holds
+/// comma-separated `KEY=VALUE` device properties applied to each of that
+/// backend's graphs before compiling. Order follows the backend list, then the
+/// env order. A malformed property entry is an error naming the key.
+pub fn preload_spec<K: AsRef<str>, V: AsRef<str>>(env: &[(K, V)]) -> Result<PreloadSpec> {
     let Some((_, backends)) = env
         .iter()
         .find(|(k, _)| k.as_ref() == "FASTEDGE_NN_BACKENDS")
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
-    backends
+    let mut spec = Vec::new();
+    for backend in backends
         .as_ref()
         .split(',')
         .map(str::trim)
         .filter(|b| !b.is_empty())
-        .flat_map(|backend| {
-            let prefix = format!("FASTEDGE_NN_{}", backend.to_ascii_uppercase());
-            env.iter().filter_map(move |(k, v)| {
-                k.as_ref()
-                    .starts_with(&prefix)
-                    .then(|| (backend.to_string(), v.as_ref().to_string()))
-            })
+    {
+        let prefix = format!("FASTEDGE_NN_{}", backend.to_ascii_uppercase());
+        let properties_key = format!("{prefix}_PROPERTIES");
+        let properties = match env.iter().find(|(k, _)| k.as_ref() == properties_key) {
+            Some((_, v)) => parse_properties(&properties_key, v.as_ref())?,
+            None => Vec::new(),
+        };
+        for (k, v) in env {
+            let k = k.as_ref();
+            if k.starts_with(&prefix) && k != properties_key {
+                spec.push(GraphSpec {
+                    kind: backend.to_string(),
+                    path: v.as_ref().to_string(),
+                    properties: properties.clone(),
+                });
+            }
+        }
+    }
+    Ok(spec)
+}
+
+/// `KEY=VALUE,KEY=VALUE` → pairs. Blanks around entries, keys and values are
+/// trimmed; empty entries (trailing commas) are skipped.
+fn parse_properties(key: &str, value: &str) -> Result<Vec<(String, String)>> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| {
+            let (k, v) = entry
+                .split_once('=')
+                .ok_or_else(|| anyhow!("{key}: expected KEY=VALUE, got {entry:?}"))?;
+            let (k, v) = (k.trim(), v.trim());
+            if k.is_empty() {
+                bail!("{key}: empty property name in {entry:?}");
+            }
+            Ok((k.to_string(), v.to_string()))
         })
         .collect()
 }
@@ -219,21 +272,35 @@ fn graph_name(path: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("no file name in graph path: {}", path))
 }
 
-/// Loads one graph from `path` with the backend `kind`. Slow and memory-hungry;
-/// only ever called through the cache.
-fn load_graph(kind: &str, path: &str) -> Result<Graph> {
-    let dir = Path::new(path);
+/// Loads one graph from `spec.path` with the backend `spec.kind`. Slow and
+/// memory-hungry; only ever called through the cache.
+fn load_graph(spec: &GraphSpec) -> Result<Graph> {
+    let dir = Path::new(&spec.path);
     if !dir.is_dir() {
-        bail!("preload directory is not a valid directory: {}", path);
+        bail!("preload directory is not a valid directory: {}", spec.path);
     }
-    let encoding = kind.parse().unwrap_or(GraphEncoding::Autodetect);
-    let mut backends = backends();
-    let backend = backends
-        .iter_mut()
-        .find(|b| b.encoding() == encoding)
-        .ok_or_else(|| anyhow!("unsupported backend: {}", kind))?
+    let encoding = spec.kind.parse().unwrap_or(GraphEncoding::Autodetect);
+    // A fresh backend per load: the properties live on its `openvino::Core`,
+    // so each graph is compiled with its own, not with whatever a previous
+    // load set.
+    let mut backend = match encoding {
+        GraphEncoding::Openvino => Backend::from(OpenvinoBackend::with_properties(
+            spec.properties.iter().cloned(),
+        )),
+        _ => {
+            if !spec.properties.is_empty() {
+                tracing::warn!(backend = %spec.kind, path = %spec.path,
+                    "wasi-nn device properties are only honoured by the openvino backend; ignored");
+            }
+            backends()
+                .into_iter()
+                .find(|b| b.encoding() == encoding)
+                .ok_or_else(|| anyhow!("unsupported backend: {}", spec.kind))?
+        }
+    };
+    let backend = backend
         .as_dir_loadable()
-        .ok_or_else(|| anyhow!("{} does not support directory loading", kind))?;
+        .ok_or_else(|| anyhow!("{} does not support directory loading", spec.kind))?;
     Ok(backend.load_from_dir(dir, ExecutionTarget::Cpu)?)
 }
 
@@ -282,9 +349,10 @@ impl CachedGraphRegistry {
     /// freed as soon as the executors built on it are gone. The handles
     /// returned keep a graph alive for the executor's lifetime; the cache
     /// entry's own lifetime is a matter of traffic (see [`Self::mark_used`]).
-    pub fn load_graphs(&self, spec: &[(String, String)]) -> Result<Vec<LoadedGraph>> {
+    pub fn load_graphs(&self, spec: &[GraphSpec]) -> Result<Vec<LoadedGraph>> {
         let mut graphs: Vec<LoadedGraph> = Vec::with_capacity(spec.len());
-        for (kind, path) in spec {
+        for graph_spec in spec {
+            let (kind, path) = (&graph_spec.kind, &graph_spec.path);
             let key = GraphKey::new(kind, path)?;
             let name = graph_name(path)?;
             // The guest addresses graphs by name, so within one app two
@@ -297,7 +365,7 @@ impl CachedGraphRegistry {
                     path
                 );
             }
-            let files = DirFiles::scan(&key.path)?;
+            let files = DirFiles::scan(&key.path, &graph_spec.properties)?;
             let revision = files.revision;
             let graph = self
                 .0
@@ -312,7 +380,10 @@ impl CachedGraphRegistry {
                         let replacing = current.is_some();
                         let rss_before = rss_bytes();
                         let started = Instant::now();
-                        let graph = load_graph(kind, path)?;
+                        tracing::info!(backend = %kind, path = %path, name = %name,
+                            file_bytes = files.bytes, replacing,
+                            properties = ?graph_spec.properties, "loading wasi-nn graph");
+                        let graph = load_graph(graph_spec)?;
                         tracing::info!(
                             backend = %kind,
                             path = %path,
@@ -329,6 +400,8 @@ impl CachedGraphRegistry {
                     }
                 })
                 .map_err(|error: anyhow::Error| {
+                    tracing::error!(backend = %kind, path = %path, name = %name,
+                        error = %format!("{error:#}"), "wasi-nn graph load failed");
                     anyhow!("wasi-nn backend load {}: {:#}", path, error)
                 })?
                 .into_entry()
@@ -368,10 +441,18 @@ mod tests {
             .collect()
     }
 
+    fn spec(kind: &str, path: &str) -> GraphSpec {
+        GraphSpec {
+            kind: kind.to_string(),
+            path: path.to_string(),
+            properties: Vec::new(),
+        }
+    }
+
     #[test]
     fn preload_spec_is_empty_without_backends() {
         let e = env(&[("FASTEDGE_NN_OPENVINO_MODEL", "/models/a"), ("X", "y")]);
-        assert!(preload_spec(&e).is_empty());
+        assert!(preload_spec(&e).unwrap().is_empty());
     }
 
     #[test]
@@ -384,11 +465,11 @@ mod tests {
             ("UNRELATED", "/models/z"),
         ]);
         assert_eq!(
-            preload_spec(&e),
+            preload_spec(&e).unwrap(),
             vec![
-                ("openvino".to_string(), "/models/b".to_string()),
-                ("openvino".to_string(), "/models/a".to_string()),
-                ("candle".to_string(), "/models/c".to_string()),
+                spec("openvino", "/models/b"),
+                spec("openvino", "/models/a"),
+                spec("candle", "/models/c"),
             ]
         );
     }
@@ -400,15 +481,56 @@ mod tests {
             ("FASTEDGE_NN_OPENVINO", "/models/a"),
         ]);
         assert_eq!(
-            preload_spec(&e),
-            vec![("OpenVINO".to_string(), "/models/a".to_string())]
+            preload_spec(&e).unwrap(),
+            vec![spec("OpenVINO", "/models/a")]
         );
+    }
+
+    /// The properties key shares the directory prefix, so it must be carved
+    /// out of the directory scan and land on every graph of its backend only.
+    #[test]
+    fn preload_spec_attaches_properties_per_backend_and_not_as_a_dir() {
+        let e = env(&[
+            ("FASTEDGE_NN_BACKENDS", "openvino,candle"),
+            ("FASTEDGE_NN_OPENVINO_MODEL", "/models/a"),
+            (
+                "FASTEDGE_NN_OPENVINO_PROPERTIES",
+                " NUM_STREAMS = 24, ENABLE_CPU_PINNING=NO ,",
+            ),
+            ("FASTEDGE_NN_CANDLE_MODEL", "/models/c"),
+        ]);
+        let props = vec![
+            ("NUM_STREAMS".to_string(), "24".to_string()),
+            ("ENABLE_CPU_PINNING".to_string(), "NO".to_string()),
+        ];
+        assert_eq!(
+            preload_spec(&e).unwrap(),
+            vec![
+                GraphSpec {
+                    properties: props,
+                    ..spec("openvino", "/models/a")
+                },
+                spec("candle", "/models/c"),
+            ]
+        );
+    }
+
+    #[test]
+    fn preload_spec_rejects_a_malformed_property_naming_the_key() {
+        let e = env(&[
+            ("FASTEDGE_NN_BACKENDS", "openvino"),
+            ("FASTEDGE_NN_OPENVINO_MODEL", "/models/a"),
+            ("FASTEDGE_NN_OPENVINO_PROPERTIES", "NUM_STREAMS=24,PINNING"),
+        ]);
+        let error = preload_spec(&e).err().expect("must fail").to_string();
+        assert!(error.contains("FASTEDGE_NN_OPENVINO_PROPERTIES"), "{error}");
+        assert!(error.contains("PINNING"), "{error}");
     }
 
     #[test]
     fn load_graphs_rejects_a_missing_directory_naming_it() {
         let registry = CachedGraphRegistry::new();
-        let spec = vec![("openvino".to_string(), "/definitely/not/here".to_string())];
+        let spec = vec![spec("openvino", "/definitely/not/here")];
         let error = registry
             .load_graphs(&spec)
             .err()
@@ -423,7 +545,7 @@ mod tests {
         // falls back to `Autodetect`, which a backend does accept.)
         let dir = std::env::temp_dir();
         let registry = CachedGraphRegistry::new();
-        let spec = vec![("onnx".to_string(), dir.to_string_lossy().into_owned())];
+        let spec = vec![spec("onnx", &dir.to_string_lossy())];
         let error = registry
             .load_graphs(&spec)
             .err()
@@ -465,27 +587,50 @@ mod tests {
         let bin = dir.path().join("model.bin");
         std::fs::write(&bin, b"v1").unwrap();
         std::fs::write(dir.path().join("model.xml"), b"<net/>").unwrap();
-        let first = DirFiles::scan(dir.path()).unwrap().revision;
+        let first = DirFiles::scan(dir.path(), &[]).unwrap().revision;
         assert_eq!(
             first,
-            DirFiles::scan(dir.path()).unwrap().revision,
+            DirFiles::scan(dir.path(), &[]).unwrap().revision,
             "stable when untouched"
         );
 
         std::fs::write(&bin, b"v2-longer").unwrap();
         assert_ne!(
             first,
-            DirFiles::scan(dir.path()).unwrap().revision,
+            DirFiles::scan(dir.path(), &[]).unwrap().revision,
             "size change seen"
         );
 
         std::fs::write(dir.path().join("extra.bin"), b"x").unwrap();
-        let with_extra = DirFiles::scan(dir.path()).unwrap().revision;
+        let with_extra = DirFiles::scan(dir.path(), &[]).unwrap().revision;
         std::fs::remove_file(dir.path().join("extra.bin")).unwrap();
         assert_ne!(
             with_extra,
-            DirFiles::scan(dir.path()).unwrap().revision,
+            DirFiles::scan(dir.path(), &[]).unwrap().revision,
             "added/removed file seen"
+        );
+    }
+
+    /// The properties shape the compiled graph, so a change must recompile
+    /// (a different revision) and the same set must not.
+    #[test]
+    fn revision_follows_the_device_properties() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.bin"), b"v1").unwrap();
+        let streams_24 = [("NUM_STREAMS".to_string(), "24".to_string())];
+        let streams_8 = [("NUM_STREAMS".to_string(), "8".to_string())];
+        let plain = DirFiles::scan(dir.path(), &[]).unwrap().revision;
+        let with_24 = DirFiles::scan(dir.path(), &streams_24).unwrap().revision;
+        assert_ne!(plain, with_24, "properties seen");
+        assert_eq!(
+            with_24,
+            DirFiles::scan(dir.path(), &streams_24).unwrap().revision,
+            "stable for the same properties"
+        );
+        assert_ne!(
+            with_24,
+            DirFiles::scan(dir.path(), &streams_8).unwrap().revision,
+            "value change seen"
         );
     }
 
@@ -561,14 +706,14 @@ mod tests {
         registry.0.insert(
             GraphKey::new("openvino", a.to_str().unwrap()).unwrap(),
             CachedGraph {
-                revision: DirFiles::scan(&a).unwrap().revision,
+                revision: DirFiles::scan(&a, &[]).unwrap().revision,
                 graph: stub_graph(),
             },
         );
         let error = registry
             .load_graphs(&[
-                ("openvino".into(), a.to_str().unwrap().into()),
-                ("openvino".into(), b.to_str().unwrap().into()),
+                spec("openvino", a.to_str().unwrap()),
+                spec("openvino", b.to_str().unwrap()),
             ])
             .err()
             .expect("duplicate name must fail")
