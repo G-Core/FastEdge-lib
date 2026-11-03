@@ -22,6 +22,7 @@ use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tracing_subscriber::EnvFilter;
 use wasmtime::Engine;
 
 #[derive(Debug, Parser)]
@@ -83,7 +84,14 @@ struct HttpRunArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    pretty_env_logger::init();
+    // All FastEdge crates log through `tracing`, so install a `tracing` subscriber
+    // (not a `log`-only logger) and let `RUST_LOG` drive the filter, e.g.
+    // `RUST_LOG=info,http_service=debug`.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
     #[cfg(target_family = "unix")]
     let shutdown_coordinator = shellflip::ShutdownCoordinator::new();
     let args = Cli::parse();
