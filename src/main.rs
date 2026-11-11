@@ -4,8 +4,9 @@ mod dotenv;
 mod executor;
 mod key_value;
 mod secret;
+mod stores_service;
 
-use crate::cache::MemoryCacheBackend;
+use crate::cache::{MemoryCacheBackend, ServiceCacheBackend};
 use crate::context::StatsStub;
 use bytesize::MB;
 use clap::{Args, Parser, Subcommand};
@@ -195,6 +196,16 @@ async fn main() -> anyhow::Result<()> {
 
             append_headers(run.geo, &mut headers);
 
+            // Opt-in: forward the cache and non-redis KV stores to a local storage service.
+            let stores_service = stores_service::StoresService::from_env();
+            let cache_backend: Arc<dyn ::cache::CacheBackend> = match &stores_service {
+                Some(service) => {
+                    tracing::info!("cache and KV stores: forwarding to the storage service");
+                    Arc::new(ServiceCacheBackend::new(service.clone()))
+                }
+                None => Arc::new(MemoryCacheBackend::new()),
+            };
+
             let context = Context {
                 headers,
                 engine,
@@ -202,7 +213,8 @@ async fn main() -> anyhow::Result<()> {
                 backend,
                 wasm_bytes: wasm_bytes.into(),
                 wasi_http: run.wasi_http.unwrap_or_default(),
-                cache_backend: Arc::new(MemoryCacheBackend::new()),
+                cache_backend,
+                stores_service,
                 graph_registry: CachedGraphRegistry::new(),
             };
 
