@@ -53,6 +53,10 @@ fn kv_error(error: ServiceError) -> Error {
     match error.as_deref() {
         Some("no-such-store") => Error::NoSuchStore,
         Some("access-denied") => Error::AccessDenied,
+        // As Redis reports it on the edge (key-value-store redis_impl.rs).
+        Some("wrong-type") => Error::Other(
+            "WRONGTYPE: Operation against a key holding the wrong kind of value".into(),
+        ),
         _ => Error::InternalError,
     }
 }
@@ -204,5 +208,9 @@ mod tests {
             Error::NoSuchStore
         ));
         assert!(matches!(kv_error(None), Error::InternalError));
+        assert!(matches!(
+            kv_error(Some("wrong-type".into())),
+            Error::Other(m) if m.starts_with("WRONGTYPE: ")
+        ));
     }
 }
