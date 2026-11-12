@@ -153,11 +153,19 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            let kv_stores = dotenv_injector.merge_with_dotenv_variables(
+            let stores_service = stores_service::StoresService::from_env();
+            let mut kv_stores = dotenv_injector.merge_with_dotenv_variables(
                 has_dotenv_flag,
                 EnvArgType::KvStore,
                 run.kv_stores.unwrap_or_default().into_iter().collect(),
             );
+            // The service's seeded stores, unless --kv-stores or dotenv already name them
+            // (e.g. a redis:// override).
+            if let Some(service) = &stores_service {
+                for name in service.kv_store_names().await {
+                    kv_stores.entry(name.clone()).or_insert(name);
+                }
+            }
 
             let kv_stores = kv_stores
                 .into_iter()
@@ -197,7 +205,6 @@ async fn main() -> anyhow::Result<()> {
             append_headers(run.geo, &mut headers);
 
             // Opt-in: forward the cache and non-redis KV stores to a local storage service.
-            let stores_service = stores_service::StoresService::from_env();
             let cache_backend: Arc<dyn ::cache::CacheBackend> = match &stores_service {
                 Some(service) => {
                     tracing::info!("cache and KV stores: forwarding to the storage service");

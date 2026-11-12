@@ -57,6 +57,24 @@ impl StoresService {
         }))
     }
 
+    /// The Edge KV stores the service has seeded (from fixtures). Empty, with a warning,
+    /// when the service does not answer.
+    pub async fn kv_store_names(&self) -> Vec<smol_str::SmolStr> {
+        let names = self
+            .call("admin", serde_json::json!({"op": "kv-stores"}))
+            .await
+            .ok()
+            .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok());
+        if names.is_none() {
+            tracing::warn!("stores service: could not list the Edge KV stores");
+        }
+        names
+            .unwrap_or_default()
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+
     /// One call. No retry: a mutation may have landed before a failure.
     pub async fn call(&self, kind: &str, body: Value) -> Result<Value, ServiceError> {
         let request = hyper::Request::post(format!("{}/v1/{kind}", self.base))
