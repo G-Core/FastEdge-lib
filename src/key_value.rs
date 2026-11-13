@@ -53,10 +53,12 @@ fn kv_error(error: ServiceError) -> Error {
     match error.as_deref() {
         Some("no-such-store") => Error::NoSuchStore,
         Some("access-denied") => Error::AccessDenied,
-        // As Redis reports it on the edge (key-value-store redis_impl.rs).
+        // The edge's own messages (measured on preprod).
         Some("wrong-type") => Error::Other(
-            "WRONGTYPE: Operation against a key holding the wrong kind of value".into(),
+            "ERR: Invalid argument: WRONGTYPE Operation against a key holding the wrong kind of value"
+                .into(),
         ),
+        Some("min-gt-max") => Error::Other("ERR: min > max".into()),
         _ => Error::InternalError,
     }
 }
@@ -210,7 +212,11 @@ mod tests {
         assert!(matches!(kv_error(None), Error::InternalError));
         assert!(matches!(
             kv_error(Some("wrong-type".into())),
-            Error::Other(m) if m.starts_with("WRONGTYPE: ")
+            Error::Other(m) if m.starts_with("ERR: Invalid argument: WRONGTYPE ")
+        ));
+        assert!(matches!(
+            kv_error(Some("min-gt-max".into())),
+            Error::Other(m) if m == "ERR: min > max"
         ));
     }
 }
