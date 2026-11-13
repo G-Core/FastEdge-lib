@@ -92,7 +92,7 @@ impl DotEnvInjector {
             EnvArgType::ReqHeader => "FASTEDGE_VAR_REQ_HEADER_",
             EnvArgType::Env => "FASTEDGE_VAR_ENV_",
             EnvArgType::Secrets => "FASTEDGE_VAR_SECRET_",
-            EnvArgType::KvStore => "FASTEDGE_VAR_KV_STORE",
+            EnvArgType::KvStore => "FASTEDGE_VAR_KV_STORE_",
         };
 
         if key.starts_with("FASTEDGE_VAR_") {
@@ -216,6 +216,27 @@ mod dotenv_injector_tests {
             SmolStr::new("some \"edge\" case with = and `quotes`"),
         );
 
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_kv_store_prefix_names_the_store() {
+        let temp_dir = tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join(".env"),
+            "FASTEDGE_VAR_KV_STORE_users=redis://localhost:6379\n",
+        )
+        .unwrap();
+
+        let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
+        let result =
+            injector.merge_with_dotenv_variables(true, EnvArgType::KvStore, HashMap::new());
+
+        let mut expected = HashMap::new();
+        expected.insert(
+            SmolStr::new("users"),
+            SmolStr::new("redis://localhost:6379"),
+        );
         assert_eq!(result, expected);
     }
 
