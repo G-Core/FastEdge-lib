@@ -92,7 +92,7 @@ impl DotEnvInjector {
             EnvArgType::ReqHeader => "FASTEDGE_VAR_REQ_HEADER_",
             EnvArgType::Env => "FASTEDGE_VAR_ENV_",
             EnvArgType::Secrets => "FASTEDGE_VAR_SECRET_",
-            EnvArgType::KvStore => "FASTEDGE_VAR_KV_STORE",
+            EnvArgType::KvStore => "FASTEDGE_VAR_KV_STORE_",
         };
 
         if key.starts_with("FASTEDGE_VAR_") {
@@ -125,29 +125,55 @@ impl DotEnvInjector {
         let mut variables = HashMap::new();
 
         if let Ok(lines) = fs::read_to_string(filename) {
-            for _line in lines.lines() {
-                let line = match _line.split_once('#') {
-                    Some((line, _)) => line,
-                    None => _line,
-                };
-                if line.trim().is_empty() {
+            for line in lines.lines() {
+                if line.trim_start().starts_with('#') {
                     continue;
                 }
                 if let Some((key, value)) = line.split_once('=') {
-                    // Insert the key-value pair into the HashMap
                     variables.insert(
-                        self.strip_quoted_strings(key),
-                        self.strip_quoted_strings(value),
+                        SmolStr::new(strip_quote_pair(key.trim())),
+                        SmolStr::new(parse_value(value)),
                     );
                 }
             }
         }
         Ok(variables)
     }
+}
 
-    fn strip_quoted_strings(&self, value: &str) -> SmolStr {
-        SmolStr::new(value.trim().trim_matches(|c| c == '"' || c == '\''))
+/// A quoted value runs to the first matching quote followed only by whitespace or a comment,
+/// so `"a#b"` and `"say "hi""` keep their content. In an unquoted value `#` starts a comment
+/// only after whitespace, so `https://x/#frag` is kept and `v # note` gives `v`.
+fn parse_value(raw: &str) -> &str {
+    let value = raw.trim();
+    if let Some(quote) = value.chars().next().filter(|c| *c == '"' || *c == '\'') {
+        let body = &value[1..];
+        let closing = body.match_indices(quote).map(|(i, _)| i).find(|&i| {
+            let rest = body[i + 1..].trim_start();
+            rest.is_empty() || rest.starts_with('#')
+        });
+        if let Some(end) = closing {
+            return &body[..end];
+        }
     }
+    let end = value
+        .char_indices()
+        .find(|&(i, c)| c == '#' && value[..i].ends_with(char::is_whitespace))
+        .map_or(value.len(), |(i, _)| i);
+    value[..end].trim_end()
+}
+
+/// Remove one matching pair of surrounding quotes.
+fn strip_quote_pair(value: &str) -> &str {
+    for quote in ['"', '\''] {
+        if let Some(inner) = value
+            .strip_prefix(quote)
+            .and_then(|v| v.strip_suffix(quote))
+        {
+            return inner;
+        }
+    }
+    value
 }
 
 #[cfg(test)]
@@ -190,6 +216,27 @@ mod dotenv_injector_tests {
             SmolStr::new("some \"edge\" case with = and `quotes`"),
         );
 
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_kv_store_prefix_names_the_store() {
+        let temp_dir = tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join(".env"),
+            "FASTEDGE_VAR_KV_STORE_users=redis://localhost:6379\n",
+        )
+        .unwrap();
+
+        let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
+        let result =
+            injector.merge_with_dotenv_variables(true, EnvArgType::KvStore, HashMap::new());
+
+        let mut expected = HashMap::new();
+        expected.insert(
+            SmolStr::new("users"),
+            SmolStr::new("redis://localhost:6379"),
+        );
         assert_eq!(result, expected);
     }
 
@@ -239,6 +286,38 @@ mod dotenv_injector_tests {
         expected.insert(SmolStr::new("KEY4"), SmolStr::new("value4"));
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_read_dotenv_file_hash_and_quotes() {
+        let temp_dir = tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join(".env"),
+            "\
+            HASH_QUOTED=\"a#b\"
+            HASH_URL=https://x.example/#frag
+            MIXED='\"mixed\"'
+            TRAILING=u # trailing comment
+            QUOTED_COMMENT=\"v\" # say \"hi\"
+            SINGLE='a # b'
+            HASH_FIRST=#abc
+            UNMATCHED=\"abc
+            ",
+        )
+        .unwrap();
+
+        let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
+        let result = injector.read_dotenv_file(EnvArgFileType::DotEnv).unwrap();
+
+        let get = |k: &str| result.get(k).map(|v| v.as_str());
+        assert_eq!(get("HASH_QUOTED"), Some("a#b"));
+        assert_eq!(get("HASH_URL"), Some("https://x.example/#frag"));
+        assert_eq!(get("MIXED"), Some("\"mixed\""));
+        assert_eq!(get("TRAILING"), Some("u"));
+        assert_eq!(get("QUOTED_COMMENT"), Some("v"));
+        assert_eq!(get("SINGLE"), Some("a # b"));
+        assert_eq!(get("HASH_FIRST"), Some("#abc"));
+        assert_eq!(get("UNMATCHED"), Some("\"abc"));
     }
 
     #[test]

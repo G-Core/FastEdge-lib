@@ -1,7 +1,7 @@
-use crate::cache::MemoryCacheBackend;
 use crate::executor::RunExecutor;
 use crate::key_value::CliStoreManager;
 use crate::secret::SecretImpl;
+use crate::stores_service::StoresService;
 use http_backend::Backend;
 use http_backend::stats::ExtRequestStats;
 use http_service::executor::{HttpExecutorImpl, WasiHttpExecutorImpl};
@@ -36,7 +36,8 @@ pub struct Context {
     pub(crate) backend: Backend<HttpsConnector<HttpConnector>>,
     pub(crate) wasm_bytes: Arc<[u8]>,
     pub(crate) wasi_http: bool,
-    pub(crate) cache_backend: Arc<MemoryCacheBackend>,
+    pub(crate) cache_backend: Arc<dyn cache::CacheBackend>,
+    pub(crate) stores_service: Option<Arc<StoresService>>,
     pub(crate) graph_registry: CachedGraphRegistry,
 }
 
@@ -91,6 +92,7 @@ impl ContextT for Context {
             .collect();
         let manager = CliStoreManager {
             stores: stores.clone(),
+            service: self.stores_service.clone(),
         };
         key_value_store::Builder::new(allowed_stores, Arc::new(manager))
     }
