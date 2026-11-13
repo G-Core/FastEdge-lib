@@ -92,10 +92,15 @@ async fn main() -> anyhow::Result<()> {
     // All FastEdge crates log through `tracing`, so install a `tracing` subscriber
     // (not a `log`-only logger) and let `RUST_LOG` drive the filter, e.g.
     // `RUST_LOG=info,http_service=debug`.
-    // `RUST_LOG` filters the log output only: the traceparent layer must see every
-    // request span, for the stores service's storage trace.
+    // With a stores service, the traceparent layer also sees the engine's `http` request
+    // spans (and nothing else), whatever `RUST_LOG` says, for the storage trace.
+    let traceparent = std::env::var_os(stores_service::ENV).map(|_| {
+        request_trace::TraceparentLayer.with_filter(tracing_subscriber::filter::filter_fn(|m| {
+            m.is_span() && m.name() == "http"
+        }))
+    });
     tracing_subscriber::registry()
-        .with(request_trace::TraceparentLayer)
+        .with(traceparent)
         .with(tracing_subscriber::fmt::layer().with_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         ))
