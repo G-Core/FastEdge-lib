@@ -3,6 +3,7 @@ mod context;
 mod dotenv;
 mod executor;
 mod key_value;
+mod request_trace;
 mod secret;
 mod stores_service;
 
@@ -24,6 +25,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer as _;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use wasmtime::Engine;
 
 #[derive(Debug, Parser)]
@@ -88,10 +92,13 @@ async fn main() -> anyhow::Result<()> {
     // All FastEdge crates log through `tracing`, so install a `tracing` subscriber
     // (not a `log`-only logger) and let `RUST_LOG` drive the filter, e.g.
     // `RUST_LOG=info,http_service=debug`.
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    // `RUST_LOG` filters the log output only: the traceparent layer must see every
+    // request span, for the stores service's storage trace.
+    tracing_subscriber::registry()
+        .with(request_trace::TraceparentLayer)
+        .with(tracing_subscriber::fmt::layer().with_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+        ))
         .init();
     #[cfg(target_family = "unix")]
     let shutdown_coordinator = shellflip::ShutdownCoordinator::new();

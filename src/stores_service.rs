@@ -6,7 +6,8 @@
 //! Every operation is one `POST <base-url>/v1/<cache|kv>` with a JSON body
 //! (`{"op": .., ..}`) and a bearer token; the reply is `{"ok": true, "value": ..}` or
 //! `{"ok": false, "error": "<code>"}`. Binary values travel as base64. All semantics
-//! (TTL, `incr`, the clock, glob matching) live in the service.
+//! (TTL, `incr`, the clock, glob matching) live in the service. Calls made while handling a
+//! request carry `"trace": {"requestId": <traceparent>, "app": "http"}`.
 
 use base64::Engine;
 use http_body_util::{BodyExt, Full};
@@ -75,8 +76,14 @@ impl StoresService {
             .collect()
     }
 
-    /// One call. No retry: a mutation may have landed before a failure.
-    pub async fn call(&self, kind: &str, body: Value) -> Result<Value, ServiceError> {
+    /// One call. No retry: a mutation may have landed before a failure. Cache and KV calls
+    /// made while handling a request carry its `traceparent`, for the service's storage trace.
+    pub async fn call(&self, kind: &str, mut body: Value) -> Result<Value, ServiceError> {
+        if kind != "admin"
+            && let Some(traceparent) = crate::request_trace::current()
+        {
+            body["trace"] = serde_json::json!({"requestId": traceparent, "app": "http"});
+        }
         let request = hyper::Request::post(format!("{}/v1/{kind}", self.base))
             .header("authorization", format!("Bearer {}", self.token))
             .header("content-type", "application/json")
