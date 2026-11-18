@@ -3,9 +3,11 @@ mod context;
 mod dotenv;
 mod executor;
 mod key_value;
+mod request_trace;
 mod secret;
+mod stores_service;
 
-use crate::cache::MemoryCacheBackend;
+use crate::cache::{MemoryCacheBackend, ServiceCacheBackend};
 use crate::context::StatsStub;
 use bytesize::MB;
 use clap::{Args, Parser, Subcommand};
@@ -23,6 +25,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer as _;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use wasmtime::Engine;
 
 #[derive(Debug, Parser)]
@@ -87,10 +92,18 @@ async fn main() -> anyhow::Result<()> {
     // All FastEdge crates log through `tracing`, so install a `tracing` subscriber
     // (not a `log`-only logger) and let `RUST_LOG` drive the filter, e.g.
     // `RUST_LOG=info,http_service=debug`.
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    // With a stores service, the traceparent layer also sees the engine's `http` request
+    // spans (and nothing else), whatever `RUST_LOG` says, for the storage trace.
+    let traceparent = std::env::var_os(stores_service::ENV).map(|_| {
+        request_trace::TraceparentLayer.with_filter(tracing_subscriber::filter::filter_fn(|m| {
+            m.is_span() && m.name() == "http"
+        }))
+    });
+    tracing_subscriber::registry()
+        .with(traceparent)
+        .with(tracing_subscriber::fmt::layer().with_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
+        ))
         .init();
     #[cfg(target_family = "unix")]
     let shutdown_coordinator = shellflip::ShutdownCoordinator::new();
@@ -152,11 +165,19 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            let kv_stores = dotenv_injector.merge_with_dotenv_variables(
+            let stores_service = stores_service::StoresService::from_env();
+            let mut kv_stores = dotenv_injector.merge_with_dotenv_variables(
                 has_dotenv_flag,
                 EnvArgType::KvStore,
                 run.kv_stores.unwrap_or_default().into_iter().collect(),
             );
+            // The service's seeded stores, unless --kv-stores or dotenv already name them
+            // (e.g. a redis:// override).
+            if let Some(service) = &stores_service {
+                for name in service.kv_store_names().await {
+                    kv_stores.entry(name.clone()).or_insert(name);
+                }
+            }
 
             let kv_stores = kv_stores
                 .into_iter()
@@ -195,6 +216,15 @@ async fn main() -> anyhow::Result<()> {
 
             append_headers(run.geo, &mut headers);
 
+            // Opt-in: forward the cache and non-redis KV stores to a local storage service.
+            let cache_backend: Arc<dyn ::cache::CacheBackend> = match &stores_service {
+                Some(service) => {
+                    tracing::info!("cache and KV stores: forwarding to the storage service");
+                    Arc::new(ServiceCacheBackend::new(service.clone()))
+                }
+                None => Arc::new(MemoryCacheBackend::new()),
+            };
+
             let context = Context {
                 headers,
                 engine,
@@ -202,7 +232,8 @@ async fn main() -> anyhow::Result<()> {
                 backend,
                 wasm_bytes: wasm_bytes.into(),
                 wasi_http: run.wasi_http.unwrap_or_default(),
-                cache_backend: Arc::new(MemoryCacheBackend::new()),
+                cache_backend,
+                stores_service,
                 graph_registry: CachedGraphRegistry::new(),
             };
 

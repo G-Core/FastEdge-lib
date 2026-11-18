@@ -226,7 +226,7 @@ Prefix keys in `.env` with `FASTEDGE_VAR_<TYPE>_` to target a specific category:
 | `FASTEDGE_VAR_SECRET_` | Secrets |
 | `FASTEDGE_VAR_REQ_HEADER_` | Request headers |
 | `FASTEDGE_VAR_RSP_HEADER_` | Response headers |
-| `FASTEDGE_VAR_KV_STORE` | Key-value stores |
+| `FASTEDGE_VAR_KV_STORE_` | Key-value stores |
 
 Bare keys in `.env` (without a `FASTEDGE_VAR_` prefix) are added as environment variables.
 
@@ -235,7 +235,7 @@ Bare keys in `.env` (without a `FASTEDGE_VAR_` prefix) are added as environment 
 DB_HOST=localhost
 FASTEDGE_VAR_SECRET_API_KEY=s3cr3t
 FASTEDGE_VAR_RSP_HEADER_Cache-Control=no-store
-FASTEDGE_VAR_KV_STORE=sessions=redis://localhost:6379
+FASTEDGE_VAR_KV_STORE_sessions=redis://localhost:6379
 ```
 
 ```bash
