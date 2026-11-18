@@ -17,6 +17,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// An environment variable, not a flag: the value carries a bearer token, and process
+/// arguments are readable by other local users.
 pub const ENV: &str = "FASTEDGE_STORES_SERVICE";
 
 /// Shorter than the service's own deadline, so the service gives up first.
