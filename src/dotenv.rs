@@ -143,7 +143,8 @@ impl DotEnvInjector {
 
 /// A quoted value runs to the first matching quote followed only by whitespace or a comment,
 /// so `"a#b"` and `"say "hi""` keep their content. In an unquoted value `#` starts a comment
-/// only after whitespace, so `https://x/#frag` is kept and `v # note` gives `v`.
+/// only after whitespace, so `https://x/#frag` is kept and `v # note` gives `v`. The whitespace
+/// may be the gap after `=`, so `KEY= # note` is empty while `KEY=#abc` keeps `#abc`.
 fn parse_value(raw: &str) -> &str {
     let value = raw.trim();
     if let Some(quote) = value.chars().next().filter(|c| *c == '"' || *c == '\'') {
@@ -156,11 +157,11 @@ fn parse_value(raw: &str) -> &str {
             return &body[..end];
         }
     }
-    let end = value
+    let end = raw
         .char_indices()
-        .find(|&(i, c)| c == '#' && value[..i].ends_with(char::is_whitespace))
-        .map_or(value.len(), |(i, _)| i);
-    value[..end].trim_end()
+        .find(|&(i, c)| c == '#' && raw[..i].ends_with(char::is_whitespace))
+        .map_or(raw.len(), |(i, _)| i);
+    raw[..end].trim()
 }
 
 /// Remove one matching pair of surrounding quotes.
@@ -301,6 +302,8 @@ mod dotenv_injector_tests {
             QUOTED_COMMENT=\"v\" # say \"hi\"
             SINGLE='a # b'
             HASH_FIRST=#abc
+            EMPTY_COMMENT= # intentionally empty
+            EMPTY_TAB=\t# tab before the comment
             UNMATCHED=\"abc
             ",
         )
@@ -317,6 +320,8 @@ mod dotenv_injector_tests {
         assert_eq!(get("QUOTED_COMMENT"), Some("v"));
         assert_eq!(get("SINGLE"), Some("a # b"));
         assert_eq!(get("HASH_FIRST"), Some("#abc"));
+        assert_eq!(get("EMPTY_COMMENT"), Some(""));
+        assert_eq!(get("EMPTY_TAB"), Some(""));
         assert_eq!(get("UNMATCHED"), Some("\"abc"));
     }
 
