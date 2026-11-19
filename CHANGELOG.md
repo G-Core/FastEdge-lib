@@ -1,3 +1,24 @@
+## [0.23.0] - 2026-11-19
+
+### 🚀 Features
+
+- *(cli)* Opt-in forwarding of cache and KV stores to a local storage service
+- *(cli)* Stores service wrong-type maps to Error::Other (WRONGTYPE)
+- *(cli)* Attach the stores service's seeded KV stores unless already named
+- *(cli)* Tag stores service calls with the request's traceparent
+
+### 🐛 Bug Fixes
+
+- *(cli)* Install a tracing subscriber so fastedge-run logs are visible again
+- *(cli)* Keep # inside dotenv values; strip one matching quote pair
+- *(cli)* Stores service KV errors use the edge's messages (WRONGTYPE, min > max)
+- *(cli)* FASTEDGE_VAR_KV_STORE_ dotenv prefix names the store
+- *(cli)* Install the traceparent layer only with a stores service, for http spans only
+- *(cli)* Dotenv comment after the gap following = gives an empty value
+
+### 📚 Documentation
+
+- *(cli)* Why the stores service opt-in is an environment variable
 ## [0.22.0] - 2026-10-21
 
 ### 🚀 Features
@@ -43,6 +64,7 @@
 - *(runtime)* Upgrade Wasmtime to 48.0.2 and update dependency management
 - *(dependencies)* Update multiple crate versions in Cargo.lock
 - *(http-service)* Allow clippy::double_must_use on HttpExecutor
+- Release
 ## [0.21.0] - 2026-09-01
 
 ### 🚀 Features
