@@ -146,7 +146,7 @@ impl<'de> Visitor<'de> for QosVisitor {
     type Value = Qos;
 
     fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
-        formatter.write_str("unsigned integer value (1 = low, 2 = normal, 3 = high)")
+        formatter.write_str("QoS tier (1 = low, 2 = normal, 3 = high)")
     }
 
     /// Lenient on purpose, unlike `Status`: an unknown tier (`0` = unset, or a
@@ -163,6 +163,54 @@ impl<'de> Visitor<'de> for QosVisitor {
             _ => Qos::Normal,
         })
     }
+
+    /// Any value of any other type is just as unknown, so just as `Normal`:
+    /// a negative number, a float, `null`, a string. Failing on it would drop
+    /// the whole app on the next config refresh.
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match u64::try_from(v) {
+            Ok(v) => self.visit_u64(v),
+            Err(_) => Ok(Qos::Normal),
+        }
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
 }
 
 impl<'de> Deserialize<'de> for Qos {
@@ -170,7 +218,10 @@ impl<'de> Deserialize<'de> for Qos {
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_u64(QosVisitor)
+        // `any`, not `u64`: the tier must accept whatever the control plane
+        // sends (see `QosVisitor`), and the app config is JSON, which is
+        // self-describing.
+        deserializer.deserialize_any(QosVisitor)
     }
 }
 
@@ -496,6 +547,52 @@ mod tests {
         assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("0")));
         assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("4")));
         assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("255")));
+    }
+
+    #[test]
+    fn test_qos_other_types_fall_back_to_normal() {
+        // Negative numbers, floats, null, strings, booleans: none may fail
+        // the app config.
+        for value in [
+            "-1",
+            "-9223372036854775808",
+            "1.5",
+            "null",
+            "\"high\"",
+            "true",
+        ] {
+            assert_eq!(
+                Qos::Normal,
+                assert_ok!(serde_json::from_str::<Qos>(value)),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_qos_null_in_app_config_is_normal() {
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+            "qos": null,
+        });
+        let app: App = assert_ok!(serde_json::from_value(json));
+        assert_eq!(app.qos, Qos::Normal);
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+            "qos": -1,
+        });
+        let app: App = assert_ok!(serde_json::from_value(json));
+        assert_eq!(app.qos, Qos::Normal);
     }
 
     #[test]
