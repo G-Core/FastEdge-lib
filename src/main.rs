@@ -206,6 +206,7 @@ async fn main() -> anyhow::Result<()> {
                 kv_stores,
                 plan_id: 0,
                 cache_mode: CacheMode::Enabled,
+                qos: Default::default(),
             };
 
             let mut headers = dotenv_injector.merge_with_dotenv_variables(
