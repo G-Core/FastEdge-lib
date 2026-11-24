@@ -19,7 +19,7 @@ use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::connect::HttpConnector;
 use runtime::app::{CacheMode, KvStoreOption, Status};
 use runtime::service::{Service, ServiceBuilder};
-use runtime::{App, CachedGraphRegistry, SecretValue, WasmConfig};
+use runtime::{App, CachedGraphRegistry, WasmConfig};
 use smol_str::{SmolStr, ToSmolStr};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -154,16 +154,7 @@ async fn main() -> anyhow::Result<()> {
                 run.secret.unwrap_or_default().into_iter().collect(),
             );
 
-            let mut secrets = vec![];
-            for (name, s) in secret_args {
-                secrets.push(runtime::app::SecretOption {
-                    name,
-                    secret_values: vec![SecretValue {
-                        effective_from: 0,
-                        value: s.to_string(),
-                    }],
-                });
-            }
+            let secrets = secret::secret_options(secret_args)?;
 
             let stores_service = stores_service::StoresService::from_env();
             let mut kv_stores = dotenv_injector.merge_with_dotenv_variables(

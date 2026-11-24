@@ -78,9 +78,7 @@ impl ContextT for Context {
     fn make_secret_store(&self, secrets: &Vec<SecretOption>) -> anyhow::Result<SecretStore> {
         let mut secret_impl = SecretImpl::default();
         for s in secrets {
-            if let Some(value) = s.secret_values.first() {
-                secret_impl.insert(s.name.to_string(), value.value.to_string());
-            }
+            secret_impl.insert(s.name.to_string(), s.secret_values.clone());
         }
         Ok(SecretStore::new(Arc::new(secret_impl)))
     }

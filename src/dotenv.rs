@@ -242,6 +242,27 @@ mod dotenv_injector_tests {
     }
 
     #[test]
+    fn test_secret_slots_keep_their_names() {
+        // `NAME@SLOT` keys reach the secret parser as they are, from either file.
+        let temp_dir = tempdir().unwrap();
+        fs::write(
+            temp_dir.path().join(".env"),
+            "FASTEDGE_VAR_SECRET_TOKEN@5=updated\n",
+        )
+        .unwrap();
+        fs::write(temp_dir.path().join(".env.secrets"), "TOKEN=original\n").unwrap();
+
+        let injector = DotEnvInjector::new(Some(temp_dir.path().to_path_buf()));
+        let result =
+            injector.merge_with_dotenv_variables(true, EnvArgType::Secrets, HashMap::new());
+
+        let mut expected = HashMap::new();
+        expected.insert(SmolStr::new("TOKEN@5"), SmolStr::new("updated"));
+        expected.insert(SmolStr::new("TOKEN"), SmolStr::new("original"));
+        assert_eq!(result, expected);
+    }
+
+    #[test]
     fn test_read_dotenv_file_with_errored_lines() {
         let temp_dir = tempdir().unwrap();
         let file_path = temp_dir.path().join(".env");
