@@ -136,6 +136,23 @@ fastedge-run http \
   --secret API_KEY=supersecret
 ```
 
+#### Secret slots
+
+A secret can hold several values, one per slot, as on the edge (`secret_slots` in the API).
+`NAME@SLOT=value` sets slot `SLOT` (a positive integer in plain digits, often an index or a Unix
+timestamp); slot 0 is written as a bare `NAME=value`. Each slot has this one spelling, so a
+`--secret` value replaces the dotenv value of the same slot. `get_effective_at(name, at)` returns the highest slot not above
+`at`, or none; `get(name)` returns the slot effective at the current time. The same form works in
+`.env.secrets` and, with the `FASTEDGE_VAR_SECRET_` prefix, in `.env`.
+
+```bash
+fastedge-run http \
+  --port 8080 \
+  --wasm ./my_app.wasm \
+  --secret TOKEN=original_password \
+  --secret TOKEN@5=updated_password
+```
+
 #### Injecting request headers
 
 Use `--headers` to add fixed headers to every request before the Wasm handler sees it, and
