@@ -585,24 +585,24 @@ dependencies = [
 
 [[package]]
 name = "cranelift-assembler-x64"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-assembler-x64-meta",
 ]
 
 [[package]]
 name = "cranelift-assembler-x64-meta"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-srcgen",
 ]
 
 [[package]]
 name = "cranelift-bforest"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-entity",
  "wasmtime-internal-core",
@@ -610,8 +610,8 @@ dependencies = [
 
 [[package]]
 name = "cranelift-bitset"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "serde",
  "serde_derive",
@@ -620,8 +620,8 @@ dependencies = [
 
 [[package]]
 name = "cranelift-codegen"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "bumpalo",
  "cranelift-assembler-x64",
@@ -650,8 +650,8 @@ dependencies = [
 
 [[package]]
 name = "cranelift-codegen-meta"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-assembler-x64-meta",
  "cranelift-codegen-shared",
@@ -662,21 +662,21 @@ dependencies = [
 
 [[package]]
 name = "cranelift-codegen-shared"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 
 [[package]]
 name = "cranelift-control"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "arbitrary",
 ]
 
 [[package]]
 name = "cranelift-entity"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-bitset",
  "serde",
@@ -686,8 +686,8 @@ dependencies = [
 
 [[package]]
 name = "cranelift-frontend"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-codegen",
  "hashbrown 0.17.1",
@@ -698,13 +698,13 @@ dependencies = [
 
 [[package]]
 name = "cranelift-isle"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 
 [[package]]
 name = "cranelift-native"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-codegen",
  "libc",
@@ -713,8 +713,8 @@ dependencies = [
 
 [[package]]
 name = "cranelift-srcgen"
-version = "0.135.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "0.135.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 
 [[package]]
 name = "crc32fast"
@@ -1540,9 +1540,9 @@ checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
 name = "http"
-version = "1.4.2"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
+checksum = "918d3568bebf352712bc2ef3d46a8bcf1a75b373be6539de198e9105cbbf9ce0"
 dependencies = [
  "bytes",
  "itoa",
@@ -2573,8 +2573,8 @@ dependencies = [
 
 [[package]]
 name = "pulley-interpreter"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-bitset",
  "log",
@@ -2584,8 +2584,8 @@ dependencies = [
 
 [[package]]
 name = "pulley-macros"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2958,9 +2958,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -3355,7 +3355,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -4046,8 +4046,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "addr2line",
  "async-trait",
@@ -4097,8 +4097,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-environ"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "anyhow",
  "cpp_demangle",
@@ -4127,8 +4127,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-cache"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "base64 0.22.1",
  "directories-next",
@@ -4146,8 +4146,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-component-macro"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "anyhow",
  "proc-macro2",
@@ -4160,13 +4160,13 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-component-util"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 
 [[package]]
 name = "wasmtime-internal-core"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "anyhow",
  "hashbrown 0.17.1",
@@ -4176,8 +4176,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-cranelift"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-codegen",
  "cranelift-control",
@@ -4201,8 +4201,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-fiber"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cc",
  "libc",
@@ -4214,8 +4214,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-jit-debug"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cc",
  "object",
@@ -4225,8 +4225,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-jit-icache-coherence"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "libc",
  "wasmtime-internal-core",
@@ -4235,8 +4235,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-unwinder"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "cranelift-codegen",
  "log",
@@ -4246,8 +4246,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-versioned-export-macros"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4256,8 +4256,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-internal-wit-bindgen"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "anyhow",
  "bitflags 2.13.1",
@@ -4269,8 +4269,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-wasi"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "async-trait",
  "bitflags 2.13.1",
@@ -4293,8 +4293,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-wasi-http"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4316,8 +4316,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-wasi-io"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "async-trait",
  "bytes",
@@ -4328,8 +4328,8 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-wasi-nn"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "openvino",
  "thiserror 2.0.19",
@@ -4382,8 +4382,8 @@ dependencies = [
 
 [[package]]
 name = "wiggle"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "bitflags 2.13.1",
  "thiserror 2.0.19",
@@ -4395,8 +4395,8 @@ dependencies = [
 
 [[package]]
 name = "wiggle-generate"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -4408,8 +4408,8 @@ dependencies = [
 
 [[package]]
 name = "wiggle-macro"
-version = "48.0.5"
-source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#06315595bbb492369120749c7c1ada1f226cf505"
+version = "48.0.10"
+source = "git+https://github.com/G-Core/wasmtime.git?branch=release-48.0.0#3d8f18e5a0a9198f76a4377f9c39488b3f0fe290"
 dependencies = [
  "proc-macro2",
  "quote",
