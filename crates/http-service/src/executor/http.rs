@@ -474,6 +474,7 @@ mod tests {
             kv_stores: vec![],
             plan_id: 0,
             cache_mode: Default::default(),
+            qos: Default::default(),
         })
     }
 
@@ -558,6 +559,7 @@ mod tests {
             kv_stores: vec![],
             plan_id: 0,
             cache_mode: Default::default(),
+            qos: Default::default(),
         });
 
         let context = TestContext {
@@ -617,6 +619,7 @@ mod tests {
             kv_stores: vec![],
             plan_id: 0,
             cache_mode: Default::default(),
+            qos: Default::default(),
         });
 
         let context = TestContext {

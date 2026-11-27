@@ -48,7 +48,7 @@ use crate::app::SecretOption;
 use crate::logger::Logger;
 use crate::util::stats::StatsVisitor;
 use anyhow::{anyhow, bail};
-pub use app::{App, SecretValue, SecretValues};
+pub use app::{App, Qos, SecretValue, SecretValues};
 use bytes::Bytes;
 use http::request::Parts;
 use http::{HeaderName, Request, Response, header};
@@ -758,6 +758,13 @@ pub trait Router: Send + Sync {
         &self,
         id: u64,
     ) -> impl std::future::Future<Output = Option<(SmolStr, App)>> + Send;
+
+    /// The app's admission tier, read on the request path before a handler is
+    /// spawned. Must be synchronous and cheap: no async lock, no `App` clone.
+    /// Unknown apps, and embedders that don't track tiers, get `Normal`.
+    fn qos_by_id(&self, _id: u64) -> Qos {
+        Qos::Normal
+    }
 }
 
 pub fn componentize_if_necessary<'a>(buffer: &'a [u8]) -> anyhow::Result<Cow<'a, [u8]>> {

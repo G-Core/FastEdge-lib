@@ -7,6 +7,7 @@ use anyhow::Result;
 use secret::SecretStore;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use std::{
     collections::HashMap,
     fmt::{Debug, Formatter},
@@ -399,34 +400,75 @@ impl StoreBuilder {
         inner.set_epoch_deadline(self.max_duration);
         // When the deadline fires, consume any host-call credit accumulated by
         // `epoch_pause_ms` to extend it; if there is no credit, trap as before.
-        inner.epoch_deadline_callback(move |_ctx| {
-            let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
-            match epoch_credit_ticks(credit_ms) {
-                None => Err(wasmtime::Error::new(wasmtime::Trap::Interrupt)),
-                Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
-            }
-        });
+        inner.epoch_deadline_callback(epoch_deadline_callback(epoch_pause_ms, self.max_duration));
         Ok(Store { inner })
     }
 }
 
-/// Compute how many epoch ticks to refund given accumulated host-call
-/// credit (in ms).
+/// The store's epoch-deadline callback, for a deadline of `max_ticks` armed
+/// now: extends the deadline by the host-I/O credit deposited in
+/// `epoch_pause_ms`, or traps with [`wasmtime::Trap::Interrupt`] when there is
+/// none.
 ///
-/// Returns `None` when no credit has been deposited — the epoch deadline
-/// should fire as an interrupt. Otherwise returns the number of additional
-/// ticks to grant, rounded **up** so any sub-tick remainder still counts
-/// as a full tick. Without ceil-div, e.g. 15 ms of credit would only
-/// refund 1 tick (10 ms) and the next epoch deadline could still trap
-/// prematurely.
-fn epoch_credit_ticks(credit_ms: u64) -> Option<u64> {
-    if credit_ms == 0 {
-        None
-    } else {
-        // Ceil-div: `div_ceil` only returns 0 when the dividend is 0,
-        // which is short-circuited above, so this never returns `Some(0)`.
-        Some(credit_ms.div_ceil(DEFAULT_EPOCH_TICK_INTERVAL))
+/// The callback keeps the deadline as an absolute wall-clock instant and moves
+/// *that* by the credit ([`epoch_refund`]). wasmtime's
+/// `UpdateDeadline::Continue(ticks)` counts from the epoch it is at when the
+/// callback runs, not from the deadline that expired, so handing it the raw
+/// credit would also give back however far a host wait ran past the deadline:
+/// a 300 ms outbound request at the start of a 100 ms budget would leave the
+/// guest 300 ms to run instead of 100. A guest spinning in wasm never yields,
+/// so nothing else would catch it.
+///
+/// Assumes nothing else re-arms the deadline while credit is being deposited
+/// (true on the HTTP paths; the ProxyWasm executor, which does re-arm between
+/// phases, deposits no credit and re-arms after host waits itself).
+fn epoch_deadline_callback<T>(
+    epoch_pause_ms: Arc<AtomicU64>,
+    max_ticks: u64,
+) -> impl FnMut(wasmtime::StoreContextMut<'_, T>) -> wasmtime::Result<UpdateDeadline>
++ Send
++ Sync
++ 'static {
+    let now = Instant::now();
+    // An absurd budget that overflows `Instant` is as good as no deadline.
+    let mut deadline = now
+        .checked_add(ticks_duration(max_ticks))
+        .unwrap_or_else(|| now + Duration::from_secs(365 * 24 * 3600));
+    move |_ctx| {
+        let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
+        match epoch_refund(credit_ms, deadline, Instant::now()) {
+            None => Err(wasmtime::Error::new(wasmtime::Trap::Interrupt)),
+            Some((ticks, moved)) => {
+                deadline = moved;
+                Ok(UpdateDeadline::Continue(ticks))
+            }
+        }
     }
+}
+
+/// Wall-clock length of `ticks` epoch ticks, saturating instead of
+/// overflowing on absurd budgets.
+fn ticks_duration(ticks: u64) -> Duration {
+    Duration::from_millis(ticks.saturating_mul(DEFAULT_EPOCH_TICK_INTERVAL))
+}
+
+/// Refund `credit_ms` of host I/O to a guest whose epoch `deadline` has
+/// fired: the deadline moves to `deadline + credit`, and the result is the
+/// ticks from `now` to it, with that new deadline.
+///
+/// `None` (trap) when no credit was deposited, or when the moved deadline is
+/// still not in the future — the guest has used up its budget even with the
+/// wait left out. Ticks round **up**, so a sub-tick remainder still counts
+/// (15 ms left is 2 ticks, not 1), and are never 0.
+fn epoch_refund(credit_ms: u64, deadline: Instant, now: Instant) -> Option<(u64, Instant)> {
+    if credit_ms == 0 {
+        return None;
+    }
+    let moved = deadline.checked_add(Duration::from_millis(credit_ms))?;
+    let left = moved.checked_duration_since(now)?;
+    let left_us = u64::try_from(left.as_micros()).unwrap_or(u64::MAX);
+    let ticks = left_us.div_ceil(DEFAULT_EPOCH_TICK_INTERVAL.saturating_mul(1000));
+    (ticks > 0).then_some((ticks, moved))
 }
 
 impl Debug for StoreBuilder {
@@ -448,35 +490,66 @@ mod tests {
     use std::time::Duration;
     use wasmtime::{Config, Engine, Instance, Module, Store as WtStore, Trap};
 
-    // ── unit tests: epoch_credit_ticks helper ─────────────────────────────
+    // ── unit tests: epoch_refund helper ───────────────────────────────────
+
+    const MS: Duration = Duration::from_millis(1);
 
     #[test]
-    fn epoch_credit_ticks_zero_means_trap() {
-        // No host-call credit accumulated → callback must signal a trap.
-        assert_eq!(epoch_credit_ticks(0), None);
+    fn epoch_refund_without_credit_traps() {
+        let t0 = Instant::now();
+        assert_eq!(epoch_refund(0, t0, t0), None);
     }
 
     #[test]
-    fn epoch_credit_ticks_rounds_up() {
-        // 1 tick == DEFAULT_EPOCH_TICK_INTERVAL ms (10 ms).
-        // Any sub-tick remainder must round UP so the guest isn't under-refunded.
-        assert_eq!(epoch_credit_ticks(1), Some(1));
-        assert_eq!(epoch_credit_ticks(9), Some(1));
-        assert_eq!(epoch_credit_ticks(10), Some(1));
-        assert_eq!(epoch_credit_ticks(11), Some(2)); // <-- regression case
-        assert_eq!(epoch_credit_ticks(15), Some(2)); // <-- regression case
-        assert_eq!(epoch_credit_ticks(20), Some(2));
-        assert_eq!(epoch_credit_ticks(25), Some(3));
-        assert_eq!(epoch_credit_ticks(100), Some(10));
+    fn epoch_refund_at_the_deadline_grants_the_credit() {
+        // The deadline fired on time: the whole credit is still ahead.
+        let t0 = Instant::now();
+        assert_eq!(epoch_refund(100, t0, t0), Some((10, t0 + 100 * MS)));
     }
 
     #[test]
-    fn epoch_credit_ticks_handles_u64_max() {
-        // Must not panic or overflow on extreme inputs.
+    fn epoch_refund_rounds_up() {
+        // 1 tick == DEFAULT_EPOCH_TICK_INTERVAL ms (10 ms). Any sub-tick
+        // remainder must round UP so the guest isn't under-refunded.
+        let t0 = Instant::now();
+        let ticks = |ms| epoch_refund(ms, t0, t0).map(|(ticks, _)| ticks);
+        assert_eq!(ticks(1), Some(1));
+        assert_eq!(ticks(9), Some(1));
+        assert_eq!(ticks(10), Some(1));
+        assert_eq!(ticks(11), Some(2));
+        assert_eq!(ticks(15), Some(2));
+        assert_eq!(ticks(25), Some(3));
+    }
+
+    #[test]
+    fn epoch_refund_leaves_out_the_overshoot_past_the_deadline() {
+        // 100 ms budget armed at t0, then a 300 ms host wait: the deadline
+        // (t0 + 100 ms) fires when the guest resumes at t0 + 300 ms. The guest
+        // has used none of its budget, so it gets 100 ms more — not the 300 ms
+        // of credit counted from the resumption point.
+        let t0 = Instant::now();
+        let deadline = t0 + 100 * MS;
         assert_eq!(
-            epoch_credit_ticks(u64::MAX),
-            Some(u64::MAX.div_ceil(DEFAULT_EPOCH_TICK_INTERVAL)),
+            epoch_refund(300, deadline, t0 + 300 * MS),
+            Some((10, t0 + 400 * MS))
         );
+    }
+
+    #[test]
+    fn epoch_refund_traps_when_the_budget_is_spent_even_with_the_credit() {
+        // The guest ran its 100 ms, then waited 50 ms, and the deadline only
+        // fired at t0 + 200 ms: deadline + credit (t0 + 150 ms) is behind.
+        let t0 = Instant::now();
+        assert_eq!(epoch_refund(50, t0 + 100 * MS, t0 + 200 * MS), None);
+        // Exactly at it: nothing left either.
+        assert_eq!(epoch_refund(50, t0 + 100 * MS, t0 + 150 * MS), None);
+    }
+
+    #[test]
+    fn epoch_refund_handles_huge_credit() {
+        // Must not panic or overflow on extreme inputs.
+        let t0 = Instant::now();
+        let _ = epoch_refund(u64::MAX, t0, t0);
     }
 
     // ── integration test: end-to-end deadline extension ───────────────────
@@ -507,16 +580,15 @@ mod tests {
         Engine::new(&cfg).unwrap()
     }
 
-    /// Install the same epoch-deadline callback used in production
-    /// (see `StoreBuilder::build_with_wasi`).
-    fn install_epoch_callback<T: 'static>(store: &mut WtStore<T>, epoch_pause_ms: Arc<AtomicU64>) {
-        store.epoch_deadline_callback(move |_ctx| {
-            let credit_ms = epoch_pause_ms.swap(0, Ordering::Relaxed);
-            match epoch_credit_ticks(credit_ms) {
-                None => Err(wasmtime::Error::new(Trap::Interrupt)),
-                Some(ticks) => Ok(UpdateDeadline::Continue(ticks)),
-            }
-        });
+    /// Arm a `ticks` deadline and install the epoch-deadline callback used in
+    /// production (see `StoreBuilder::build`).
+    fn arm_with_callback<T: 'static>(
+        store: &mut WtStore<T>,
+        epoch_pause_ms: Arc<AtomicU64>,
+        ticks: u64,
+    ) {
+        store.set_epoch_deadline(ticks);
+        store.epoch_deadline_callback(epoch_deadline_callback(epoch_pause_ms, ticks));
     }
 
     #[test]
@@ -526,8 +598,7 @@ mod tests {
         let epoch_pause_ms = Arc::new(AtomicU64::new(0));
 
         let mut store = WtStore::new(&engine, ());
-        store.set_epoch_deadline(1); // very short budget: 1 tick
-        install_epoch_callback(&mut store, epoch_pause_ms.clone());
+        arm_with_callback(&mut store, epoch_pause_ms.clone(), 1); // very short budget: 1 tick
 
         // Background ticker: bump the engine epoch until the test signals stop.
         let stop = Arc::new(AtomicBool::new(false));
@@ -573,8 +644,7 @@ mod tests {
         let epoch_pause_ms = Arc::new(AtomicU64::new(0));
 
         let mut store = WtStore::new(&engine, ());
-        store.set_epoch_deadline(1); // very short budget: 1 tick
-        install_epoch_callback(&mut store, epoch_pause_ms.clone());
+        arm_with_callback(&mut store, epoch_pause_ms.clone(), 1); // very short budget: 1 tick
 
         // Background ticker bumps the epoch AND deposits generous credit so
         // every fired deadline is extended via `UpdateDeadline::Continue`.
@@ -611,6 +681,75 @@ mod tests {
         // must always be extended — execution should reach the natural
         // end of the bounded loop without trapping.
         result.expect("guest must complete when epoch credit is deposited");
+    }
+
+    /// A guest that calls a host function which blocks for `wait_ms` (the
+    /// epoch keeps ticking, as during an outbound request) and deposits that
+    /// wait as credit, then spins forever.
+    const WAIT_THEN_SPIN_WAT: &str = r#"
+        (module
+            (import "host" "wait" (func $wait))
+            (func (export "run")
+                (call $wait)
+                (loop $l (br $l))))
+    "#;
+
+    /// A host wait that runs past the deadline gives back only the budget
+    /// that was left, not the whole wait: under a 100 ms budget a guest that
+    /// waits 300 ms at once and then spins is stopped ~100 ms after the wait
+    /// (it got ~300 ms when the credit was counted from the resumption epoch).
+    #[test]
+    fn wait_past_the_deadline_refunds_only_the_remaining_budget() {
+        const BUDGET_TICKS: u64 = 10; // 100 ms
+        const WAIT: Duration = Duration::from_millis(300);
+
+        let engine = make_engine();
+        let module = Module::new(&engine, WAIT_THEN_SPIN_WAT).unwrap();
+        let epoch_pause_ms = Arc::new(AtomicU64::new(0));
+        let mut store = WtStore::new(&engine, ());
+        arm_with_callback(&mut store, epoch_pause_ms.clone(), BUDGET_TICKS);
+
+        let wait = {
+            let credit = epoch_pause_ms.clone();
+            wasmtime::Func::wrap(&mut store, move || {
+                thread::sleep(WAIT);
+                credit.fetch_add(WAIT.as_millis() as u64, Ordering::Relaxed);
+            })
+        };
+        let instance = Instance::new(&mut store, &module, &[wait.into()]).unwrap();
+        let run = instance
+            .get_typed_func::<(), ()>(&mut store, "run")
+            .unwrap();
+
+        // The production ticker period, so ticks and milliseconds agree.
+        let stop = Arc::new(AtomicBool::new(false));
+        let ticker = {
+            let engine = engine.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(DEFAULT_EPOCH_TICK_INTERVAL));
+                    engine.increment_epoch();
+                }
+            })
+        };
+        let started = Instant::now();
+        let result = run.call(&mut store, ());
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        ticker.join().unwrap();
+
+        let err = result.expect_err("the spin must end on the epoch deadline");
+        assert_eq!(
+            err.root_cause().downcast_ref::<Trap>().copied(),
+            Some(Trap::Interrupt)
+        );
+        assert!(elapsed >= WAIT, "took {elapsed:?}");
+        // ~WAIT + 100 ms; the over-refund made it ~WAIT × 2.
+        assert!(
+            elapsed < WAIT + Duration::from_millis(180),
+            "took {elapsed:?}"
+        );
     }
 
     // ── live-instance accounting ──────────────────────────────────────────

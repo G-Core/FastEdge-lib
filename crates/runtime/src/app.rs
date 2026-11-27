@@ -33,6 +33,10 @@ pub struct App {
     pub plan_id: u64,
     #[serde(default)]
     pub cache_mode: CacheMode,
+    /// Admission priority under overload, derived from the app's plan by the
+    /// control plane. Absent means [`Qos::Normal`].
+    #[serde(default)]
+    pub qos: Qos,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -105,6 +109,120 @@ pub enum Status {
 pub enum CacheMode {
     Disabled = 0,
     Enabled = 1,
+}
+
+/// Admission priority of an app when the node is overloaded: lower tiers are
+/// shed first. Ordered, so `Low < Normal < High`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum Qos {
+    Low = 1,
+    #[default]
+    Normal = 2,
+    High = 3,
+}
+
+impl Qos {
+    pub const ALL: [Qos; 3] = [Qos::Low, Qos::Normal, Qos::High];
+
+    /// Dense index (`0..3`) for per-tier arrays.
+    pub const fn index(self) -> usize {
+        self as usize - 1
+    }
+
+    /// Metric label value.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Qos::Low => "low",
+            Qos::Normal => "normal",
+            Qos::High => "high",
+        }
+    }
+}
+
+struct QosVisitor;
+
+impl<'de> Visitor<'de> for QosVisitor {
+    type Value = Qos;
+
+    fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+        formatter.write_str("QoS tier (1 = low, 2 = normal, 3 = high)")
+    }
+
+    /// Lenient on purpose, unlike `Status`: an unknown tier (`0` = unset, or a
+    /// tier added by the control plane before this binary knows it) must not
+    /// fail the whole app config, which would take the app offline. It falls
+    /// back to `Normal`, i.e. today's behaviour.
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(match v {
+            1 => Qos::Low,
+            3 => Qos::High,
+            _ => Qos::Normal,
+        })
+    }
+
+    /// Any value of any other type is just as unknown, so just as `Normal`:
+    /// a negative number, a float, `null`, a string. Failing on it would drop
+    /// the whole app on the next config refresh.
+    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        match u64::try_from(v) {
+            Ok(v) => self.visit_u64(v),
+            Err(_) => Ok(Qos::Normal),
+        }
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(Qos::Normal)
+    }
+}
+
+impl<'de> Deserialize<'de> for Qos {
+    fn deserialize<D>(deserializer: D) -> Result<Qos, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // `any`, not `u64`: the tier must accept whatever the control plane
+        // sends (see `QosVisitor`), and the app config is JSON, which is
+        // self-describing.
+        deserializer.deserialize_any(QosVisitor)
+    }
 }
 
 impl Default for Status {
@@ -252,6 +370,7 @@ mod tests {
             kv_stores: vec![],
             plan_id: 0,
             cache_mode: CacheMode::Disabled,
+            qos: Qos::Normal,
         };
 
         assert_eq!(expected, assert_ok!(serde_json::from_str(&json)));
@@ -413,5 +532,89 @@ mod tests {
         let json = assert_ok!(serde_json::to_string(&json));
         let app: App = assert_ok!(serde_json::from_str(&json));
         assert_eq!(app.cache_mode, CacheMode::Enabled);
+    }
+
+    #[test]
+    fn test_qos_deserialize() {
+        assert_eq!(Qos::Low, assert_ok!(serde_json::from_str("1")));
+        assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("2")));
+        assert_eq!(Qos::High, assert_ok!(serde_json::from_str("3")));
+    }
+
+    #[test]
+    fn test_qos_unknown_falls_back_to_normal() {
+        // `0` (unset) and tiers this binary does not know must not fail the app.
+        assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("0")));
+        assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("4")));
+        assert_eq!(Qos::Normal, assert_ok!(serde_json::from_str("255")));
+    }
+
+    #[test]
+    fn test_qos_other_types_fall_back_to_normal() {
+        // Negative numbers, floats, null, strings, booleans: none may fail
+        // the app config.
+        for value in [
+            "-1",
+            "-9223372036854775808",
+            "1.5",
+            "null",
+            "\"high\"",
+            "true",
+        ] {
+            assert_eq!(
+                Qos::Normal,
+                assert_ok!(serde_json::from_str::<Qos>(value)),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_qos_null_in_app_config_is_normal() {
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+            "qos": null,
+        });
+        let app: App = assert_ok!(serde_json::from_value(json));
+        assert_eq!(app.qos, Qos::Normal);
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+            "qos": -1,
+        });
+        let app: App = assert_ok!(serde_json::from_value(json));
+        assert_eq!(app.qos, Qos::Normal);
+    }
+
+    #[test]
+    fn test_qos_order_and_index() {
+        assert!(Qos::Low < Qos::Normal && Qos::Normal < Qos::High);
+        for (i, qos) in Qos::ALL.into_iter().enumerate() {
+            assert_eq!(qos.index(), i);
+        }
+    }
+
+    #[test]
+    fn test_qos_default_when_missing() {
+        let json = json!({
+            "binary_id": 1,
+            "max_duration": 5,
+            "mem_limit": 512000,
+            "app_id": 1,
+            "client_id": 2,
+            "plan": "basic",
+        });
+        let json = assert_ok!(serde_json::to_string(&json));
+        let app: App = assert_ok!(serde_json::from_str(&json));
+        assert_eq!(app.qos, Qos::Normal);
     }
 }
